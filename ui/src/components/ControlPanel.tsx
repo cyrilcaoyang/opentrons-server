@@ -733,6 +733,33 @@ export function ControlPanel({
           >
             {claim.held ? "RELEASE CONTROL" : "TAKE CONTROL"}
           </TileButton>
+          {/* The session toggle changes the gateway connection. Keep it beside
+              the claim that unlocks it, away from the motion/run controls, so
+              an operator does not mistake it for part of a protocol action. */}
+          <TileButton
+            onClick={() =>
+              deviceOn
+                ? runControl("shutdown", () => postShutdown(token))
+                : runControl("startup", () => postStartup(token))
+            }
+            disabled={locked || pending}
+            variant={deviceOn ? "primary" : "default"}
+            title={
+              controlHint ??
+              (deviceOn
+                ? "Gateway session connected — click to disconnect (does NOT power off the robot)"
+                : "Click to connect & initialize the gateway session")
+            }
+          >
+            <span
+              className={[
+                "mr-1 inline-block h-2 w-2 rounded-full",
+                deviceOn ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" : "bg-slate-400",
+              ].join(" ")}
+              aria-hidden
+            />
+            {deviceOn ? "CONNECTED" : "DISCONNECTED"}
+          </TileButton>
           <StatusPill state={status.equipment_status} />
         </div>
       </header>
@@ -862,42 +889,16 @@ export function ControlPanel({
             one sequence, so capping only one would step the page width
             mid-scroll. */}
         <div className="mx-auto flex w-full max-w-xl flex-col gap-4 lg:mx-0 lg:max-w-none">
-          {/* Session controls. The toggle connects/disconnects the GATEWAY control
-              session (NOT robot power); PAUSE applies between commands. STOP RUN
-              requests a software stop of the owned HTTP run.
+          {/* Session controls. PAUSE applies between commands. STOP RUN requests
+              a software stop of the owned HTTP run. The gateway-session toggle
+              sits next to the claim control above, away from this action strip.
 
               Sits at the top of the right column rather than spanning the page:
               as a full-width banner it was the widest thing on screen while
-              holding five small buttons, pushing the deck below the fold. Kept
-              as one group — the connect toggle is the precondition for the
-              other four, and separating them would put a control above the
-              thing that enables it. Tighter padding and gaps than a Section
-              since it is a control strip, not a panel. */}
+              holding small buttons, pushing the deck below the fold. Tighter
+              padding and gaps than a Section since it is a control strip, not
+              a panel. */}
           <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-slate-200 bg-surface-raised p-2 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <TileButton
-              onClick={() =>
-                deviceOn
-                  ? runControl("shutdown", () => postShutdown(token))
-                  : runControl("startup", () => postStartup(token))
-              }
-              disabled={locked || pending}
-              variant={deviceOn ? "primary" : "default"}
-              title={
-                controlHint ??
-                (deviceOn
-                  ? "Gateway session connected — click to disconnect (does NOT power off the robot)"
-                  : "Click to connect & initialize the gateway session")
-              }
-            >
-              <span
-                className={[
-                  "mr-1 inline-block h-2 w-2 rounded-full",
-                  deviceOn ? "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]" : "bg-slate-400",
-                ].join(" ")}
-                aria-hidden
-              />
-              {deviceOn ? "CONNECTED" : "DISCONNECTED"}
-            </TileButton>
             <TileButton
               onClick={() => runControl("home", () => postHome(token))}
               disabled={locked || pending}
