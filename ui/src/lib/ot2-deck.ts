@@ -169,7 +169,7 @@ export function declaredMapFromDeck(deck: DeviceDeck): Record<string, string> {
     if (declaredModule) {
       // A declared (sticky) module → round-trip via its picker key.
       const key = MODULE_NAME_TO_KEY[declaredModule.module_name];
-      if (key) declared[slot] = key;
+      declared[slot] = key ?? declaredModule.module_name;
       continue;
     }
     const item = s.declared ?? (s.slot_state === "declared" ? s.labware : null);
@@ -314,13 +314,16 @@ export function pairModuleSlots(
   const moduleSlots = new Map<number | string, PairedModule>();
   if (!deviceDeck) return moduleSlots;
   const used = new Set<RobotModule>();
+  const reservedSerials = new Set(Object.values(deviceDeck.slots).map(s => s.module?.serial_number).filter(Boolean));
   for (const [slotStr, s] of Object.entries(deviceDeck.slots)) {
     if (!s.module) continue;
     const serial = s.module.serial_number;
     const family = moduleFamily(s.module.module_name);
+    const familyMatches = robotModules.filter(m => !used.has(m) && !reservedSerials.has(m.serial) &&
+      family != null && moduleFamily(m.type) === family);
     const live =
       robotModules.find((m) => !used.has(m) && serial != null && m.serial === serial) ??
-      robotModules.find((m) => !used.has(m) && family != null && moduleFamily(m.type) === family) ??
+      (serial == null && familyMatches.length === 1 ? familyMatches[0] : null) ??
       null;
     if (live) used.add(live);
     moduleSlots.set(/^\d+$/.test(slotStr) ? Number(slotStr) : slotStr, { name: s.module.module_name, live });

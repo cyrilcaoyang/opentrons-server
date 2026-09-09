@@ -22,6 +22,7 @@ import {
   postStartup,
 } from "../lib/api";
 import { useActionErrorState } from "../lib/use-action-error";
+import { declarationPayload, modulePlacementIssue, placeModule, unassignedModules } from "../lib/module-placement";
 import type { useClaim } from "../lib/use-claim";
 import {
   buildSlotView,
@@ -526,6 +527,7 @@ export function ControlPanel({
   const deviceDeck = deviceDeckFromStatus(status);
   const robotModules = robotModulesFromStatus(status);
   const moduleSlots = pairModuleSlots(deviceDeck, robotModules);
+  const unattachedToSlots = unassignedModules(deviceDeck, robotModules);
   const declaredMap = useMemo(
     () => (deviceDeck ? declaredMapFromDeck(deviceDeck) : {}),
     [deviceDeck],
@@ -600,8 +602,55 @@ export function ControlPanel({
         const definition = definitions.get(value);
         resolved[slot] = definition ? { load_name: value, definition } : value;
       }
+      // Preserve serial identity and embedded geometry on unchanged slots.
+      if (deviceDeck) {
+        for (const [slot, value] of Object.entries(declarationPayload(deviceDeck))) {
+          if (next[slot] === declaredMap[slot] && value && typeof value === "object" &&
+            ("module_name" in value || value.definition)) resolved[slot] = value;
+        }
+      }
       return resolved;
     });
+  }
+
+  function assignModule(from: string | null, to: string | null, name: string, serial?: string | null) {
+    if (locked || declaring || pending || !deviceDeck) return;
+    setActionError(null);
+    let next: Record<string, DeckDeclareValue>;
+    try {
+      next = placeModule(deviceDeck, from, to, { module_name: name, serial_number: serial });
+    } catch (error) {
+      reportError(error, "deck.declare");
+      return;
+    }
+    setDeclaring(true);
+    postDeckDeclare(token, next)
+      .then(() => refetch())
+      .catch((error: unknown) => reportError(error, "deck.declare"))
+      .finally(() => setDeclaring(false));
+  }
+
+  function moduleAssignment(from: string | null, name: string, serial?: string | null) {
+    const issue = deviceDeck ? modulePlacementIssue(deviceDeck, from, null, name) : "Deck state unavailable.";
+    return <div className="flex flex-wrap items-center gap-2 text-xs">
+      <label className="flex items-center gap-2">
+        Deck slot
+        <select aria-label={`Deck slot for ${serial || name}`} value={from ?? ""}
+          disabled={locked || declaring || pending || !!issue}
+          className="rounded border border-slate-300 bg-white px-2 py-1 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
+          onChange={event => assignModule(from, event.target.value || null, name, serial)}>
+          <option value="">Unassigned — off deck</option>
+          {deviceDeck && Object.keys(deviceDeck.slots).filter(slot => slot !== "12").map(slot => {
+            const reason = modulePlacementIssue(deviceDeck, from, slot, name);
+            return <option key={slot} value={slot} disabled={!!reason}>Slot {slot}{reason ? " — unavailable" : ""}</option>;
+          })}
+        </select>
+      </label>
+      {from && <button type="button" disabled={locked || declaring || pending || !!issue}
+        className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50 dark:border-slate-700"
+        onClick={() => assignModule(from, null, name, serial)}>Clear slot</button>}
+      {issue && <p className="w-full text-amber-700 dark:text-amber-400">{issue}</p>}
+    </div>;
   }
 
   function declare(entry: CatalogEntry | null) {
@@ -1143,6 +1192,9 @@ export function ControlPanel({
           </Section>
 
           <Section title="Modules (live telemetry)">
+            <p className="mb-2 text-xs text-ink-subtle dark:text-slate-400">
+              Connected modules without an assigned slot are off deck. Set the slot after physically placing the module; this changes declared intent only.
+            </p>
             {moduleSlots.size === 0 && robotModules.length === 0 ? (
               <p className="text-xs text-ink-subtle dark:text-slate-500">
                 No modules on the deck or attached.
@@ -1162,6 +1214,7 @@ export function ControlPanel({
                         </span>
                         <ModuleReadout live={m.live} compact />
                       </div>
+                      {moduleAssignment(String(slot), m.name, deviceDeck?.slots[String(slot)]?.module?.serial_number ?? m.live?.serial)}
                       {moduleFamily(m.name) === "temperature" && (
                         <TempModuleControls
                           slot={slot}
@@ -1186,6 +1239,17 @@ export function ControlPanel({
                       )}
                     </li>
                   ))}
+                {unattachedToSlots.map((module, index) => (
+                  <li key={`unassigned-${module.id ?? module.serial ?? index}`}
+                    className="flex flex-col gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs"><strong>Unassigned · off deck</strong> · {module.model || module.type}
+                        {module.serial && <span className="ml-1 font-mono">{module.serial}</span>}</span>
+                      <ModuleReadout live={module} compact />
+                    </div>
+                    {moduleAssignment(null, module.model || module.type, module.serial)}
+                  </li>
+                ))}
               </ul>
             )}
           </Section>

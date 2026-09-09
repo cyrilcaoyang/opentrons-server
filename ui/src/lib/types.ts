@@ -118,9 +118,9 @@ export interface DeviceDeckSlot {
   /** The operator/recipe declaration on this slot, set whatever won the merge —
    *  including once a run/REPL source occupies it, when `slot_state` no longer
    *  says "declared". The declared-layout round-trip depends on this. */
-  declared?: { kind: string; load_name: string } | null;
+  declared?: { kind: string; load_name: string; definition?: unknown } | null;
   /** As `declared`, when the declaration is a sticky module rather than labware. */
-  declared_module?: { module_name: string } | null;
+  declared_module?: { module_name: string; serial_number?: string | null } | null;
 }
 
 export interface DeviceDeck {

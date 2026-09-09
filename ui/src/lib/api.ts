@@ -288,7 +288,7 @@ export const postTipsMark = (
  *  schema-2 definition is attached so the gateway derives real geometry
  *  instead of guessing from load_name alone (`DeckDeclareRequest` on the
  *  gateway side already supports this — see gateway/models.py). */
-export type DeckDeclareValue = string | { load_name: string; definition: unknown } | null;
+export type DeckDeclareValue = string | { load_name: string; definition?: unknown } | { module_name: string; serial_number?: string | null } | null;
 
 /** Full-layout declared-deck replace. Values are load_names, module keys,
  *  legacy kind strings, or a load_name+definition object for custom labware;

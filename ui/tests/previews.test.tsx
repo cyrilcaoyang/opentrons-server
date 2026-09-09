@@ -8,6 +8,9 @@ import { PlanView, ElevationView } from "../src/components/PlateInspector";
 import { DeckPanel } from "../src/components/DeckPanel";
 import { geometryFromDefinition, frontProjectionColumns } from "../src/lib/labware-geometry";
 import { buildWellModel } from "../src/lib/plate-wells";
+import { placeModule, unassignedModules } from "../src/lib/module-placement";
+import { declaredMapFromDeck, pairModuleSlots } from "../src/lib/ot2-deck";
+import type { DeviceDeck, RobotModule } from "../src/lib/types";
 import rack from "../../.venv.test/Lib/site-packages/opentrons_shared_data/data/labware/definitions/2/opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical/3.json";
 
 function modelFor(definition: unknown) {
@@ -70,6 +73,56 @@ test("missing and duplicate well references remain invalid; unequal columns are 
   assert.ok(geometryFromDefinition(square));
   assert.equal(geometryFromDefinition({ ...square, ordering: [["missing"]] }), null);
   assert.equal(geometryFromDefinition({ ...square, ordering: [["A1", "A1"]] }), null);
+});
+
+function moduleDeck(): DeviceDeck {
+  return { source: "declared", slots: Object.fromEntries(Array.from({ length: 12 }, (_, i) =>
+    [String(i + 1), { source: "empty", slot_state: "empty", module: null, labware: null }])) };
+}
+const attached: RobotModule = { model: "temperatureModuleV2", type: "temperatureModuleType", serial: "synthetic-module-1" };
+
+test("unassigned attached modules stay in inventory without acquiring deck slots", () => {
+  const deck = moduleDeck();
+  assert.deepEqual(unassignedModules(deck, [attached]), [attached]);
+  assert.equal(pairModuleSlots(deck, [attached]).size, 0);
+  const declared = placeModule(deck, null, "11", { module_name: attached.model, serial_number: attached.serial });
+  assert.deepEqual(declared["11"], { module_name: attached.model, serial_number: attached.serial });
+  assert.equal(deck.slots["11"].slot_state, "empty");
+});
+
+test("moving and clearing a declared module preserve unrelated custom labware and module identity", () => {
+  const deck = moduleDeck();
+  deck.slots["11"] = { source: "declared", slot_state: "declared", labware: null,
+    module: { module_name: attached.model, serial_number: attached.serial } };
+  deck.slots["2"] = { source: "declared", slot_state: "declared", module: null,
+    labware: { kind: "unknown", load_name: "synthetic_mixed", definition: square } };
+  const moved = placeModule(deck, "11", "10", deck.slots["11"].module!);
+  assert.equal(moved["11"], undefined);
+  assert.deepEqual(moved["10"], deck.slots["11"].module);
+  assert.deepEqual(moved["2"], deck.slots["2"].labware);
+  assert.equal(placeModule(deck, "11", null, deck.slots["11"].module!)["11"], undefined);
+  assert.equal(declaredMapFromDeck(deck)["11"], "temperatureModuleV2");
+  assert.deepEqual(unassignedModules(deck, [attached]), []);
+});
+
+test("module reassignment refuses observed modules, occupied targets and thermocycler overlaps", () => {
+  const deck = moduleDeck();
+  deck.slots["11"] = { source: "run", slot_state: "occupied", labware: null,
+    module: { module_name: attached.model, serial_number: attached.serial } };
+  assert.throws(() => placeModule(deck, "11", null, deck.slots["11"].module!), /robot session/);
+  assert.throws(() => placeModule(deck, null, "11", { module_name: attached.model }), /occupied/);
+  assert.throws(() => placeModule(deck, null, "7", { module_name: "thermocyclerModuleV2" }), /Slot 11 is occupied/);
+  assert.throws(() => placeModule(deck, null, "3", { module_name: "thermocyclerModuleV2" }), /slot 7/);
+});
+
+test("module pairing never substitutes another serial or guesses between identical modules", () => {
+  const deck = moduleDeck();
+  deck.slots["11"] = { source: "declared", slot_state: "declared", labware: null,
+    module: { module_name: attached.model, serial_number: "absent-module" } };
+  assert.deepEqual(unassignedModules(deck, [attached]), [attached]);
+  deck.slots["11"].module!.serial_number = null;
+  const second = { ...attached, serial: "synthetic-module-2" };
+  assert.deepEqual(unassignedModules(deck, [attached, second]), [attached, second]);
 });
 
 test("front projection uses physical x coordinates even when ordering is one arbitrary group", () => {

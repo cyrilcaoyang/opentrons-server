@@ -359,6 +359,23 @@ firing, being the one declare action with no per-slot undo.
   plate handoffs are recorded by the gateway per the handoff spec in
   [`HTTP_TRANSPORT.md`](HTTP_TRANSPORT.md).
 
+## Module assignment in the operator panel
+
+The Modules panel lists attached hardware even when it has no deck assignment.
+Unassigned modules are displayed as off deck and do not create deck tiles.
+After physically placing a module, an operator holding control can select its
+slot. A declared module can be moved to an available slot or unassigned with
+**Clear slot**. These controls update declared intent only; they issue no motion
+or temperature commands. The full-layout update preserves other declarations,
+including custom labware definitions and module serial numbers.
+
+An observed module loaded by the active run or REPL cannot be relocated through
+these controls: its session must first be ended or updated. The UI retains that
+observed slot instead of hiding it. Occupied destinations and thermocycler
+footprint conflicts are unavailable, and labware on a module must be cleared
+before changing its placement. Serial matching never substitutes a different
+serial; family-only matching is used only for a single unambiguous candidate.
+
 ## Implementation map
 
 | Piece | Where |
