@@ -1076,8 +1076,18 @@ export function ControlPanel({
                 <p className="mb-1 text-[10px] uppercase tracking-wider text-ink-subtle dark:text-slate-500">
                   Pipettes
                 </p>
-                <KV k="Left mount" v={pipetteLabel(pipLeft?.state)} />
-                <KV k="Right mount" v={pipetteLabel(pipRight?.state)} />
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    ["Left", pipLeft?.state],
+                    ["Right", pipRight?.state],
+                  ] as const).map(([mount, state]) => (
+                    <span key={mount} className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs text-ink dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      <span className="font-semibold">{mount}</span>
+                      <span aria-hidden>·</span>
+                      <span>{pipetteLabel(state)}</span>
+                    </span>
+                  ))}
+                </div>
               </div>
 
               <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-800">
