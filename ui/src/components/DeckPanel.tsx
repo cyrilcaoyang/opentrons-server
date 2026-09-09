@@ -11,6 +11,7 @@ import {
   type TipRackSummary,
 } from "../lib/ot2-deck";
 import { buildWellModel } from "../lib/plate-wells";
+import { PlanView, useLabwareGeometry } from "./PlateInspector";
 
 function formatTemp(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
@@ -51,80 +52,31 @@ export function ModuleReadout({ live, compact }: { live: RobotModule | null; com
   );
 }
 
-const MINI_ROW_LETTERS = "ABCDEFGHIJKLMNOP";
-
-/**
- * Per-well tint for the deck's miniature grid. A well here is 2–3 px, so this
- * is deliberately *not* the inspector's vocabulary: an outlined "hollow" ring
- * turns to mud at this size, and three tones is already the most a 96-dot
- * thumbnail can carry.
- *
- * - present (default): solid grey, as it has always been.
- * - `empty`: a faint dot — the tip was picked and dropped, the hole is bare.
- * - `touched`: amber, matching the inspector — used, but still in the rack.
- *
- * An **untracked** rack keeps the plain solid grey. That is not a claim it is
- * full; the tile has no honest way to say "unknown" at this scale, so it says
- * nothing, and the slot's tooltip plus the expanded inspector carry the truth.
- */
-const MINI_WELL_FILL: Record<string, string> = {
-  // Green is reserved for "a tip is there and unused" — the one state an
-  // operator scans the deck for. It also distinguishes a *tracked* rack at a
-  // glance: no green anywhere means either every tip is gone or the tracker
-  // has no record, and both of those want a closer look.
-  fresh: "bg-emerald-400 dark:bg-emerald-500",
-  touched: "bg-amber-300 dark:bg-amber-600",
-  empty: "bg-slate-300 dark:bg-slate-600",
-  // A tip that is on a head is not in the rack, so it reads as a hole here
-  // deliberately — at 2 px the useful question is "is there a tip in it", and
-  // "where did it go" is the inspector's job. Mapped explicitly rather than
-  // falling through to the default, so the choice is visible.
-  mounted: "bg-slate-300 dark:bg-slate-600",
-};
-// Wells with nothing known about them: plates (tip state is a rack concept)
-// and racks the tracker has never registered. Same grey as an emptied well —
-// deliberately, because "no tip" and "no idea" are both "do not count on it",
-// and the tooltip plus the inspector carry the distinction.
-const MINI_WELL_DEFAULT = "bg-slate-300 dark:bg-slate-600";
-
-// Miniature well grid drawn inside a deck slot once well-plate labware is
-// assigned. The inner grid is given the plate's own aspect ratio so every cell
-// is square, and it is centred within the (taller) slot box.
-export function MiniPlate({
-  rows,
-  columns,
-  wellKinds,
-}: {
-  rows: number;
-  columns: number;
-  /** Optional per-well state, keyed `A1`-style. Omitted → every well solid. */
-  wellKinds?: Record<string, string>;
+/** Use the same definition coordinates and shapes as the detailed inspector. */
+function LabwareThumbnail({ view, slot, tipRacks }: {
+  view: SlotView;
+  slot: number | string;
+  tipRacks: TipRackSummary[];
 }) {
-  return (
-    <div className="flex h-full w-full items-center justify-center p-1.5">
-      <div
-        className="grid w-full gap-[2px]"
-        style={{
-          aspectRatio: `${columns} / ${rows}`,
-          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-        }}
-        aria-hidden
-      >
-        {Array.from({ length: rows * columns }, (_, i) => {
-          // CSS grid fills row-major, so index → (row, column) → well id.
-          const well = `${MINI_ROW_LETTERS[Math.floor(i / columns)] ?? "?"}${(i % columns) + 1}`;
-          const kind = wellKinds?.[well];
-          return (
-            <span
-              key={i}
-              className={`rounded-full ${(kind && MINI_WELL_FILL[kind]) || MINI_WELL_DEFAULT}`}
-            />
-          );
-        })}
-      </div>
-    </div>
-  );
+  const { geometry, state } = useLabwareGeometry(view.loadName, view.definition);
+  if (!geometry && view.loadName) {
+    return <div className="flex h-full items-center justify-center p-2 text-center text-[10px] text-slate-500">
+      {state === "loading" ? "Loading geometry…" : "Geometry unavailable"}
+    </div>;
+  }
+  if (!geometry && (!view.rows || !view.columns)) return null;
+  const model = buildWellModel({
+    isTiprack: geometry?.isTiprack ?? view.isTiprack ?? false,
+    rows: geometry?.rows ?? view.rows,
+    columns: geometry?.columns ?? view.columns,
+    geometry,
+    tipRack: tipRacks.find((rack) => rack.slot === String(slot)) ?? null,
+    samples: view.wells ?? null,
+    slot,
+  });
+  return <div className="h-full w-full p-1.5">
+    <PlanView model={model} geometry={geometry} compact />
+  </div>;
 }
 
 export interface DeckPanelProps {
@@ -169,31 +121,6 @@ export function DeckPanel({
   const moduleSlots = pairModuleSlots(deviceDeck, robotModules);
   const moduleFootprints = computeModuleFootprints(deviceDeck);
 
-  /**
-   * Per-well state for a tip-rack slot, via the same model the expanded
-   * inspector renders — one definition of "fresh / used / empty", so the
-   * thumbnail and the detail view can never disagree.
-   *
-   * Returns undefined (⇒ uniform solid) unless this slot is a tracked tip
-   * rack: an untracked rack has no state to show, and inventing one is the
-   * failure this exists to avoid.
-   */
-  function wellKindsFor(v: SlotView, slot: number | string): Record<string, string> | undefined {
-    if (!v.isTiprack) return undefined;
-    const summary = tipRacks.find((r) => r.slot === String(slot));
-    if (!summary) return undefined;
-    const model = buildWellModel({
-      isTiprack: true,
-      rows: v.rows,
-      columns: v.columns,
-      geometry: null,
-      tipRack: summary,
-      samples: null,
-    });
-    const out: Record<string, string> = {};
-    for (const cell of model.cells) out[cell.well] = cell.kind;
-    return out;
-  }
   const grid = (
     <div
       className={
@@ -261,8 +188,8 @@ export function DeckPanel({
                   waste
                 </span>
               </div>
-            ) : v.rows > 0 && v.columns > 0 ? (
-              <MiniPlate rows={v.rows} columns={v.columns} wellKinds={wellKindsFor(v, slot)} />
+            ) : v.loadName || (v.rows > 0 && v.columns > 0) ? (
+              <LabwareThumbnail view={v} slot={slot} tipRacks={tipRacks} />
             ) : v.state !== "empty" ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1 text-center">
                 <span className="text-[10px] font-medium text-ink-subtle dark:text-slate-400">

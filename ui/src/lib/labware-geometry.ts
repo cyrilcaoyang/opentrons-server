@@ -30,6 +30,8 @@ export interface WellGeometry {
   xDimension?: number;
   yDimension?: number;
   totalLiquidVolume?: number | null;
+  /** Measured internal profile, in millimetres above the well bottom. */
+  sections?: { bottomHeight: number; topHeight: number; bottomDiameter: number; topDiameter: number }[];
 }
 
 export interface LabwareGeometry {
@@ -94,20 +96,52 @@ export function geometryFromDefinition(defn: unknown): LabwareGeometry | null {
     .filter((col): col is unknown[] => Array.isArray(col))
     .map((col) => col.filter((w): w is string => typeof w === "string"));
   if (ordering.length === 0 || ordering[0].length === 0) return null;
-  // A renderer may safely use a rectangular, fully-defined grid. A ragged
-  // ordering or a named well without geometry would otherwise make the plan
-  // silently mix exact and invented coordinates, which is worse than omitting
-  // the geometry-specific preview.
-  if (ordering.some((col) => col.length !== ordering[0].length)) return null;
+  // Ordering describes access order, not a rectangular physical grid. Mixed
+  // tube racks legitimately have columns of different lengths and spacing.
+  if (ordering.some((col) => col.length === 0)) return null;
+  const orderedNames = ordering.flat();
+  if (new Set(orderedNames).size !== orderedNames.length) return null;
 
   const wellsRaw = (d.wells ?? {}) as Record<string, unknown>;
   const wells: Record<string, WellGeometry> = {};
   for (const [well, raw] of Object.entries(wellsRaw)) {
     const parsed = readWell(raw);
-    if (parsed) wells[well] = parsed;
+    if (parsed) {
+      const id = (raw as Record<string, unknown>).geometryDefinitionId;
+      const inner = d.innerLabwareGeometry as Record<string, { sections?: Record<string, unknown>[] }> | undefined;
+      const sections = typeof id === "string" ? inner?.[id]?.sections : undefined;
+      if (Array.isArray(sections)) {
+        const profile = sections.flatMap((s) => {
+          const bottomHeight = num(s.bottomHeight), topHeight = num(s.topHeight);
+          if (bottomHeight == null || topHeight == null || topHeight < bottomHeight) return [];
+          if (s.shape === "conical") {
+            const bottomDiameter = num(s.bottomDiameter), topDiameter = num(s.topDiameter);
+            return bottomDiameter != null && topDiameter != null
+              ? [{ bottomHeight, topHeight, bottomDiameter, topDiameter }] : [];
+          }
+          if (s.shape === "spherical") {
+            const radius = num(s.radiusOfCurvature);
+            if (radius == null || radius <= 0 || topHeight > 2 * radius) return [];
+            const diameter = (h: number) => 2 * Math.sqrt(Math.max(0, 2 * radius * h - h * h));
+            return Array.from({ length: 8 }, (_, i) => {
+              const bottom = bottomHeight + (topHeight - bottomHeight) * i / 8;
+              const top = bottomHeight + (topHeight - bottomHeight) * (i + 1) / 8;
+              return { bottomHeight: bottom, topHeight: top, bottomDiameter: diameter(bottom), topDiameter: diameter(top) };
+            });
+          }
+          return [];
+        });
+        // An unsupported section must not become an invented complete profile.
+        if (sections.every((s) => s.shape === "conical" || s.shape === "spherical") && profile.length) {
+          parsed.sections = profile.sort((a, b) => b.topHeight - a.topHeight);
+        }
+      }
+      wells[well] = parsed;
+    }
   }
   if (Object.keys(wells).length === 0) return null;
   if (ordering.some((col) => col.some((well) => wells[well] == null))) return null;
+  if (Object.keys(wells).length !== orderedNames.length) return null;
 
   const params = (d.parameters ?? {}) as Record<string, unknown>;
   const meta = (d.metadata ?? {}) as Record<string, unknown>;
@@ -120,7 +154,7 @@ export function geometryFromDefinition(defn: unknown): LabwareGeometry | null {
     footprintX,
     footprintY,
     footprintZ,
-    rows: ordering[0].length,
+    rows: Math.max(...ordering.map((col) => col.length)),
     columns: ordering.length,
     isTiprack: params.isTiprack === true,
     tipLength: num(params.tipLength),
@@ -134,6 +168,17 @@ export function geometryFromDefinition(defn: unknown): LabwareGeometry | null {
 export function wellHalfX(well: WellGeometry): number {
   if (well.shape === "rectangular") return (well.xDimension ?? 0) / 2;
   return (well.diameter ?? 0) / 2;
+}
+
+/** Wells that overlap in a front projection share x, regardless of ordering. */
+export function frontProjectionColumns(geometry: LabwareGeometry): string[][] {
+  const byX = new Map<number, string[]>();
+  for (const name of geometry.ordering.flat()) {
+    const x = geometry.wells[name].x;
+    byX.set(x, [...(byX.get(x) ?? []), name]);
+  }
+  return [...byX.entries()].sort(([a], [b]) => a - b).map(([, names]) =>
+    names.sort((a, b) => geometry.wells[a].y - geometry.wells[b].y));
 }
 
 /** One run of the body's top edge in the elevation: `x0..x1` mm wide, `top` mm tall. */

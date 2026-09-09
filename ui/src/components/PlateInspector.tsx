@@ -34,6 +34,7 @@ import {
 } from "../lib/api";
 import {
   elevationProfile,
+  frontProjectionColumns,
   geometryFromDefinition,
   wellHalfX,
   wellHalfY,
@@ -136,12 +137,14 @@ function wellTitle(cell: WellCell, contents: "tiprack" | "plate"): string {
  * SBS grids this panel shows, a synthesized plan is geometrically the same
  * drawing, so it is safe here in a way the elevation is not.
  */
-function PlanView({
+export function PlanView({
   model,
   geometry,
+  compact = false,
 }: {
   model: PlateWellModel;
   geometry: LabwareGeometry | null;
+  compact?: boolean;
 }) {
   const { rows, columns } = model;
   // Synthesized frame: 9 mm pitch inside a standard SBS footprint.
@@ -150,13 +153,19 @@ function PlanView({
   const frameW = geometry?.footprintX ?? columns * pitch + margin * 2;
   const frameH = geometry?.footprintY ?? rows * pitch + margin * 2;
   const labelPad = 7;
+  const individualLabels = geometry != null && (
+    geometry.ordering.some((col) => col.length !== geometry.ordering[0].length) ||
+    geometry.ordering.some((col) => col.some((name) => geometry.wells[name].x !== geometry.wells[col[0]].x)) ||
+    geometry.ordering.some((col) => col.some((name, r) =>
+      geometry.wells[name].y !== geometry.wells[geometry.ordering[0][r]]?.y))
+  );
 
   return (
     <svg
       viewBox={`${-labelPad} ${-labelPad} ${frameW + labelPad * 2} ${frameH + labelPad * 2}`}
-      className="w-full"
+      className="h-full w-full"
       role="img"
-      aria-label={`Top-down view of ${columns} × ${rows} wells`}
+      aria-label={`Top-down view of ${model.total} wells${geometry ? " at definition coordinates" : " (schematic)"}`}
     >
       <rect
         x={0}
@@ -168,7 +177,7 @@ function PlanView({
         strokeWidth={0.6}
       />
       {/* Column numbers along the top, row letters down the left. */}
-      {Array.from({ length: columns }, (_, c) => {
+      {!compact && !individualLabels && Array.from({ length: columns }, (_, c) => {
         const well = geometry?.ordering[c]?.[0];
         const g = well ? geometry?.wells[well] : undefined;
         const cx = g ? g.x : margin + pitch / 2 + c * pitch;
@@ -185,7 +194,7 @@ function PlanView({
           </text>
         );
       })}
-      {Array.from({ length: rows }, (_, r) => {
+      {!compact && !individualLabels && Array.from({ length: rows }, (_, r) => {
         const well = geometry?.ordering[0]?.[r];
         const g = well ? geometry?.wells[well] : undefined;
         // Definition y grows toward the back; SVG y grows downward.
@@ -233,6 +242,12 @@ function PlanView({
                 strokeDasharray={cell.kind === "empty" || cell.kind === "mounted" ? "1 1" : undefined}
               />
             )}
+            {!compact && individualLabels && (
+              <text x={cx} y={cy + 1.3} textAnchor="middle"
+                className="fill-slate-700 dark:fill-slate-200" style={{ fontSize: 4 }}>
+                {cell.well}
+              </text>
+            )}
             {cell.mounted && (
               <ellipse
                 cx={cx}
@@ -272,7 +287,7 @@ function PlanView({
  * but only when the column actually carries a used tip; the tooltip gives
  * the exact count.
  */
-function ElevationView({
+export function ElevationView({
   geometry,
   model,
 }: {
@@ -282,7 +297,10 @@ function ElevationView({
   const { footprintX, footprintZ } = geometry;
   const shadeTips = model.contents === "tiprack" && geometry.isTiprack;
   const profile = elevationProfile(geometry);
-  const cavities = geometry.ordering.map((column, index) => {
+  const top = Math.max(footprintZ, ...Object.values(geometry.wells).map((well) =>
+    well.z + Math.max(well.depth, ...(well.sections?.map((s) => s.topHeight) ?? []))));
+  const bottom = Math.min(0, ...Object.values(geometry.wells).map((well) => well.z));
+  const cavities = frontProjectionColumns(geometry).map((column, index) => {
     // A front elevation intersects the well nearest the operator, not merely
     // the first name in definition ordering. They coincide for ordinary
     // plates, but differ for heterogeneous tube racks whose rows have
@@ -298,19 +316,27 @@ function ElevationView({
     // silhouette below, and drawing it here would only be a line along it.
     if (!g || g.depth === 0) return null;
     const halfX = wellHalfX(g);
-    const mouthY = Math.max(0, footprintZ - (g.z + g.depth)); // SVG y of the well mouth
-    const floorY = Math.min(footprintZ, footprintZ - g.z); // SVG y of the well floor
+    const mouthY = footprintZ - (g.z + g.depth);
+    const floorY = footprintZ - g.z;
     // Half-width of the cavity at depth fraction t (0 = mouth, 1 = floor):
     // tapered to ~25% for a tip rack, straight-sided for a plate.
     const taper = (t: number) => (geometry.isTiprack ? halfX * (1 - 0.75 * t) : halfX);
-    const outline = `${g.x - taper(0)},${mouthY} ${g.x + taper(0)},${mouthY} ${
+    const schematicOutline = `${g.x - taper(0)},${mouthY} ${g.x + taper(0)},${mouthY} ${
       g.x + taper(1)
     },${floorY} ${g.x - taper(1)},${floorY}`;
+    const edge = g.sections?.flatMap((section) => [
+      { half: section.topDiameter / 2, y: footprintZ - g.z - section.topHeight },
+      { half: section.bottomDiameter / 2, y: footprintZ - g.z - section.bottomHeight },
+    ]);
+    const outline = edge?.length
+      ? [...edge.map((p) => `${g.x + p.half},${p.y}`),
+         ...[...edge].reverse().map((p) => `${g.x - p.half},${p.y}`)].join(" ")
+      : schematicOutline;
 
     let level: React.ReactNode = null;
-    let label = `Column ${index + 1}`;
+    let label = `Column ${index + 1}: front well at y=${g.y} mm; ${g.totalLiquidVolume ?? "unknown"} µL`;
     if (shadeTips) {
-      const cells = model.cells.filter((w) => w.column === index);
+      const cells = model.cells.filter((w) => column.includes(w.well));
       const total = cells.length || 1;
       const present = cells.filter(
         (w) => w.kind === "fresh" || w.kind === "sample" || w.kind === "touched",
@@ -363,10 +389,10 @@ function ElevationView({
 
   return (
     <svg
-      viewBox={`-2 -2 ${footprintX + 4} ${footprintZ + 4}`}
+      viewBox={`-2 ${footprintZ - top - 2} ${footprintX + 4} ${top - bottom + 4}`}
       className="w-full"
       role="img"
-      aria-label="Side-view labware cross-section"
+      aria-label="Front projection of well profiles and labware bounding envelope"
     >
       {/* The body is an outline only; a section drawing shades the solids it
           cuts, and here that is just a tip rack's tips. Its top edge follows
@@ -406,7 +432,7 @@ export interface PlateInspectorProps {
  * knows the gateway's installed standard library. Standard definitions are
  * fetched and cached by load name as before.
  */
-function useLabwareGeometry(loadName: string | undefined, declaredDefinition: unknown | null | undefined): {
+export function useLabwareGeometry(loadName: string | undefined, declaredDefinition: unknown | null | undefined): {
   geometry: LabwareGeometry | null;
   state: "idle" | "loading" | "ready" | "unavailable";
 } {
@@ -452,10 +478,10 @@ function useLabwareGeometry(loadName: string | undefined, declaredDefinition: un
     };
   }, [loadName, cache, hasDeclaredDefinition]);
 
-  if (!loadName) return { geometry: null, state: "idle" };
   if (hasDeclaredDefinition) {
     return { geometry: declaredGeometry, state: declaredGeometry ? "ready" : "unavailable" };
   }
+  if (!loadName) return { geometry: null, state: "idle" };
   if (loading === loadName) return { geometry: null, state: "loading" };
   if (!(loadName in cache)) return { geometry: null, state: "loading" };
   const geometry = cache[loadName];
@@ -594,7 +620,7 @@ export function PlateInspector({ slot, view, tipRacks, mountedTips }: PlateInspe
       {/* Elevation */}
       <div className="mt-1 border-t border-slate-100 pt-2 dark:border-slate-800">
         <p className="mb-1 text-[10px] uppercase tracking-wider text-ink-subtle dark:text-slate-500">
-          Side view {geometryState === "ready" && "(front elevation, to scale)"}
+          Side view {geometryState === "ready" && "(front well profiles)"}
         </p>
         {geometryState === "ready" && geometry ? (
           <>
@@ -605,8 +631,12 @@ export function PlateInspector({ slot, view, tipRacks, mountedTips }: PlateInspe
               {geometry.footprintX.toFixed(1)} × {geometry.footprintY.toFixed(1)} ×{" "}
               {geometry.footprintZ.toFixed(1)} mm
               {geometry.tipLength != null && ` · tip ${geometry.tipLength.toFixed(1)} mm`}
-              {geometry.wellVolumeUl != null && ` · well ${geometry.wellVolumeUl} µL`}
-              {" · columns tinted by aggregate state"}
+              {" · well capacity: "}{[...new Set(Object.values(geometry.wells).map((w) => w.totalLiquidVolume).filter((v) => v != null))].join(" / ")} µL
+              {geometry.isTiprack && " · columns tinted by aggregate state"}
+            </p>
+            <p className="text-[10px] text-ink-subtle dark:text-slate-500">
+              Outer outline is the definition’s bounding envelope. Internal profiles use supplied sections;
+              otherwise well walls are schematic. This does not depict the rack’s exterior support structure.
             </p>
           </>
         ) : geometryState === "loading" ? (
