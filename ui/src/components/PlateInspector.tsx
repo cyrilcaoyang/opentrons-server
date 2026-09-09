@@ -152,7 +152,7 @@ export function PlanView({
   const margin = 10;
   const frameW = geometry?.footprintX ?? columns * pitch + margin * 2;
   const frameH = geometry?.footprintY ?? rows * pitch + margin * 2;
-  const labelPad = 7;
+  const labelPad = compact ? 0 : 7;
   const individualLabels = geometry != null && (
     geometry.ordering.some((col) => col.length !== geometry.ordering[0].length) ||
     geometry.ordering.some((col) => col.some((name) => geometry.wells[name].x !== geometry.wells[col[0]].x)) ||

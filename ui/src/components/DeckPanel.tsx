@@ -74,7 +74,7 @@ function LabwareThumbnail({ view, slot, tipRacks }: {
     samples: view.wells ?? null,
     slot,
   });
-  return <div className="h-full w-full p-1.5">
+  return <div className="h-full w-full">
     <PlanView model={model} geometry={geometry} compact />
   </div>;
 }
@@ -154,7 +154,7 @@ export function DeckPanel({
           : v.title;
         const cellClassName = [
           "relative overflow-hidden rounded border transition-colors",
-          page ? "aspect-[4/3] w-full" : "h-[120px] w-[160px]",
+          page ? "aspect-[127.76/85.48] w-full" : "h-[120px] w-[160px]",
           selected
             ? "border-sky-500 bg-sky-50 dark:border-sky-500 dark:bg-sky-950/40"
             : footprintConflict
@@ -210,16 +210,13 @@ export function DeckPanel({
                 aria-hidden
               />
             )}
-            {/* Slot number in the cell's own top-left corner. Bare text, no
-                pill: the badge background is what made the old corner number
-                read as an overlay sitting on top of A1. An empty slot already
-                draws its number large and centred, so it is skipped here. */}
-            {page && v.state !== "empty" && (
+            {/* Overlay the slot ID without reserving any preview space. */}
+            {page && (
               <span
                 className={[
-                  "pointer-events-none absolute left-1 top-0.5 text-[10px] font-semibold leading-none",
+                  "pointer-events-none absolute left-0.5 top-0.5 z-10 rounded bg-white/90 px-1 py-0.5 text-[10px] font-semibold leading-none shadow-sm dark:bg-slate-900/90",
                   moduleAccent ? "top-[5px]" : "",
-                  "text-ink-subtle dark:text-slate-400",
+                  "text-ink dark:text-slate-200",
                 ].join(" ")}
                 aria-hidden
               >
