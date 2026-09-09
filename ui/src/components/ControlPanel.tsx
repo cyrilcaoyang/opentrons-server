@@ -889,7 +889,7 @@ export function ControlPanel({
             one sequence, so capping only one would step the page width
             mid-scroll. */}
         <div className="mx-auto flex w-full max-w-xl flex-col gap-4 lg:mx-0 lg:max-w-none">
-          {/* Session controls. PAUSE applies between commands. STOP RUN requests
+          {/* Session controls. PAUSE applies between commands. STOP requests
               a software stop of the owned HTTP run. The gateway-session toggle
               sits next to the claim control above, away from this action strip.
 
@@ -924,7 +924,7 @@ export function ControlPanel({
               ariaLabel="Stop this robot run"
               title="Software stop over HTTP. Requires inspection and a fresh session; cannot replace a physical emergency stop."
             >
-              {stopping ? "STOPPING…" : "STOP RUN"}
+              {stopping ? "STOPPING…" : "STOP"}
             </TileButton>
             <TileButton
               onClick={() => runControl("pause", () => postPause(token))}
@@ -933,7 +933,7 @@ export function ControlPanel({
               title={
                 controlHint ??
                 (allowedActions.includes("pause")
-                  ? "Pause between commands; use STOP RUN to interrupt the owned HTTP run"
+                  ? "Pause between commands; use STOP to interrupt the owned HTTP run"
                   : isPaused
                     ? "Already paused"
                     : "Nothing to pause")
