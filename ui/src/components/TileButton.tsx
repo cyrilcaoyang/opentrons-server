@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 
 /**
  * Shared button vocabulary, ported from the dashboard's TileButton so the
- * panel keeps its exact look. Two sizes (default 28 px, small 20 px), three
- * variants (default neutral, primary emerald, danger rose).
+ * panel keeps its exact look. Two sizes (default 28 px, small 20 px), four
+ * variants (default neutral, primary emerald, danger rose, stop solid red).
  */
 
 export type TileButtonSize = "default" | "small";
-export type TileButtonVariant = "default" | "primary" | "danger";
+export type TileButtonVariant = "default" | "primary" | "danger" | "stop";
 
 const SIZE_CLASSES: Record<TileButtonSize, string> = {
   default: "h-7 px-2.5 text-xs",
@@ -21,6 +21,8 @@ const VARIANT_CLASSES: Record<TileButtonVariant, string> = {
     "border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200 dark:hover:bg-emerald-900/60",
   danger:
     "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-900/60",
+  stop:
+    "border-red-700 bg-red-600 text-white hover:bg-red-700 dark:border-red-500 dark:bg-red-600 dark:text-white dark:hover:bg-red-700",
 };
 
 export interface TileButtonProps {

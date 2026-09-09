@@ -919,7 +919,7 @@ export function ControlPanel({
             <TileButton
               onClick={stopRun}
               disabled={locked || stopping || !allowedActions.includes("stop")}
-              variant="danger"
+              variant="stop"
               ariaLabel="Stop this robot run"
               title="Software stop over HTTP. Requires inspection and a fresh session; cannot replace a physical emergency stop."
             >
