@@ -100,6 +100,9 @@ export interface DeviceDeckSlot {
     plate_id?: string | null;
     /** Tracked plate samples the deck folds onto this slot. */
     wells?: WellSample[] | null;
+    /** Exact schema-2 definition supplied with an operator-declared custom
+     * labware item. It is authoritative for its own preview geometry. */
+    definition?: unknown | null;
     /** The setup recipe's name for this labware — the key `details.tip_racks`
      *  and `/control/*` use. Stamped per slot so it survives run/REPL
      *  precedence, unlike `display_name`. */

@@ -3,7 +3,7 @@ import {
   deckRows,
   TEMP_FAMILIES,
   buildSlotView,
-  computeOverhangReadouts,
+  computeModuleFootprints,
   moduleFamily,
   moduleShortLabel,
   pairModuleSlots,
@@ -147,8 +147,8 @@ export interface DeckPanelProps {
 /**
  * The 12-slot OT-2 deck (slot 1 bottom-left … 12 top-right, rendered top row
  * first to match the physical deck). Declared vs observed state, mismatch
- * flags, module accent + live temperature readouts (including the
- * temperature-module overhang cell) all come from the shared ot2-deck lib.
+ * flags, module accent, physical multi-slot module footprints, and live
+ * temperature readouts all come from the shared ot2-deck lib.
  * Ported from the ac-organic-lab dashboard.
  */
 export function DeckPanel({
@@ -167,7 +167,7 @@ export function DeckPanel({
   const interactive = onSelectSlot != null;
 
   const moduleSlots = pairModuleSlots(deviceDeck, robotModules);
-  const overhangReadout = computeOverhangReadouts(deviceDeck, moduleSlots);
+  const moduleFootprints = computeModuleFootprints(deviceDeck);
 
   /**
    * Per-well state for a tip-rack slot, via the same model the expanded
@@ -194,10 +194,6 @@ export function DeckPanel({
     for (const cell of model.cells) out[cell.well] = cell.kind;
     return out;
   }
-  // Module slots whose readout renders in an overhang cell — their own cell
-  // then shows only the module name (or the plate sitting on it).
-  const exportedReadouts = new Set(Array.from(overhangReadout.values(), (o) => o.moduleSlot));
-
   const grid = (
     <div
       className={
@@ -211,27 +207,31 @@ export function DeckPanel({
         const v = buildSlotView(slot, deviceDeck, legacyLabware);
         const selected = selectedSlot === slot;
         const mismatch = v.state === "mismatch";
-        const overhang = overhangReadout.get(slot);
+        const footprint = moduleFootprints.get(slot);
+        const footprintOnly = footprint != null && v.state === "empty";
+        const footprintConflict =
+          footprint != null && footprint.anchorSlot !== slot && v.state !== "empty" && v.moduleName == null;
         const paired = moduleSlots.get(slot);
         const inlineReadout =
           v.kind === "module" &&
           v.moduleName != null &&
-          !exportedReadouts.has(slot) &&
           TEMP_FAMILIES.has(moduleFamily(v.moduleName) ?? "");
-        const moduleAccent = overhang != null || v.moduleName != null;
+        const moduleAccent = footprint != null || v.moduleName != null;
         // Declared = operator intent the robot has not confirmed. Page-only,
         // matching where the "declared" wording already renders: on the compact
         // tile almost every slot is declared, so outlining them all would say
         // nothing while shouting.
         const declaredOnly = page && migrated && v.state === "declared";
-        const cellTitle = overhang
-          ? `Slot ${slot} — overhang of the ${overhang.name} at slot ${overhang.moduleSlot}`
+        const cellTitle = footprintOnly
+          ? `Slot ${slot} — occupied by the ${footprint.moduleName} anchored at slot ${footprint.anchorSlot}`
           : v.title;
         const cellClassName = [
           "relative overflow-hidden rounded border transition-colors",
           page ? "aspect-[4/3] w-full" : "h-[120px] w-[160px]",
           selected
             ? "border-sky-500 bg-sky-50 dark:border-sky-500 dark:bg-sky-950/40"
+            : footprintConflict
+              ? "border-rose-500 bg-rose-50 dark:border-rose-500 dark:bg-rose-950/30"
             : mismatch
               ? "border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-950/30"
               : declaredOnly
@@ -246,12 +246,14 @@ export function DeckPanel({
         ].join(" ");
         const cellBody = (
           <>
-            {overhang ? (
+            {footprintOnly ? (
               <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-1">
                 <span className="text-[9px] uppercase tracking-wider text-ink-subtle dark:text-slate-400">
-                  {moduleShortLabel(overhang.name)} · slot {overhang.moduleSlot}
+                  {moduleShortLabel(footprint.moduleName)}
                 </span>
-                <ModuleReadout live={overhang.live} />
+                <span className="text-[9px] text-ink-subtle dark:text-slate-400">
+                  footprint of slot {footprint.anchorSlot}
+                </span>
               </div>
             ) : v.isTrash ? (
               <div className="flex h-full w-full items-center justify-center bg-slate-300/70 dark:bg-slate-700/60">
@@ -312,6 +314,14 @@ export function DeckPanel({
                 {v.state === "mismatch" ? "≠" : "busy"}
               </span>
             )}
+            {footprintConflict && (
+              <span
+                className="absolute right-1 top-1 rounded bg-rose-600 px-1 text-[8px] font-semibold uppercase tracking-wide text-white"
+                aria-hidden
+              >
+                conflict
+              </span>
+            )}
           </>
         );
         // On the full-width deck the slot number sits in the cell's top-left
@@ -326,7 +336,11 @@ export function DeckPanel({
               className="min-h-[1.15em] truncate px-0.5 text-left text-[10px] font-medium leading-tight text-ink dark:text-slate-200"
               title={v.loadName || v.label || undefined}
             >
-              {v.state !== "empty" && !overhang && !v.isTrash ? v.label : "\u00a0"}
+              {v.state !== "empty" && !v.isTrash
+                ? v.label
+                : footprintOnly
+                  ? `${moduleShortLabel(footprint.moduleName)} footprint`
+                  : "\u00a0"}
             </span>
           </div>
         ) : (
@@ -359,6 +373,9 @@ export function DeckPanel({
   if (!page) return grid;
   return (
     <div className="flex w-full flex-col gap-1.5">
+      <p className="px-0.5 text-center text-[10px] font-semibold uppercase tracking-wider text-ink-subtle dark:text-slate-400">
+        Back of robot
+      </p>
       <p className="flex items-center gap-1.5 px-0.5 text-[10px] leading-tight text-ink-subtle dark:text-slate-400">
         <span
           className="inline-block h-3 w-4 shrink-0 rounded-[2px] border border-orange-400 dark:border-orange-500/80"
@@ -368,6 +385,9 @@ export function DeckPanel({
         yet observed on the robot.
       </p>
       {grid}
+      <p className="px-0.5 text-center text-[10px] font-semibold uppercase tracking-wider text-ink-subtle dark:text-slate-400">
+        Front · operator
+      </p>
     </div>
   );
 }

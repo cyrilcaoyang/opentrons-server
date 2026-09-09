@@ -220,6 +220,8 @@ export interface SlotView {
   isTiprack?: boolean;
   /** Tracked plate samples folded onto this slot, when there are any. */
   wells?: WellSample[] | null;
+  /** Definition supplied with a custom declaration, when present. */
+  definition?: unknown | null;
 }
 
 export function buildSlotView(
@@ -279,6 +281,7 @@ export function buildSlotView(
       // gateway that predates it.
       isTiprack: s.labware?.is_tiprack ?? kind === "tiprack",
       wells: s.labware?.wells ?? null,
+      definition: s.labware?.definition ?? null,
     };
   }
   // Legacy store: pure intent, no lifecycle.
@@ -291,7 +294,7 @@ export function buildSlotView(
 }
 
 // ---------------------------------------------------------------------------
-// Module ↔ telemetry pairing + the temperature-module overhang
+// Module ↔ telemetry pairing + physical module footprints
 // ---------------------------------------------------------------------------
 
 export interface PairedModule {
@@ -325,33 +328,31 @@ export function pairModuleSlots(
   return moduleSlots;
 }
 
-export interface OverhangReadout extends PairedModule {
-  moduleSlot: number | string;
+export interface ModuleFootprint {
+  /** The slot carrying the module in the device state. */
+  anchorSlot: number | string;
+  moduleName: string;
 }
 
 /**
- * Overhang readout cells. The OT-2 temperature module is physically LONG: it
- * is bolted at its slot and overhangs ~half of the slot to its left, while
- * the plate sits ON the module above the module's own slot. Mirror that
- * footprint: render the live readout in the empty left-neighbor cell so the
- * module's own slot stays free for its plate. Left neighbor exists when the
- * slot isn't first in its deck row (slots 1/4/7/10, i.e. slot % 3 === 1).
+ * Extra deck cells physically occupied by a module.
+ *
+ * Temperature, magnetic, and heater-shaker modules each occupy the one SBS
+ * slot they are declared in. The Thermocycler is the OT-2 exception: its
+ * anchor is slot 7 and its body occupies slots 7, 8, 10, and 11. Project the
+ * other three cells so an empty-looking cell never invites an operator to put
+ * labware under the module. Do not invent a footprint for a declaration at an
+ * unsupported anchor: render the gateway's asserted slot faithfully instead.
  */
-export function computeOverhangReadouts(
-  deviceDeck: DeviceDeck | null,
-  moduleSlots: Map<number | string, PairedModule>,
-): Map<number | string, OverhangReadout> {
-  const overhang = new Map<number | string, OverhangReadout>();
-  for (const [slot, m] of moduleSlots) {
-    if (moduleFamily(m.name) !== "temperature") continue;
-    if (typeof slot !== "number" || slot % 3 === 1) continue;
-    const left = slot - 1;
-    const leftSlot = deviceDeck?.slots[String(left)];
-    const leftIsFree = !leftSlot || (!leftSlot.module && !leftSlot.labware);
-    if (!leftIsFree) continue;
-    overhang.set(left, { moduleSlot: slot, name: m.name, live: m.live });
+export function computeModuleFootprints(deviceDeck: DeviceDeck | null): Map<number | string, ModuleFootprint> {
+  const footprint = new Map<number | string, ModuleFootprint>();
+  if (!deviceDeck) return footprint;
+  const anchor = deviceDeck.slots["7"];
+  if (moduleFamily(anchor?.module?.module_name) !== "thermocycler") return footprint;
+  for (const slot of [7, 8, 10, 11]) {
+    footprint.set(slot, { anchorSlot: 7, moduleName: anchor.module!.module_name });
   }
-  return overhang;
+  return footprint;
 }
 
 // ---------------------------------------------------------------------------

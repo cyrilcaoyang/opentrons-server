@@ -94,6 +94,11 @@ export function geometryFromDefinition(defn: unknown): LabwareGeometry | null {
     .filter((col): col is unknown[] => Array.isArray(col))
     .map((col) => col.filter((w): w is string => typeof w === "string"));
   if (ordering.length === 0 || ordering[0].length === 0) return null;
+  // A renderer may safely use a rectangular, fully-defined grid. A ragged
+  // ordering or a named well without geometry would otherwise make the plan
+  // silently mix exact and invented coordinates, which is worse than omitting
+  // the geometry-specific preview.
+  if (ordering.some((col) => col.length !== ordering[0].length)) return null;
 
   const wellsRaw = (d.wells ?? {}) as Record<string, unknown>;
   const wells: Record<string, WellGeometry> = {};
@@ -102,6 +107,7 @@ export function geometryFromDefinition(defn: unknown): LabwareGeometry | null {
     if (parsed) wells[well] = parsed;
   }
   if (Object.keys(wells).length === 0) return null;
+  if (ordering.some((col) => col.some((well) => wells[well] == null))) return null;
 
   const params = (d.parameters ?? {}) as Record<string, unknown>;
   const meta = (d.metadata ?? {}) as Record<string, unknown>;

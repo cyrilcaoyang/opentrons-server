@@ -24,7 +24,7 @@
  *   so, rather than inventing a footprint and well depth to scale against.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
@@ -283,7 +283,17 @@ function ElevationView({
   const shadeTips = model.contents === "tiprack" && geometry.isTiprack;
   const profile = elevationProfile(geometry);
   const cavities = geometry.ordering.map((column, index) => {
-    const g = geometry.wells[column[0]];
+    // A front elevation intersects the well nearest the operator, not merely
+    // the first name in definition ordering. They coincide for ordinary
+    // plates, but differ for heterogeneous tube racks whose rows have
+    // different diameters and depths.
+    const g = column
+      .map((well) => geometry.wells[well])
+      .filter((well): well is NonNullable<typeof well> => well != null)
+      .reduce<NonNullable<(typeof geometry.wells)[string]> | null>(
+        (front, well) => (front == null || well.y < front.y ? well : front),
+        null,
+      );
     // A zero-depth well is a top face, not a cavity — it is part of the body
     // silhouette below, and drawing it here would only be a line along it.
     if (!g || g.depth === 0) return null;
@@ -390,16 +400,26 @@ export interface PlateInspectorProps {
   mountedTips: MountedTip[];
 }
 
-/** Fetch + cache one definition per load_name for the elevation. */
-function useLabwareGeometry(loadName: string | undefined): {
+/**
+ * Resolve preview geometry. A custom definition carried by the live deck wins:
+ * it is the exact object the operator declared, whereas `/labware/{name}` only
+ * knows the gateway's installed standard library. Standard definitions are
+ * fetched and cached by load name as before.
+ */
+function useLabwareGeometry(loadName: string | undefined, declaredDefinition: unknown | null | undefined): {
   geometry: LabwareGeometry | null;
   state: "idle" | "loading" | "ready" | "unavailable";
 } {
   const [cache, setCache] = useState<Record<string, LabwareGeometry | null>>({});
   const [loading, setLoading] = useState<string | null>(null);
+  const hasDeclaredDefinition = declaredDefinition != null;
+  const declaredGeometry = useMemo(
+    () => (hasDeclaredDefinition ? geometryFromDefinition(declaredDefinition) : null),
+    [declaredDefinition, hasDeclaredDefinition],
+  );
 
   useEffect(() => {
-    if (!loadName || loadName in cache) return;
+    if (hasDeclaredDefinition || !loadName || loadName in cache) return;
     let cancelled = false;
     setLoading(loadName);
     getLabwareDefinition(loadName)
@@ -430,9 +450,12 @@ function useLabwareGeometry(loadName: string | undefined): {
     return () => {
       cancelled = true;
     };
-  }, [loadName, cache]);
+  }, [loadName, cache, hasDeclaredDefinition]);
 
   if (!loadName) return { geometry: null, state: "idle" };
+  if (hasDeclaredDefinition) {
+    return { geometry: declaredGeometry, state: declaredGeometry ? "ready" : "unavailable" };
+  }
   if (loading === loadName) return { geometry: null, state: "loading" };
   if (!(loadName in cache)) return { geometry: null, state: "loading" };
   const geometry = cache[loadName];
@@ -443,7 +466,7 @@ export function PlateInspector({ slot, view, tipRacks, mountedTips }: PlateInspe
   const nickname = view?.nickname ?? null;
   const isTiprack = view?.isTiprack ?? false;
   const loadName = view?.loadName;
-  const { geometry, state: geometryState } = useLabwareGeometry(loadName);
+  const { geometry, state: geometryState } = useLabwareGeometry(loadName, view?.definition);
 
   if (slot == null || view == null) {
     return (
