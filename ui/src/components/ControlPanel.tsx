@@ -1193,7 +1193,7 @@ export function ControlPanel({
 
           <Section title="Modules (live telemetry)">
             <p className="mb-2 text-xs text-ink-subtle dark:text-slate-400">
-              Connected modules without an assigned slot are off deck. Set the slot after physically placing the module; this changes declared intent only.
+              Connected modules without an assigned slot are off deck.
             </p>
             {moduleSlots.size === 0 && robotModules.length === 0 ? (
               <p className="text-xs text-ink-subtle dark:text-slate-500">
