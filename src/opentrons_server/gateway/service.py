@@ -12,6 +12,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import paramiko
@@ -26,6 +27,9 @@ from ..control import (
 )
 from ..control import state_readers as _state_readers
 from ..version import __version__ as GATEWAY_VERSION
+from .advanced import ADVANCED_ACTIONS, FLEX_ACTIONS
+from .robot_profile import PROFILE, IS_FLEX
+from ..control.flex_control import FlexHttpControl
 from .claims import ClaimManager
 from .deck import (
     SLOTS,
@@ -34,6 +38,8 @@ from .deck import (
     make_slot_labware,
     normalize_repl_slots,
     normalize_run_slots,
+    normalize_run_modules,
+    run_slot_for,
 )
 from .events_exporter import EventsExporter
 from .models import (
@@ -157,7 +163,7 @@ _DISPENSE_DEFAULT_TOP_MM = float(os.getenv("OT2_DISPENSE_TOP_MM", "0"))
 # the *default* drop target and needs no addressing; these route to it rather
 # than being resolved as labware (slot 12 holds no loadable labware — it IS
 # the trash). "12" is what the assistant naturally proposes.
-_TRASH_ALIASES = frozenset({"12", "trash", "fixedTrash", "fixed_trash", "default_trash", "waste"})
+_TRASH_ALIASES = frozenset({"trash", "fixedTrash", "fixed_trash", "default_trash", "waste"} | (set() if IS_FLEX else {"12"}))
 
 # Actions that drive a protocol command on the robot — this device's primary
 # operation. Withheld from `allowed_actions` while one is already in flight
@@ -297,7 +303,14 @@ class OT2Service:
         # robot-server run engine, docs/HTTP_TRANSPORT.md). Opt-in and fully
         # reversible: unset OT2_TRANSPORT (or pass transport="ssh") to restore the
         # SSH path with zero behaviour change. HTTP is not yet robot-validated.
+        self._state_lock = threading.Lock()
+        self._command_lock = threading.Lock()
+        self._stop_lock = threading.Lock()
+        self._stop_latched = False
+        self._stop_confirmed = False
         self.transport = (transport or os.getenv("OT2_TRANSPORT") or "ssh").lower()
+        if IS_FLEX and self.transport != "http":
+            raise ValueError("Flex profile requires OT2_TRANSPORT=http")
         # Orchestrator-owned plate/well tracking, persisted across restarts.
         # Mirrors the Cytation contract so a plate round-trips across devices.
         self.plates = (
@@ -374,7 +387,12 @@ class OT2Service:
         # self-heal so "shut it down" stays shut down: without it the refresh
         # loop would re-take the REPL seconds later and make the endpoint a
         # no-op. Cleared by an explicit POST /control/startup.
-        self._operator_shutdown = False
+        self._stop_latch_path = Path(os.getenv("OT2_STOP_STATE_PATH", str(self.tips._path.with_name("ot2_stop_state.json"))))
+        if not self.dry_run and self._stop_latch_path.exists():
+            self._stop_latched = True
+            self.state = OT2ServiceState.UNKNOWN_OUTCOME
+            self._set_error("command_unknown_outcome", "A previous stop requires operator inspection and a fresh startup", severity="critical")
+        self._operator_shutdown = self._stop_latched
         self._last_self_heal_at = 0.0
         # Activity span tracking (STATUS_SPEC v1.2 §2.3). `_activity` is the
         # last observed value and `_activity_since` the instant it last
@@ -423,6 +441,28 @@ class OT2Service:
         simulation: Optional[bool] = None,
     ) -> None:
         """Connect and initialize the remote protocol session."""
+        self._change_session(lambda: self._startup_session(
+            host_alias=host_alias, password=password, simulation=simulation
+        ))
+
+    def _change_session(self, change: Callable[[], None]) -> None:
+        """Do not replace/close a transport while a command or stop uses it."""
+        if not self._command_lock.acquire(blocking=False):
+            raise RuntimeError("command still in flight; stop and wait before changing session")
+        try:
+            if not self._stop_lock.acquire(blocking=False):
+                raise RuntimeError("stop still in flight; wait before changing session")
+            try:
+                change()
+            finally:
+                self._stop_lock.release()
+        finally:
+            self._command_lock.release()
+
+    def _startup_session(self, *, host_alias: Optional[str], password: Optional[str],
+                         simulation: Optional[bool]) -> None:
+        if self._stop_latched and self.control is not None:
+            raise RuntimeError("finish stopping and close the old session before startup")
 
         # An explicit startup is the operator asking for the session back, so
         # it re-arms the background self-heal.
@@ -461,6 +501,9 @@ class OT2Service:
             self.state = OT2ServiceState.READY
             self.last_error = None
             self._status_note = None
+            self._stop_latch_path.unlink(missing_ok=True)
+            self._stop_latched = False
+            self._stop_confirmed = False
             self._emit_session_event("startup", to_state=self.state.value)
             self.refresh_snapshot()
             self._refresh_identity()
@@ -480,13 +523,15 @@ class OT2Service:
             raise RuntimeError(
                 "http transport requires OT2_HTTP_BASE_URL or a configured host_alias"
             )
-        control = OT2HttpControl(RunEngineClient(base_url))
+        control = (FlexHttpControl if IS_FLEX else OT2HttpControl)(RunEngineClient(base_url))
         control.initialize_protocol(simulation=self.simulation)
         # initialize_protocol creates a fresh (usually empty) run, but if the
         # robot-server preloads labware into new runs — or a future path adopts
         # an existing run — the id maps must reflect it before any command
         # resolves a name. Cheap and non-clobbering; a no-op on an empty run.
         control.adopt_run_state()
+        if IS_FLEX:
+            return control  # Flex trash must be explicitly configured.
         # The OT-2's fixed trash is always physically present. Register it as
         # soon as the run exists so a bare drop_tip routes there even in a
         # setup-less (declared-deck) session; setup_protocol's own registration
@@ -513,6 +558,9 @@ class OT2Service:
         immediately undo it — the gateway stays down until someone starts it.
         """
 
+        self._change_session(self._shutdown_session)
+
+    def _shutdown_session(self) -> None:
         self._operator_shutdown = True
         if self.control is not None:
             try:
@@ -863,6 +911,8 @@ class OT2Service:
                 nick = mod.get("nickname")
                 loc = str(mod.get("location") or "")
                 if nick and name in {str(nick), loc}:
+                    if _module_family(str(mod.get("module_name") or "")) != family:
+                        raise RuntimeError(f"module {name!r} is not a {family} module")
                     return str(nick)
             if name in self._session_modules:
                 return self._session_modules[name]
@@ -874,7 +924,7 @@ class OT2Service:
         self._require_control().load_module(
             {
                 "nickname": nickname,
-                "module_name": self._tempmod_load_name_for_slot(slot),
+                "module_name": self._module_load_name_for_slot(slot, family=family),
                 "location": slot,
             }
         )
@@ -933,6 +983,19 @@ class OT2Service:
             if _module_family(label) == family:
                 return True
         return False
+
+    def _module_load_name_for_slot(self, slot: str, *, family: str) -> str:
+        if family == "temperature":
+            return self._tempmod_load_name_for_slot(slot)
+        declared = self._declared_slots().get(slot)
+        if isinstance(declared, SlotModule) and _module_family(declared.module_name) == family:
+            # Only canonical engine names are acceptable for non-temperature modules.
+            aliases = {"heater-shaker module gen1": "heaterShakerModuleV1",
+                       "magnetic module gen2": "magneticModuleV2", "magnetic module": "magneticModuleV1",
+                       "thermocycler module gen2": "thermocyclerModuleV2",
+                       "thermocycler module": "thermocyclerModuleV1"}
+            return aliases.get(declared.module_name, declared.module_name)
+        raise RuntimeError(f"declare the exact {family} model at slot {slot} before loading")
 
     def _tempmod_load_name_for_slot(self, slot: str) -> str:
         for mod in self._last_probe.get("modules") or []:
@@ -1096,13 +1159,67 @@ class OT2Service:
     def home(self) -> None:
         self._run_action("home", lambda: self._require_control().home(), idempotent=True)
 
+    def stop(self) -> None:
+        """Operator software stop. Never queued behind a running command.
+
+        The claim gate remains intact. SSH and externally-owned sessions have
+        no verified interrupt channel here and must not advertise this operation.
+        """
+        if self.dry_run:
+            return
+        if self.transport != "http" or self.control is None or self.state == OT2ServiceState.EXTERNAL_CONTROL:
+            raise RuntimeError("software stop requires this gateway's HTTP run")
+        if not self._stop_lock.acquire(blocking=False):
+            raise RuntimeError("stop already in progress")
+        started = time.monotonic()
+        try:
+            with self._state_lock:
+                self._stop_latched = True
+                self._stop_confirmed = False
+                self._operator_shutdown = True
+                self.state = OT2ServiceState.UNKNOWN_OUTCOME
+                self._set_error("command_unknown_outcome", "Stop requested; stopped motion is not yet confirmed",
+                                severity="critical")
+            persistence_error = None
+            try:
+                self._stop_latch_path.parent.mkdir(parents=True, exist_ok=True)
+                self._stop_latch_path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+            except OSError as exc:
+                # A disk failure must not prevent the physical stop attempt.
+                # Report it explicitly after attempting the independent channel.
+                persistence_error = exc
+            self.control.client.stop_and_confirm()
+            self._stop_confirmed = True
+            if persistence_error is not None:
+                raise RuntimeError(f"robot stopped, but recovery latch could not be saved: {persistence_error}")
+            self.state = OT2ServiceState.ERROR
+            self._set_error("command_failed", "Run stopped. Inspect the robot, then shut down and start a fresh session.",
+                            severity="error")
+            self._emit_control_action("stop", "ok", started)
+        except Exception as exc:
+            self.state = OT2ServiceState.ERROR if self._stop_confirmed else OT2ServiceState.UNKNOWN_OUTCOME
+            if self._stop_confirmed:
+                self._set_error("command_failed", f"Stop requires inspection: {exc}", severity="critical")
+                self._emit_control_action("stop", "failed", started, str(exc))
+            else:
+                self._set_error("command_unknown_outcome", f"Stop requires inspection: {exc}", severity="critical")
+                self._emit_control_action("stop", "unknown_outcome", started, str(exc))
+            raise
+        finally:
+            self._sync_activity()
+            self._stop_lock.release()
+
     def pause(self) -> None:
         self._run_action("pause", lambda: self._require_control().pause(), idempotent=True)
-        self.state = OT2ServiceState.PAUSED
+        with self._state_lock:
+            if not self._stop_latched:
+                self.state = OT2ServiceState.PAUSED
 
     def resume(self) -> None:
         self._run_action("resume", lambda: self._require_control().resume(), idempotent=True)
-        self.state = OT2ServiceState.READY
+        with self._state_lock:
+            if not self._stop_latched:
+                self.state = OT2ServiceState.READY
 
     def set_location_from_well(
         self,
@@ -1118,6 +1235,12 @@ class OT2Service:
         means by an unqualified well, so each caller states its own (see
         ``_ASPIRATE_DEFAULT_BOTTOM_MM``); a plain move keeps the well top.
         """
+
+        # Zero is a meaningful explicit offset, not an omitted value.
+        if request.location.top == 0:
+            default_origin, default_offset = "top", request.location.top
+        elif request.location.bottom == 0:
+            default_origin, default_offset = "bottom", request.location.bottom
 
         self._require_control().get_location_from_labware(
             self._resolve_session_labware(request.location.labware_nickname),
@@ -1197,12 +1320,88 @@ class OT2Service:
                 default_origin="top",
                 default_offset=_DISPENSE_DEFAULT_TOP_MM,
             )
-            self._require_control().dispense(pip, request.volume_ul, flow_rate=flow_rate)
+            kwargs = {"flow_rate": flow_rate}
+            if getattr(request, "push_out", None) is not None:
+                kwargs["push_out"] = request.push_out
+            self._require_control().dispense(pip, request.volume_ul, **kwargs)
 
         self._run_action("dispense", _dispense, idempotent=False)
         self._mark_tip_used(
             request.pipette, request.location.labware_nickname, request.location.position
         )
+
+    def advanced_action(self, name: str, request: Any) -> None:
+        """Execute only a typed catalog entry through the existing state machine."""
+        operation = ADVANCED_ACTIONS[name]
+        request = operation.model.model_validate(request)
+        if not self.dry_run and name not in self.allowed_actions():
+            raise RuntimeError(f"{name} is not allowed in {self.state.value}")
+        if name in {"mix", "air_gap"}:
+            check_volume(request.pipette, request.volume_ul,
+                         self._volume_limits_for(request.pipette), action=name)
+
+        contact_attempted = False
+
+        def execute() -> None:
+            nonlocal contact_attempted
+            control = self._require_control()
+            args = request.model_dump(exclude_none=True)
+            if operation.family:
+                nick = self._ensure_session_module(args.pop("module"), family=operation.family)
+                getattr(control, operation.method)(nick, **args)
+                return
+            if name in FLEX_ACTIONS or name in {"comment", "delay"}:
+                getattr(control, operation.method)(**args)
+                return
+            pip = self._ensure_session_pipette(request.pipette)
+            if name == "blow_out":
+                if request.in_place:
+                    control.blow_out_in_place(pip)
+                else:
+                    self.set_location_from_well(request)
+                    contact_attempted = True
+                    control.blow_out(pip)
+            elif name == "touch_tip":
+                nick = self._resolve_session_labware(request.labware_nickname)
+                contact_attempted = True
+                control.touch_tip(pip, nick, request.position, radius=request.radius,
+                                  v_offset=request.v_offset, speed=request.speed)
+            elif name == "mix":
+                self.set_location_from_well(request, default_origin="bottom",
+                                            default_offset=_ASPIRATE_DEFAULT_BOTTOM_MM)
+                contact_attempted = True
+                control.mix(pip, request.repetitions, request.volume_ul, rate=request.rate)
+            elif name == "air_gap":
+                # Account for liquid already held, before any motion.
+                limits = self._volume_limits_for(request.pipette)
+                if limits:
+                    check_volume(pip, control.current_volume(pip) + request.volume_ul,
+                                 (0, limits[1]), action=name)
+                nick = self._resolve_session_labware(request.location.labware_nickname)
+                control.get_location_from_labware(nick, request.location.position,
+                                                 default_origin="top", default_offset=request.height)
+                if self.transport != "http":
+                    control.move_to_pip(pip)
+                control.air_gap(pip, request.volume_ul, height=request.height)
+            else:
+                args.pop("pipette")
+                getattr(control, operation.method)(pip, **args)
+            # Keep the existing tracker. A wall touch counts as sample contact.
+            if name == "touch_tip":
+                self._mark_tip_used(request.pipette, request.labware_nickname, request.position)
+            elif name in {"mix", "blow_out"} and request.location is not None:
+                self._mark_tip_used(request.pipette, request.location.labware_nickname,
+                                    request.location.position)
+
+        try:
+            self._run_action(name, execute, idempotent=operation.idempotent)
+        except Exception:
+            if contact_attempted:
+                # A composite mix can fail after contacting liquid. Preserve
+                # that uncertainty in the existing tracker, never return the
+                # tip to the pool as fresh after an interrupted operation.
+                self.tips.update_mount(request.pipette, uncertain=True, last_sample="unknown")
+            raise
 
     @property
     def _mounted_tips(self) -> Dict[str, Dict[str, Any]]:
@@ -1467,7 +1666,10 @@ class OT2Service:
                 self._require_control().get_location_from_labware(
                     self._resolve_session_labware(nickname), position, **depth
                 )
-            self._require_control().drop_tip(pip)
+            control = self._require_control()
+            if isinstance(control, OT2HttpControl) and not (nickname and position):
+                control._pending = None  # No explicit target means trash, never a stale well.
+            control.drop_tip(pip)
 
         try:
             self._run_action("drop_tip", _drop_tip, idempotent=False)
@@ -1613,14 +1815,31 @@ class OT2Service:
         return self.tips.racks()[slot]
 
     def move_labware(self, request: Any) -> None:
-        self._run_action(
-            "move_labware",
-            lambda: self._require_control().move_labware(
-                self._resolve_session_labware(request.labware_nickname),
-                request.new_location,
-            ),
-            idempotent=False,
-        )
+        if getattr(request, "use_gripper", False) and self._tiprack_slot(request.labware_nickname) is not None:
+            raise RuntimeError("moving tracked tip racks is not supported; rack tracking remains keyed by its declared slot")
+        def move() -> None:
+            control = self._require_control()
+            nick = self._resolve_session_labware(request.labware_nickname)
+            destination = request.new_location
+            if isinstance(control, FlexHttpControl):
+                if destination in control._module_ids:
+                    destination = {"moduleId": control._module_id(destination)}
+                elif destination in control._labware_ids:
+                    destination = {"labwareId": control._labware_id(destination)}
+            if getattr(request, "use_gripper", False):
+                if not isinstance(control, FlexHttpControl):
+                    raise RuntimeError("gripper moves require a Flex HTTP session")
+                control.move_labware_w_gripper(
+                    nick, destination,
+                    pick_up_offset=request.pick_up_offset.model_dump() if request.pick_up_offset else None,
+                    drop_offset=request.drop_offset.model_dump() if request.drop_offset else None,
+                )
+            else:
+                control.move_labware(nick, destination)
+            for item in self.session_recipe.get("labware", []):
+                if item.get("nickname") == nick:
+                    item["location"] = request.new_location
+        self._run_action("move_labware", move, idempotent=False)
 
     # ---- plate / well tracking (orchestrator-owned bookkeeping) --------
     #
@@ -2061,8 +2280,8 @@ class OT2Service:
         shutdown then startup (ROADMAP: "self-heal the stale-run 409").
         """
 
-        if self.state == OT2ServiceState.BUSY:
-            return  # the in-flight command reports its own outcome
+        if self.state == OT2ServiceState.BUSY or self._stop_latched:
+            return  # the in-flight command or stop reports its own outcome
         if self._session_alive_on_robot() is False:
             self._drop_dead_session("Robot restarted while unreachable")
 
@@ -2190,7 +2409,7 @@ class OT2Service:
         that keeps them from colliding.
         """
 
-        if self.dry_run or self._boot_started:
+        if self.dry_run or self._boot_started or self._stop_latched:
             return
         self._boot_started = True
 
@@ -2411,6 +2630,8 @@ class OT2Service:
             if probed is not None:
                 volumes[mount] = {"min_ul": probed[0], "max_ul": probed[1]}
         details["pipette_volumes"] = volumes
+        details["gateway_profile"] = {"model": PROFILE.model, "slots": list(PROFILE.slots),
+                                      "supported_channels": [1, 8]}
         if self._last_probe or self._robot_last_seen_at or self.robot_unreachable:
             details["robot"] = self._robot_details()
         claimed_by = self.claims.current()
@@ -2458,6 +2679,7 @@ class OT2Service:
         run = normalize_run_slots(self._last_run_labware) if self._last_run_labware else None
         return build_deck(
             run=run,
+            run_modules=normalize_run_modules(self._last_run_labware),
             repl=repl,
             declared=self._declared_slots(),
             loaded_plate=self.plates.get(),
@@ -2530,6 +2752,12 @@ class OT2Service:
             location = lw.get("location")
             if nickname is not None and location is not None:
                 out[str(nickname)] = str(location)
+        for item in (self._last_run_labware or {}).get("labware", []):
+            nickname = item.get("id")
+            if nickname:
+                out.pop(nickname, None)
+                if slot := run_slot_for(item, self._last_run_labware):
+                    out[nickname] = slot
         return out
 
     def allowed_actions(self) -> list[str]:
@@ -2540,7 +2768,17 @@ class OT2Service:
         advertised while one is in flight, however the state table evolves.
         """
 
-        actions = [a for a in self._allowed_for_state() if not self._blocked_by_activity(a)]
+        if self._stop_latched:
+            actions = []
+            if self.transport == "http" and self.control is not None:
+                actions.append("stop")
+            if not self._command_lock.locked() and not self._stop_lock.locked():
+                actions.append("shutdown" if self.control is not None else "startup")
+            return actions
+        base_actions = self._allowed_for_state()
+        if self.state == OT2ServiceState.READY:
+            base_actions += list(ADVANCED_ACTIONS)
+        actions = [a for a in base_actions if not self._blocked_by_activity(a)]
         # The two convenience actions used to be appended by the /status builder
         # instead of here, so this method returned a NARROWER list than the
         # device advertised on the wire — `lights.set` and `deck.declare` were
@@ -2562,6 +2800,11 @@ class OT2Service:
             # Mirrors _run_action's refusal (§6.2): anything that would talk to
             # the robot is withheld; bookkeeping and closing the session stay.
             actions = [a for a in actions if a in _OFFLINE_SAFE_ACTIONS]
+        # Stop is the sole network action still offered during an outage: it
+        # attempts its independent connection and reports unconfirmed on failure.
+        if (self.transport == "http" and self.control is not None
+                and self.state != OT2ServiceState.EXTERNAL_CONTROL):
+            actions.append("stop")
         return actions
 
     def _blocked_by_activity(self, action: str) -> bool:
@@ -2569,7 +2812,7 @@ class OT2Service:
         start or enqueue a *second* concurrent command. Abort/stop-class
         actions (``pause``) and pure bookkeeping stay available."""
 
-        return action in _RUN_STARTING_ACTIONS and self._observed_activity() == "running"
+        return action in (_RUN_STARTING_ACTIONS | ADVANCED_ACTIONS.keys()) and self._observed_activity() == "running"
 
     def _allowed_for_state(self) -> list[str]:
         if self.state == OT2ServiceState.REQUIRES_INIT:
@@ -2649,6 +2892,8 @@ class OT2Service:
         startup stays ERROR until a startup succeeds).
         """
 
+        if self._stop_latched:
+            raise RuntimeError("a stopped run requires shutdown/startup after inspection; reconcile cannot resume it")
         if snapshot is not None:
             self.last_snapshot = snapshot
         if self.state == OT2ServiceState.UNKNOWN_OUTCOME or (
@@ -2750,6 +2995,16 @@ class OT2Service:
         self.events.emit(event, rack=rack, owner=self._claim_owner(), **extra)
 
     def _run_action(self, name: str, func: Callable[[], None], *, idempotent: bool) -> None:
+        if not self._command_lock.acquire(blocking=False):
+            raise RuntimeError("another command is in flight")
+        try:
+            if self._stop_latched:
+                raise RuntimeError("run stopped; inspect and start a fresh session")
+            self._run_action_locked(name, func, idempotent=idempotent)
+        finally:
+            self._command_lock.release()
+
+    def _run_action_locked(self, name: str, func: Callable[[], None], *, idempotent: bool) -> None:
         if self.dry_run:
             self.state = OT2ServiceState.DRY_RUN
             self.last_error = None
@@ -2765,44 +3020,64 @@ class OT2Service:
                 f"{self._robot_unreachable_since.isoformat(timespec='seconds')}"  # type: ignore[union-attr]
             )
 
-        previous_state = self.state
-        self.state = OT2ServiceState.BUSY
+        with self._state_lock:
+            if self._stop_latched:
+                raise RuntimeError("run stopped; inspect and start a fresh session")
+            if name not in self.allowed_actions():
+                raise RuntimeError(f"{name} is not allowed in {self.state.value}")
+            previous_state = self.state
+            self.state = OT2ServiceState.BUSY
         self._sync_activity()  # exact span start (§2.3): the command is in flight
         started = time.monotonic()
         try:
             func()
-            self.state = OT2ServiceState.READY
-            self.last_error = None
-            self._cycles_total += 1
+            with self._state_lock:
+                if self._stop_latched:
+                    raise UnknownOutcomeError("stop interrupted the command; inspect outcome")
+                self.state = OT2ServiceState.READY
+                self.last_error = None
+                self._cycles_total += 1
             self._emit_control_action(name, "ok", started)
             self.refresh_snapshot()
+        except (OutOfEnvelope, TipUnavailable):
+            with self._state_lock:
+                if not self._stop_latched:
+                    self.state = previous_state
+            raise
         except (socket.timeout, paramiko.SSHException, OSError) as exc:
+            with self._state_lock:
+                stopped = self._stop_latched
+                if not stopped:
+                    if idempotent:
+                        self._set_error("command_transport_failed", f"{name}: {exc}", severity="error")
+                    else:
+                        self.state = OT2ServiceState.UNKNOWN_OUTCOME
+                        self._set_error("command_unknown_outcome", f"{name}: {exc}", severity="critical")
+            if stopped:
+                self._emit_control_action(name, "unknown_outcome", started, str(exc))
+                raise UnknownOutcomeError(str(exc)) from exc
             if idempotent:
-                self._set_error(
-                    "command_transport_failed", f"{name}: {exc}", severity="error"
-                )
                 self._emit_control_action(name, "transport_failed", started, str(exc))
             else:
-                self.state = OT2ServiceState.UNKNOWN_OUTCOME
-                self._set_error(
-                    "command_unknown_outcome", f"{name}: {exc}", severity="critical"
-                )
                 self._emit_control_action(name, "unknown_outcome", started, str(exc))
                 raise UnknownOutcomeError(str(exc)) from exc
             raise
         except Exception as exc:
-            self._set_error("command_failed", f"{name}: {exc}", severity="error")
+            with self._state_lock:
+                stopped = self._stop_latched
+                if not stopped:
+                    self._set_error("command_failed", f"{name}: {exc}", severity="error")
+                    if self._is_stale_run_error(exc):
+                        self._drop_dead_session("Robot-server run is gone (robot restarted?)")
+            if stopped:
+                self._emit_control_action(name, "unknown_outcome", started, str(exc))
+                raise UnknownOutcomeError(str(exc)) from exc
             self._emit_control_action(name, "failed", started, str(exc))
-            if self._is_stale_run_error(exc):
-                # Definitive: the run died with the robot. Drop the reference so
-                # the self-heal recreates it instead of every command 409ing
-                # until an operator cycles shutdown/startup. The error stays on
-                # /status until the re-init succeeds (§6.4 then clears it).
-                self._drop_dead_session("Robot-server run is gone (robot restarted?)")
             raise
         finally:
-            if self.state == OT2ServiceState.BUSY:
-                self.state = previous_state
+            with self._state_lock:
+                if not self._stop_latched and self.state == OT2ServiceState.BUSY:
+                    self.state = previous_state
             # Exact span end, whatever the outcome — including the
             # UNKNOWN_OUTCOME path, where "still running?" is genuinely
             # unanswerable until an operator reconciles.
@@ -2892,6 +3167,8 @@ class OT2Service:
         non-idempotent command, so whether the robot is still moving is
         exactly what we do not know until an operator reconciles.
         """
+        if self._stop_latched:
+            return "idle" if self._stop_confirmed else "unknown"
 
         if self.robot_unreachable and not self.dry_run:
             return "unknown"  # nothing can be observed on a robot nobody can reach

@@ -21,11 +21,14 @@ does not state one).
 
 from __future__ import annotations
 
+import keyword
+
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional, Union, get_args
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .robot_profile import IS_FLEX
 from .limits import (
     MAX_PIPETTE_VOLUME_UL,
     MAX_WELL_OFFSET_MM,
@@ -120,6 +123,12 @@ class CommandResponse(BaseModel):
     state: Optional[str] = None
 
 
+# References remain compatible with engine UUIDs and deck slots, while
+# excluding Python expressions from inputs shared with the SSH transport.
+RobotReference = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]+$")]
+WellName = Annotated[str, Field(pattern=r"^[A-Z]+[1-9][0-9]*$")]
+
+
 class StrictRequest(BaseModel):
     """Base for control request bodies: unknown keys are rejected, not ignored.
 
@@ -131,7 +140,7 @@ class StrictRequest(BaseModel):
     boundary so the caller (human or agent) corrects the step.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class StartupRequest(StrictRequest):
@@ -144,6 +153,15 @@ class ProtocolSetupRequest(StrictRequest):
     labware: List[Dict[str, Any]] = Field(default_factory=list)
     instruments: List[Dict[str, Any]] = Field(default_factory=list)
     modules: List[Dict[str, Any]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def safe_setup_names(self):
+        for item in [*self.labware, *self.instruments, *self.modules]:
+            name = item.get("nickname")
+            if (not isinstance(name, str) or not name.isascii() or not name.isidentifier()
+                    or keyword.iskeyword(name) or name in {"protocol", "json", "Point", "Location", "location"}):
+                raise ValueError("setup nickname must be a non-reserved Python identifier")
+        return self
 
 
 class WellLocation(StrictRequest):
@@ -161,8 +179,8 @@ class WellLocation(StrictRequest):
     offsets; the bound is a sanity check on intent, not the machine envelope.
     """
 
-    labware_nickname: str
-    position: str
+    labware_nickname: RobotReference
+    position: WellName
     top: Optional[float] = Field(
         default=None,
         ge=-MAX_WELL_OFFSET_MM,
@@ -182,6 +200,12 @@ class WellLocation(StrictRequest):
         ),
     )
     center: bool = False
+
+    @model_validator(mode="after")
+    def one_reference(self):
+        if sum((self.top is not None, self.bottom is not None, self.center)) > 1:
+            raise ValueError("provide only one of top, bottom or center")
+        return self
 
 
 class CoordinateLocation(StrictRequest):
@@ -223,14 +247,14 @@ class MoveToRequest(StrictRequest):
     or ``coordinates`` (absolute deck frame, mm) must be provided.
     """
 
-    pipette: str
+    pipette: RobotReference
     location: Optional[WellLocation] = None
     coordinates: Optional[CoordinateLocation] = None
     # Straight-line speed for this move in mm/s; omit for the robot default.
     speed: Optional[float] = Field(default=None, gt=0.0)
     # Move in a straight line instead of the arced safe path. The caller owns
     # collision avoidance when set.
-    force_direct: bool = False
+    force_direct: bool = Field(default=False, description="False uses the robot's arced path. True requests a straight move without a Z-retract waypoint. To hold Z, use the current Z as the destination.")
     # Minimum Z height (mm) for the arced path.
     minimum_z_height: Optional[float] = Field(default=None, ge=0.0)
 
@@ -242,7 +266,7 @@ class MoveToRequest(StrictRequest):
 
 
 class LiquidMoveRequest(StrictRequest):
-    pipette: str
+    pipette: RobotReference
     # Bounded by the largest OT-2 pipette. The tighter, *live* bound — what THIS
     # pipette actually holds — cannot be a schema constant, so it is checked
     # pre-motion and refused with 412 (`limits.check_volume`). Unbounded, a
@@ -264,10 +288,17 @@ class LiquidMoveRequest(StrictRequest):
     flow_rate: Optional[float] = Field(default=None, gt=0.0)
 
 
+class DispenseRequest(LiquidMoveRequest):
+    push_out: Optional[float] = Field(
+        default=None, ge=0, le=MAX_PIPETTE_VOLUME_UL,
+        description="Additional plunger air volume in uL; omit for robot default. Separate from blow-out.",
+    )
+
+
 class TipRequest(StrictRequest):
-    pipette: str
-    labware_nickname: Optional[str] = None
-    position: Optional[str] = None
+    pipette: RobotReference
+    labware_nickname: Optional[RobotReference] = None
+    position: Optional[WellName] = None
     # Tip-tracking fields. Omitting `position` on a tracked rack auto-picks the
     # next available tip; omitting `labware_nickname` too auto-selects a
     # tracked, tip-size-compatible rack (slot order). An untracked rack still
@@ -402,9 +433,26 @@ class TipMount(BaseModel):
     uncertain: bool = False
 
 
+class GripperOffset(StrictRequest):
+    x: float = Field(default=0, ge=-MAX_WELL_OFFSET_MM, le=MAX_WELL_OFFSET_MM)
+    y: float = Field(default=0, ge=-MAX_WELL_OFFSET_MM, le=MAX_WELL_OFFSET_MM)
+    z: float = Field(default=0, ge=-MAX_WELL_OFFSET_MM, le=MAX_WELL_OFFSET_MM)
+
+
 class MoveLabwareRequest(StrictRequest):
-    labware_nickname: str
-    new_location: str
+    labware_nickname: RobotReference
+    new_location: RobotReference = Field(min_length=1, description="Deck slot, OFF_DECK, or a loaded module/adapter nickname on Flex.")
+    use_gripper: bool = False
+    pick_up_offset: Optional[GripperOffset] = None
+    drop_offset: Optional[GripperOffset] = None
+
+    @model_validator(mode="after")
+    def gripper_options(self):
+        if self.use_gripper and not IS_FLEX:
+            raise ValueError("gripper moves require a Flex gateway profile")
+        if not self.use_gripper and (self.pick_up_offset is not None or self.drop_offset is not None):
+            raise ValueError("gripper offsets require use_gripper=true")
+        return self
 
 
 class LightsRequest(StrictRequest):
@@ -428,7 +476,7 @@ class TempmodSetRequest(StrictRequest):
         le=95.0,
         description="Target in °C. Temperature module GEN2 range is 4–95.",
     )
-    module: Optional[str] = Field(
+    module: Optional[RobotReference] = Field(
         default=None,
         description=(
             'Recipe nickname or deck slot (e.g. "7"). Omit when exactly one '
@@ -440,7 +488,7 @@ class TempmodSetRequest(StrictRequest):
 class TempmodDeactivateRequest(StrictRequest):
     """Turn the temperature module off."""
 
-    module: Optional[str] = Field(
+    module: Optional[RobotReference] = Field(
         default=None,
         description=(
             'Recipe nickname or deck slot (e.g. "7"). Omit when exactly one '

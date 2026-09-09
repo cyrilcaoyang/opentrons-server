@@ -29,6 +29,27 @@ def _transcript(value: str) -> str:
     return f"cmd\r\n{value}\r\n>>> "
 
 
+def test_setup_strings_stay_literals_in_generated_python():
+    import ast
+    control = RecordingControl()
+    supplied = "plate'); forbidden() #"
+    control.load_labware({"nickname": "plate", "ot_default": True, "loadname": supplied, "location": "1"})
+    statement, = ast.parse(control.invoked[0]).body
+    assert isinstance(statement, ast.Assign)
+    assert ast.literal_eval(statement.value.keywords[0].value) == supplied
+    control._load_custom_labware("custom", {"parameters": {"loadName": supplied}}, "2")
+    statement, = ast.parse(control.invoked[-1]).body
+    assert isinstance(statement, ast.Assign)
+    assert ast.literal_eval(statement.value.keywords[0].value)["parameters"]["loadName"] == supplied
+
+
+def test_setup_identifiers_cannot_inject_remote_python():
+    control = RecordingControl()
+    with pytest.raises(ValueError, match="identifier"):
+        control.load_module({"nickname": "m; forbidden() #", "module_name": "temperature module", "location": "1"})
+    assert control.invoked == []
+
+
 # ---- typed readback ------------------------------------------------------
 
 

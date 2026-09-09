@@ -52,6 +52,7 @@ async def test_no_tool_can_move_the_robot():
 @pytest.mark.asyncio
 async def test_exposes_reads_and_proposal_only():
     assert await _tool_names() == {
+        "get_equipment_docs",
         "get_status",
         "get_deck",
         "get_consumables",
@@ -70,6 +71,16 @@ async def test_every_tool_has_a_docstring():
     server = build_server(Gateway("http://gateway.invalid"), instance="test")
     for tool in await server.list_tools():
         assert tool.description and len(tool.description) > 40, tool.name
+
+
+@pytest.mark.asyncio
+async def test_equipment_docs_only_reads_the_guide():
+    gateway = Mock(spec=Gateway)
+    gateway.get.return_value = {"documentation_version": "1"}
+    server = build_server(gateway, instance="test")
+    await server.call_tool("get_equipment_docs", {})
+    gateway.get.assert_called_once_with("/docs/agent")
+    gateway.post.assert_not_called()
 
 
 def test_gateway_surfaces_the_devices_own_refusal(monkeypatch):

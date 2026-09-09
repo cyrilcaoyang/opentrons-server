@@ -58,7 +58,9 @@ _ROW_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 # A rack is identified by the deck slot it sits in — see
 # ``OT2Service.register_tiprack_slots`` for why. Kept as a literal rather than
 # imported from deck.py so this store stays dependency-free.
-_SLOT_KEYS = frozenset(str(i) for i in range(1, 13))
+from .robot_profile import PROFILE
+
+_SLOT_KEYS = frozenset(PROFILE.slots)
 
 # Statuses that mean "this tip is pickable by anyone".
 _FRESH_STATUSES = {"", "new", "unused", "clean", "available"}
@@ -581,7 +583,7 @@ class TipStateStore:
         key = str(key)
         if key not in _SLOT_KEYS:
             raise ValueError(
-                f"Tip racks are keyed by deck slot (1-12); got {key!r}. "
+                f"Tip racks are keyed by deck slot ({PROFILE.model}); got {key!r}. "
                 "A rack's identity is the slot it sits in."
             )
         return key

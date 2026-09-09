@@ -118,7 +118,9 @@ def test_allowed_actions_shrink_to_offline_safe_set(monkeypatch):
     _fail_probes(monkeypatch, service, _OT2_UNREACHABLE_AFTER)
 
     actions = set(service.allowed_actions())
-    assert actions <= _OFFLINE_SAFE_ACTIONS
+    assert actions <= _OFFLINE_SAFE_ACTIONS | {"stop"}
+    # A software stop may still attempt its own connection during an outage.
+    assert "stop" in actions
     assert "shutdown" in actions
     assert not actions & {"home", "setup", "aspirate", "lights.set", "startup"}
 

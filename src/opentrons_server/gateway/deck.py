@@ -44,7 +44,9 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-SLOTS = [str(i) for i in range(1, 13)]  # "1".."12"
+from .robot_profile import PROFILE
+
+SLOTS = list(PROFILE.slots)
 
 # Standard well-plate / tip-rack grids keyed by total well count -> (rows, columns).
 # rows <= columns by Opentrons landscape convention.
@@ -220,6 +222,33 @@ def normalize_repl_slots(
     return out
 
 
+def run_slot_for(entry: Dict[str, Any], run_doc: Dict[str, Any]) -> Optional[str]:
+    """Resolve deck/module/adapter nesting from observed run locations only."""
+    items = {item.get("id"): item for item in [*(run_doc.get("labware") or []),
+                                                *(run_doc.get("modules") or [])] if item.get("id")}
+    location = entry.get("location")
+    seen = set()
+    while isinstance(location, dict):
+        if "slotName" in location:
+            slot = str(location["slotName"])
+            return slot if slot in SLOTS else None
+        parent = location.get("moduleId") or location.get("labwareId")
+        if parent is None or parent in seen or parent not in items:
+            return None
+        seen.add(parent)
+        location = items[parent].get("location")
+    return None
+
+
+def normalize_run_modules(run_doc: Optional[Dict[str, Any]]) -> Dict[str, SlotModule]:
+    if not run_doc:
+        return {}
+    return {slot: SlotModule(module_name=item.get("model") or "unknown",
+                             serial_number=item.get("serialNumber"))
+            for item in run_doc.get("modules", [])
+            if (slot := run_slot_for(item, run_doc)) is not None}
+
+
 def normalize_run_slots(run_doc: Optional[Dict[str, Any]]) -> Dict[str, SlotLabware]:
     """Map an active robot-server run's labware list to per-slot :class:`SlotLabware`.
 
@@ -234,21 +263,23 @@ def normalize_run_slots(run_doc: Optional[Dict[str, Any]]) -> Dict[str, SlotLabw
     out: Dict[str, SlotLabware] = {}
     if not run_doc:
         return out
-    for lw in run_doc.get("labware") or []:
-        location = lw.get("location") or {}
-        # Off-deck labware carries the bare string "offDeck", not a dict — skip it
-        # (found live 2026-07-14: it 500'd /status after a move-labware OFF_DECK).
-        if not isinstance(location, dict):
+    labwares = run_doc.get("labware") or []
+    # A carrier underneath another labware must not hide its contents.
+    parents = {lw["location"].get("labwareId") for lw in labwares if isinstance(lw.get("location"), dict)}
+    parents.discard(None)
+    for lw in labwares:
+        if lw.get("id") in parents:
             continue
-        slot = location.get("slotName")
+        slot = run_slot_for(lw, run_doc)
         if slot is None:
             continue
-        slot = str(slot)
-        if slot not in SLOTS:
-            continue
-        out[slot] = make_slot_labware(
-            lw.get("loadName") or "",
-            display_name=lw.get("displayName"),
+        load_name = lw.get("loadName") or ""
+        if not load_name and lw.get("definitionUri"):
+            parts = lw["definitionUri"].split("/")
+            if len(parts) == 3:
+                load_name = parts[1]
+        out[slot] = make_slot_labware(load_name, display_name=lw.get("displayName")).model_copy(
+            update={"nickname": lw.get("id")}
         )
     return out
 
@@ -271,6 +302,7 @@ def _kinds_agree(a: SlotLabware, b: SlotLabware) -> bool:
 def build_deck(
     *,
     run: Optional[Dict[str, SlotLabware]] = None,
+    run_modules: Optional[Dict[str, SlotModule]] = None,
     repl: Optional[Dict[str, Union[SlotLabware, SlotModule]]] = None,
     declared: Optional[Dict[str, Union[SlotLabware, SlotModule]]] = None,
     loaded_plate: Optional[LoadedPlate] = None,
@@ -321,8 +353,8 @@ def build_deck(
     for slot in SLOTS:
         observed: Optional[SlotLabware] = None
         observed_source: Optional[DeckSource] = None
-        module: Optional[SlotModule] = None
-        module_source: Optional[DeckSource] = None
+        module: Optional[SlotModule] = (run_modules or {}).get(slot)
+        module_source: Optional[DeckSource] = "run" if module is not None else None
 
         if slot in run:
             observed = run[slot]
@@ -534,7 +566,7 @@ class DeckDeclarationStore:
         for slot, value in mapping.items():
             slot = str(slot)
             if slot not in SLOTS:
-                raise ValueError(f"Invalid slot {slot!r}; expected '1'..'12'")
+                raise ValueError(f"Invalid slot {slot!r}; expected one of {SLOTS}")
             if value is None:
                 continue
             resolved[slot] = _coerce_declaration(value)

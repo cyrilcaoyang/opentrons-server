@@ -1,6 +1,6 @@
 import type { DeviceDeck, RobotModule } from "../lib/types";
 import {
-  DECK_ROWS,
+  deckRows,
   TEMP_FAMILIES,
   buildSlotView,
   computeOverhangReadouts,
@@ -134,9 +134,9 @@ export interface DeckPanelProps {
   legacyLabware?: Record<string, string>;
   /** Live module telemetry (details.robot.modules) for readout pairing. */
   robotModules?: RobotModule[];
-  selectedSlot?: number | null;
+  selectedSlot?: number | string | null;
   /** Omit for a read-only deck (cells render as plain, non-clickable tiles). */
-  onSelectSlot?: (slot: number | null) => void;
+  onSelectSlot?: (slot: number | string | null) => void;
   /** "tile" = fixed 160×120 cells; "page" = responsive full-width cells. */
   variant?: "tile" | "page";
   /** Tip-tracker summaries (`details.tip_racks`). When given, a tip rack's
@@ -160,6 +160,8 @@ export function DeckPanel({
   variant = "tile",
   tipRacks = [],
 }: DeckPanelProps) {
+  const rows = deckRows(deviceDeck);
+  const columns = rows[0].length;
   const migrated = deviceDeck != null;
   const page = variant === "page";
   const interactive = onSelectSlot != null;
@@ -176,7 +178,7 @@ export function DeckPanel({
    * rack: an untracked rack has no state to show, and inventing one is the
    * failure this exists to avoid.
    */
-  function wellKindsFor(v: SlotView, slot: number): Record<string, string> | undefined {
+  function wellKindsFor(v: SlotView, slot: number | string): Record<string, string> | undefined {
     if (!v.isTiprack) return undefined;
     const summary = tipRacks.find((r) => r.slot === String(slot));
     if (!summary) return undefined;
@@ -203,9 +205,9 @@ export function DeckPanel({
           ? "grid w-full gap-x-2 gap-y-1 sm:gap-x-3 sm:gap-y-1.5"
           : "grid justify-center gap-[10px] overflow-x-auto"
       }
-      style={{ gridTemplateColumns: page ? "repeat(3, minmax(0, 1fr))" : "repeat(3, 160px)" }}
+      style={{ gridTemplateColumns: page ? `repeat(${columns}, minmax(0, 1fr))` : `repeat(${columns}, 160px)` }}
     >
-      {DECK_ROWS.flat().map((slot) => {
+      {rows.flat().map((slot) => {
         const v = buildSlotView(slot, deviceDeck, legacyLabware);
         const selected = selectedSlot === slot;
         const mismatch = v.state === "mismatch";

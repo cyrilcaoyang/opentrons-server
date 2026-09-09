@@ -24,6 +24,8 @@ Every request/response uses the ``{"data": {...}}`` envelope and carries the
 from __future__ import annotations
 
 import os
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
@@ -628,6 +630,7 @@ class RunEngineClient:
         self.command_timeout_s = command_timeout_s
         self.request_timeout_s = request_timeout_s
         self.run_id: Optional[str] = None
+        self._stop_requested = threading.Event()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -663,6 +666,31 @@ class RunEngineClient:
         except RunEngineError:
             pass  # shutdown is best-effort; the run id is discarded regardless
 
+    def stop_and_confirm(self, timeout_s: float = 10.0) -> None:
+        """Stop this run over a separate connection, then require stopped readback.
+
+        Latch before I/O so composite operations cannot send their next command.
+        A timeout is an unknown outcome, never an acknowledgment of stopped motion.
+        """
+        self._stop_requested.set()
+        if self.run_id is None:
+            raise RunEngineError("no active run to stop")
+        other = RunEngineClient(self.base_url, opentrons_version=self._headers["Opentrons-Version"],
+                                request_timeout_s=min(timeout_s, self.request_timeout_s))
+        other.run_id = self.run_id
+        deadline = time.monotonic() + timeout_s
+        try:
+            other._request("POST", f"/runs/{self.run_id}/actions",
+                           json_body={"data": {"actionType": "stop"}},
+                           timeout=other.request_timeout_s)
+            while time.monotonic() < deadline:
+                if other.get_run().get("status") == "stopped":
+                    return
+                time.sleep(0.1)
+            raise TimeoutError("stop requested but robot did not confirm stopped")
+        finally:
+            other.close()
+
     def close(self) -> None:
         if self._owns_session:
             self._session.close()
@@ -682,6 +710,8 @@ class RunEngineClient:
         Returns the command resource. Raises :class:`CommandFailed` if the command
         reached a terminal ``failed`` status.
         """
+        if self._stop_requested.is_set():
+            raise OSError("run stopped; no further commands permitted")
         if self.run_id is None:
             raise RunEngineError("no active run; call create_run() first")
         command_type, params = command
@@ -707,6 +737,8 @@ class RunEngineClient:
             params=params_q,
             timeout=read_timeout,
         )
+        if self._stop_requested.is_set():
+            raise OSError("stop requested during command; inspect its outcome")
         status = result.get("status")
         if status == "failed":
             raise CommandFailed(result)

@@ -61,17 +61,21 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import threading
+from functools import wraps
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ValidationError
 
+from .advanced import ADVANCED_ACTIONS
 from .models import (
     ClaimedBy,
     DeckDeclareRequest,
     LightsRequest,
     LiquidMoveRequest,
+    DispenseRequest,
     MoveLabwareRequest,
     MoveToRequest,
     PlateLoadRequest,
@@ -139,7 +143,7 @@ PLAN_ACTIONS: Dict[str, ActionSpec] = {
     "move_to": ActionSpec(MoveToRequest, True, lambda svc, a: svc.move_to(a)),
     "pick_up_tip": ActionSpec(TipRequest, False, lambda svc, a: svc.pick_up_tip(a)),
     "aspirate": ActionSpec(LiquidMoveRequest, False, lambda svc, a: svc.aspirate(a)),
-    "dispense": ActionSpec(LiquidMoveRequest, False, lambda svc, a: svc.dispense(a)),
+    "dispense": ActionSpec(DispenseRequest, False, lambda svc, a: svc.dispense(a)),
     "drop_tip": ActionSpec(TipRequest, False, lambda svc, a: svc.drop_tip(a)),
     "move_labware": ActionSpec(
         MoveLabwareRequest, False, lambda svc, a: svc.move_labware(a)
@@ -187,6 +191,13 @@ PLAN_ACTIONS: Dict[str, ActionSpec] = {
         TempmodDeactivateRequest, True, lambda svc, a: svc.deactivate_tempmod(a)
     ),
 }
+
+
+for _name, _operation in ADVANCED_ACTIONS.items():
+    PLAN_ACTIONS[_name] = ActionSpec(
+        _operation.model, _operation.idempotent,
+        lambda svc, args, name=_name: svc.advanced_action(name, args),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -356,14 +367,24 @@ def compute_step_hash(steps: Sequence[PlanStep]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _synchronized(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return call
+
+
 @dataclass
 class PlanStore:
     """In-memory plan registry. See the module docstring on why not persisted."""
 
     _plans: Dict[str, Plan] = field(default_factory=dict)
+    _lock: Any = field(default_factory=threading.RLock, repr=False)
 
     # -- lifecycle ---------------------------------------------------------
 
+    @_synchronized
     def create(self, steps: Sequence[PlanStep], *, created_by: str) -> Plan:
         if not steps:
             raise StepValidationError("a plan needs at least one step")
@@ -371,7 +392,7 @@ class PlanStore:
             step.validated_args()  # layer 1, at proposal time
         plan = Plan(
             plan_id=secrets.token_urlsafe(12),
-            steps=list(steps),
+            steps=[step.model_copy(deep=True) for step in steps],
             step_hash=compute_step_hash(steps),
             created_at=datetime.now(timezone.utc),
             created_by=created_by,
@@ -380,15 +401,18 @@ class PlanStore:
         self._plans[plan.plan_id] = plan
         return plan
 
+    @_synchronized
     def get(self, plan_id: str) -> Plan:
         try:
             return self._plans[plan_id]
         except KeyError:
             raise PlanNotFound(f"no plan {plan_id!r}") from None
 
+    @_synchronized
     def list(self) -> List[Plan]:
         return sorted(self._plans.values(), key=lambda p: p.created_at, reverse=True)
 
+    @_synchronized
     def replace_steps(self, plan_id: str, steps: Sequence[PlanStep]) -> Plan:
         """Revise a plan — which always drops it back to ``draft``.
 
@@ -402,7 +426,7 @@ class PlanStore:
             raise StepValidationError("a plan needs at least one step")
         for step in steps:
             step.validated_args()
-        plan.steps = list(steps)
+        plan.steps = [step.model_copy(deep=True) for step in steps]
         plan.step_hash = compute_step_hash(steps)
         plan.results = [StepResult(action=s.action) for s in steps]
         plan.status = "draft"
@@ -411,6 +435,7 @@ class PlanStore:
 
     # -- the gate ----------------------------------------------------------
 
+    @_synchronized
     def approve(
         self,
         plan_id: str,
@@ -449,6 +474,7 @@ class PlanStore:
         plan.status = "approved"
         return plan
 
+    @_synchronized
     def check_executable(self, plan_id: str, *, claimed_by: Optional[ClaimedBy]) -> Plan:
         """Every reason a plan may not run, checked in one place.
 
@@ -469,25 +495,27 @@ class PlanStore:
             raise PlanHashMismatch("plan changed after approval")
         if claimed_by is None:
             raise ApprovalRequiresClaim("no live claim; the approving operator is gone")
-        if claimed_by.session_id != auth.session_id:
+        if claimed_by.session_id != auth.session_id or claimed_by.owner != auth.owner:
             raise ApprovalRequiresClaim(
                 "the claim is held by a different session than the one that approved "
                 "this plan; have the current holder review it"
             )
         return plan
 
+    @_synchronized
     def abort(self, plan_id: str, *, reason: str) -> Plan:
         plan = self.get(plan_id)
         if plan.status in {"executed", "failed", "aborted"}:
             return plan
         for result in plan.results:
-            if result.outcome == "pending":
+            if result.outcome == "pending" and result.started_at is None:
                 result.outcome = "skipped"
         plan.status = "aborted"
         plan.halt_reason = reason
         plan.approval = None
         return plan
 
+    @_synchronized
     def delete(self, plan_id: str) -> None:
         """Dismiss a settled plan — remove it from the registry entirely.
 
@@ -503,6 +531,8 @@ class PlanStore:
             raise PlanStateError(
                 f"plan {plan_id} is {plan.status}; abort it instead of deleting"
             )
+        if any(r.started_at is not None and r.finished_at is None for r in plan.results):
+            raise PlanStateError("a plan with a command still in flight cannot be deleted")
         del self._plans[plan_id]
 
 
@@ -519,36 +549,62 @@ class PlanExecutor:
         self._store = store
 
     def execute(self, plan_id: str, *, claimed_by: Optional[ClaimedBy]) -> Plan:
-        plan = self._store.check_executable(plan_id, claimed_by=claimed_by)
-        plan.status = "executing"
-        plan.halt_reason = None
+        # Validation and reservation must be one transaction: concurrent
+        # execute/revise requests cannot spend or replace the same approval.
+        with self._store._lock:
+            plan = self._store.check_executable(plan_id, claimed_by=claimed_by)
+            plan.status = "executing"
+            plan.halt_reason = None
 
         for index, step in enumerate(plan.steps):
-            result = plan.results[index]
-            try:
-                self._assert_allowed(step)
-            except StepNotAllowed as exc:
-                self._halt(plan, index, str(exc))
-                return plan
-
-            result.started_at = datetime.now(timezone.utc)
+            with self._store._lock:
+                if plan.status != "executing":
+                    return plan
+                result = plan.results[index]
+                try:
+                    self._assert_live_approval(plan)
+                    self._assert_allowed(step)
+                except (ApprovalRequiresClaim, PlanStateError, StepNotAllowed) as exc:
+                    self._halt(plan, index, str(exc))
+                    return plan
+                result.started_at = datetime.now(timezone.utc)
+            # Do not hold the registry lock during I/O: abort must remain
+            # available. A command already started keeps its actual outcome.
             try:
                 spec = step.spec()
                 spec.invoke(self._service, step.validated_args())
             except Exception as exc:
-                result.outcome = "failed"
-                result.message = str(exc)
+                with self._store._lock:
+                    result.outcome = "failed"
+                    result.message = str(exc)
+                    result.finished_at = datetime.now(timezone.utc)
+                    if plan.status == "executing":
+                        self._halt(plan, index + 1, f"{step.action} failed: {exc}")
+                    return plan
+            with self._store._lock:
+                result.outcome = "ok"
                 result.finished_at = datetime.now(timezone.utc)
-                self._halt(plan, index + 1, f"{step.action} failed: {exc}")
-                return plan
-            result.outcome = "ok"
-            result.finished_at = datetime.now(timezone.utc)
+                if plan.status != "executing":
+                    return plan
 
-        plan.status = "executed"
-        # An approval is spent once used. Re-running the same steps is a
-        # new decision, so it needs a new approval.
-        plan.approval = None
-        return plan
+        with self._store._lock:
+            if plan.status != "executing":
+                return plan
+            if getattr(self._service, "_stop_latched", False) is True:
+                self._halt(plan, len(plan.results), "Operator stopped the robot run")
+                return plan
+            plan.status = "executed"
+            plan.approval = None
+            return plan
+
+    def _assert_live_approval(self, plan: Plan) -> None:
+        auth = plan.approval
+        if auth is None or auth.expired():
+            raise PlanStateError("approval expired or revoked; review remaining work before continuing")
+        live = self._service.claims.current()
+        if (live is None or live.expires_at <= datetime.now(timezone.utc)
+                or live.session_id != auth.session_id or live.owner != auth.owner):
+            raise ApprovalRequiresClaim("approving operator no longer holds a live claim")
 
     def _assert_allowed(self, step: PlanStep) -> None:
         """Layer-3 re-check against the device's own live answer.

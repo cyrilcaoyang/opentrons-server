@@ -383,7 +383,7 @@ function ElevationView({
 // ---------------------------------------------------------------------------
 
 export interface PlateInspectorProps {
-  slot: number | null;
+  slot: number | string | null;
   view: SlotView | null;
   /** Tracker summaries from `details.tip_racks`, joined by slot nickname. */
   tipRacks: TipRackSummary[];

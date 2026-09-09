@@ -242,6 +242,7 @@ def _approved(store: PlanStore, *actions: str):
 def test_executes_every_step_in_order_then_spends_the_approval():
     store = PlanStore()
     service = Mock()
+    service.claims.current.return_value = _claimed_by()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     plan = _approved(store, "lights.set", "plate.unload")
 
@@ -262,6 +263,7 @@ def test_a_step_the_device_now_refuses_halts_the_plan():
     fire into one that has since faulted or been seized by an external run."""
     store = PlanStore()
     service = Mock()
+    service.claims.current.return_value = _claimed_by()
     service.allowed_actions.return_value = ["lights.set"]  # plate.unload withdrawn
     plan = _approved(store, "lights.set", "plate.unload")
 
@@ -273,11 +275,27 @@ def test_a_step_the_device_now_refuses_halts_the_plan():
     service.unload_plate.assert_not_called()
 
 
+@pytest.mark.parametrize("final_step", [False, True])
+def test_stop_between_steps_or_after_final_ack_prevents_plan_success(final_step):
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service._stop_latched = False
+    service.allowed_actions.side_effect = lambda: (["stop", "shutdown"] if service._stop_latched else ["lights.set", "plate.unload"])
+    service.set_lights.side_effect = lambda _: setattr(service, "_stop_latched", True)
+    plan = _approved(store, *(["lights.set"] if final_step else ["lights.set", "plate.unload"]))
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+    assert done.status == "failed"
+    assert done.approval is None
+    service.unload_plate.assert_not_called()
+
+
 def test_a_failing_step_halts_and_skips_the_rest():
     """Fail-fast, never continue-past-error: later steps of a pipetting
     sequence assume the earlier ones happened."""
     store = PlanStore()
     service = Mock()
+    service.claims.current.return_value = _claimed_by()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     service.set_lights.side_effect = RuntimeError("robot said no")
     plan = _approved(store, "lights.set", "plate.unload")
@@ -293,6 +311,7 @@ def test_a_failing_step_halts_and_skips_the_rest():
 def test_execute_refuses_an_unapproved_plan_without_touching_the_device():
     store = PlanStore()
     service = Mock()
+    service.claims.current.return_value = _claimed_by()
     plan = store.create(_steps("lights.set"), created_by="agent")
 
     with pytest.raises(PlanStateError):

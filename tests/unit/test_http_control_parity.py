@@ -669,3 +669,28 @@ def test_unqualified_location_still_defaults_to_the_well_top():
         "origin": "top",
         "offset": {"x": 0, "y": 0, "z": 0.0},
     }
+
+
+@pytest.mark.parametrize("direct", [True, False])
+def test_absolute_pipette_motion_preserves_direct_flag_without_extra_retract(direct):
+    ctl, client = _loaded_control()
+    client.commands.clear()
+    ctl.get_location_absolute(100, 200, 30)
+    ctl.move_to_pip("p300", force_direct=direct)
+    assert len(client.commands) == 1
+    name, params = client.commands[0]
+    assert name == "moveToCoordinates"
+    assert params["forceDirect"] is direct
+    assert params["coordinates"]["z"] == 30
+
+
+def test_explicit_air_gap_moves_above_requested_well_once():
+    ctl, client = _loaded_control()
+    client.commands.clear()
+    ctl.get_location_from_labware("plate", "B2")
+    ctl.air_gap("p300", 10, height=4)
+    assert [name for name, _ in client.commands] == ["moveToWell", "aspirateInPlace"]
+    move = client.commands[0][1]
+    assert move["wellName"] == "B2"
+    assert move["wellLocation"] == {"origin":"top", "offset":{"x":0, "y":0, "z":4}}
+    assert ctl._pending is None

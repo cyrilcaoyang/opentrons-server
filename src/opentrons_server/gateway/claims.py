@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import secrets
+import threading
+from functools import wraps
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -20,6 +22,14 @@ class UnknownClaim(Exception):
     pass
 
 
+def _synchronized(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return call
+
+
 class ClaimManager:
     """Small single-device claim store.
 
@@ -28,6 +38,7 @@ class ClaimManager:
     """
 
     def __init__(self, heartbeat_fraction: float = 0.5) -> None:
+        self._lock = threading.RLock()
         self._token: Optional[str] = None
         self._owner: Optional[str] = None
         self._session_id: Optional[str] = None
@@ -45,6 +56,7 @@ class ClaimManager:
             self._session_id = None
             self._expires_at = None
 
+    @_synchronized
     def current(self) -> Optional[ClaimedBy]:
         self._clear_if_expired()
         if not self._session_id or not self._owner or not self._expires_at:
@@ -55,6 +67,7 @@ class ClaimManager:
             expires_at=self._expires_at,
         )
 
+    @_synchronized
     def acquire(self, request: ClaimRequest, *, takeover: bool = False) -> ClaimResponse:
         """Acquire, re-acquire (idempotent for the same session), or take over.
 
@@ -71,7 +84,8 @@ class ClaimManager:
         """
         self._clear_if_expired()
         current = self.current()
-        same_session = current is not None and current.session_id == request.session_id
+        same_session = (current is not None and current.session_id == request.session_id
+                        and current.owner == request.owner)
         if current is not None and not same_session:
             if not (takeover and current.owner == request.owner):
                 retry_after_s = max(
@@ -89,25 +103,32 @@ class ClaimManager:
         self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._ttl_s)
         return self._response()
 
+    @_synchronized
     def heartbeat(self, token: Optional[str]) -> ClaimResponse:
         if not self.validate(token):
             raise UnknownClaim("claim token is unknown or expired")
         self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=self._ttl_s)
         return self._response()
 
+    @_synchronized
     def release(self, token: Optional[str]) -> None:
-        if token is None or token == self._token:
+        if token is not None and token == self._token:
             self._token = None
             self._owner = None
             self._session_id = None
             self._expires_at = None
 
+    @_synchronized
     def validate(self, token: Optional[str]) -> bool:
         self._clear_if_expired()
         return bool(token and self._token and token == self._token)
 
+    @_synchronized
     def force_clear(self) -> None:
-        self.release(self._token)
+        self._token = None
+        self._owner = None
+        self._session_id = None
+        self._expires_at = None
 
     def _response(self) -> ClaimResponse:
         if self._token is None or self._expires_at is None:

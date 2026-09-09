@@ -229,6 +229,8 @@ export const postStartup = (token: string | null, simulation = false) =>
 export const postShutdown = (token: string | null) =>
   controlPost("shutdown", {}, token);
 
+export const postStop = (token: string | null) => controlPost("stop", {}, token);
+
 export const postPause = (token: string | null) => controlPost("pause", {}, token);
 
 export const postResume = (token: string | null) => controlPost("resume", {}, token);

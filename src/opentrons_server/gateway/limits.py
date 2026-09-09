@@ -43,6 +43,8 @@ import logging
 import os
 from typing import Any, Dict, Optional, Tuple
 
+from .robot_profile import PROFILE, IS_FLEX
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,7 +88,7 @@ def _ot2_extents() -> Tuple[float, float]:
     return fallback
 
 
-MAX_X_MM, MAX_Y_MM = _ot2_extents()
+MAX_X_MM, MAX_Y_MM = (PROFILE.max_x, PROFILE.max_y) if IS_FLEX else _ot2_extents()
 
 # See the module docstring: conservative, not measured. shared-data publishes no
 # Z extent for the OT-2.

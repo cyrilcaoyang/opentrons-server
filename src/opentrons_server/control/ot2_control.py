@@ -19,6 +19,7 @@ Remote calls are built through two small helper layers:
 from __future__ import annotations
 
 import os
+import keyword
 from typing import Any, Dict, List, Optional
 
 from ..transport import SSHClient
@@ -147,16 +148,26 @@ class OT2Control:
         for module_config in modules or []:
             self.load_module(module_config)
 
+    @staticmethod
+    def _validated_identifier(name: str) -> str:
+        if (not isinstance(name, str) or not name.isascii() or not name.isidentifier()
+                or keyword.iskeyword(name) or name in {"protocol", "json", "Point", "Location", "location"}):
+            raise ValueError("nickname must be a non-reserved Python identifier")
+        return name
+
     def _load_custom_labware(self, nickname: str, labware_config: Dict, location: str):
-        loadname = labware_config["parameters"]["loadName"]
-        self.invoke(f"{loadname}={labware_config}")
-        self.invoke(f"{nickname} = protocol.load_labware_from_definition(labware_def = {loadname}, location = '{location}')")
+        nickname = self._validated_identifier(nickname)
+        # The definition is data, including its loadName. Never use a name
+        # inside a custom definition as a Python assignment target.
+        self.invoke(f"{nickname} = protocol.load_labware_from_definition(labware_def = {labware_config!r}, location = {location!r})")
 
     def _load_default_labware(self, nickname: str, loadname: str, location: str):
-        self.invoke(f"{nickname} = protocol.load_labware(load_name = '{loadname}', location = '{location}')")
+        nickname = self._validated_identifier(nickname)
+        self.invoke(f"{nickname} = protocol.load_labware(load_name = {loadname!r}, location = {location!r})")
 
     def _load_default_instrument(self, nickname: str, instrument_name: str, mount: str):
-        self.invoke(f"{nickname} = protocol.load_instrument(instrument_name = '{instrument_name}', mount = '{mount}')")
+        nickname = self._validated_identifier(nickname)
+        self.invoke(f"{nickname} = protocol.load_instrument(instrument_name = {instrument_name!r}, mount = {mount!r})")
 
     def _load_custom_instrument(self, nickname: str, instrument_config: Dict, mount: str):
         raise NotImplementedError("custom instrument not implemented")
@@ -177,17 +188,18 @@ class OT2Control:
             self._load_custom_instrument(nickname=instrument["nickname"], instrument_config=instrument["config"], mount=instrument["mount"])
 
     def load_module(self, module: Dict):
-        nickname = module["nickname"]
+        nickname = self._validated_identifier(module["nickname"])
         module_name = module["module_name"]
         location = module["location"]
         adapter = module.get("adapter")
-        self.invoke(f"{nickname} = protocol.load_module(module_name = '{module_name}', location = '{location}')")
+        self.invoke(f"{nickname} = protocol.load_module(module_name = {module_name!r}, location = {location!r})")
         if adapter:
-            self.invoke(f"{nickname}_adapter = {nickname}.load_adapter(name = '{adapter}')")
+            self.invoke(f"{nickname}_adapter = {nickname}.load_adapter(name = {adapter!r})")
 
     def load_trash_bin(self, nickname: str = "default_trash", location: str = "A3"):
         """Flex only; the OT-2's fixed trash is always present in slot 12."""
-        self.invoke(f"{nickname} = protocol.load_trash_bin(location = '{location}')")
+        nickname = self._validated_identifier(nickname)
+        self.invoke(f"{nickname} = protocol.load_trash_bin(location = {location!r})")
 
     def remove_labware(self, labware_nickname: str):
         self.invoke(f"deck_pos = {labware_nickname}.parent")

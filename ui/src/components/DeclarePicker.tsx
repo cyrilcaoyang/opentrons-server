@@ -23,7 +23,7 @@ export function DeclarePicker({
   onDeclare,
   customEntries = [],
 }: {
-  selectedSlot: number | null;
+  selectedSlot: number | string | null;
   /** The declare string currently held by the selected slot (or null). */
   currentDeclare: string | null;
   locked: boolean;

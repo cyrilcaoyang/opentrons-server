@@ -67,7 +67,8 @@ def _fake_openai(monkeypatch, responses):
         calls["sent"].append(kwargs)
         return responses.pop(0)
 
-    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=Mock())
+    calls["client"] = client
     monkeypatch.setattr(
         assistant_mod, "OpenAI", lambda **_kw: client, raising=False
     )
@@ -157,6 +158,7 @@ def test_no_tool_can_move_the_robot():
     refusals and tempt the model to claim it had started work."""
     names = {t["function"]["name"] for t in _tool_schemas()}
     assert names == {
+        "get_equipment_docs",
         "get_status",
         "get_deck",
         "get_consumables",
@@ -361,9 +363,9 @@ def test_chat_requires_the_claim(monkeypatch):
     resp = client.post("/assistant/chat", json={"messages": [{"role": "user", "content": "hi"}]})
     assert resp.status_code == 423
 
-    client.post("/control/claim", json=CLAIM)
+    token = client.post("/control/claim", json=CLAIM).json()["claim_token"]
     _fake_openai(monkeypatch, [_text("Hello.")])
-    ok = client.post("/assistant/chat", json={"messages": [{"role": "user", "content": "hi"}]})
+    ok = client.post("/assistant/chat", json={"messages": [{"role": "user", "content": "hi"}]}, headers={"X-Claim-Token": token})
     assert ok.status_code == 200
     assert ok.json()["reply"] == "Hello."
 
@@ -371,12 +373,13 @@ def test_chat_requires_the_claim(monkeypatch):
 def test_stream_endpoint_emits_sse_progress(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
     client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
-    client.post("/control/claim", json=CLAIM)
+    token = client.post("/control/claim", json=CLAIM).json()["claim_token"]
     _fake_openai(monkeypatch, [_tool_call("get_status", {}), _text("Hello.")])
 
     response = client.post(
         "/assistant/chat/stream",
         json={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"X-Claim-Token": token},
     )
 
     assert response.status_code == 200
@@ -530,3 +533,66 @@ def test_searched_paths_are_deduped(monkeypatch):
 def test_explicit_env_file_is_the_only_candidate(monkeypatch, tmp_path):
     monkeypatch.setenv("OT2_ENV_FILE", str(tmp_path / "custom.env"))
     assert assistant_mod.env_file_candidates() == [tmp_path / "custom.env"]
+
+
+@pytest.mark.parametrize("field,value", [("MAX_TOKENS", "bad"), ("MAX_TOKENS", "-1"),
+                                        ("TIMEOUT_S", "nan"), ("TIMEOUT_S", "0")])
+def test_bad_numeric_config_disables_only_assistant(monkeypatch, field, value):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-key")
+    monkeypatch.setenv(f"OT2_ASSISTANT_{field}", value)
+    client = TestClient(create_app(dry_run=True, auto_reconnect=False))
+    health = client.get("/assistant/health")
+    assert health.status_code == 200
+    assert health.json()["configured"] is False
+    assert field in health.json()["reason"]
+    assert client.get("/status").status_code == 200
+
+
+def test_openai_key_without_explicit_provider_is_not_sent_to_openrouter(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OT2_ASSISTANT_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-key")
+    assert "OT2_ASSISTANT_BASE_URL" in AssistantConfig.from_env().unavailable_reason()
+
+
+def test_environment_key_precedes_other_provider_key_from_file(tmp_path, monkeypatch):
+    _write_env(tmp_path, "OPENROUTER_API_KEY=file-key\n")
+    monkeypatch.setenv("OT2_ENV_FILE", str(tmp_path / ".env"))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "environment-key")
+    monkeypatch.setenv("OT2_ASSISTANT_BASE_URL", "http://provider.invalid/v1")
+    config = AssistantConfig.from_env()
+    assert config.api_key == "environment-key" and config.key_source == "environment"
+
+
+def test_model_client_closed_after_completion_and_exception(monkeypatch):
+    calls = _fake_openai(monkeypatch, [_text("hello")])
+    assistant = Assistant(OT2Service(dry_run=True), PlanStore(), _config())
+    assistant.chat([{"role": "user", "content": "hi"}])
+    calls["client"].close.assert_called_once()
+    with pytest.raises(IndexError):
+        assistant.chat([{"role": "user", "content": "hi again"}])
+    assert calls["client"].close.call_count == 2
+
+
+def test_claim_loss_after_model_response_cannot_create_draft(monkeypatch):
+    calls = _fake_openai(monkeypatch, [_tool_call("propose_plan", {"steps": [{"action": "home", "args": {}}]})])
+    authorization = Mock(side_effect=[None, RuntimeError("claim lost")])
+    plans = PlanStore()
+    assistant = Assistant(OT2Service(dry_run=True), plans, _config(), ensure_authorized=authorization)
+    with pytest.raises(RuntimeError, match="claim lost"):
+        assistant.chat([{"role": "user", "content": "home"}])
+    assert plans.list() == []
+    calls["client"].close.assert_called_once()
+
+
+def test_flex_prompt_does_not_assume_ot2_fixed_trash(monkeypatch):
+    from opentrons_server.gateway.robot_profile import profile_for
+    monkeypatch.setattr(assistant_mod, "PROFILE", profile_for("Flex"))
+    monkeypatch.setattr(assistant_mod, "IS_FLEX", True)
+    calls = _fake_openai(monkeypatch, [_text("hello")])
+    Assistant(OT2Service(dry_run=True), PlanStore(), _config()).chat([{"role": "user", "content": "hi"}])
+    prompt = calls["sent"][0]["messages"][0]["content"]
+    assert "Opentrons Flex" in prompt and "no assumed fixed trash" in prompt
+    assert "force_direct=true" in prompt
+    assert "`stop`" in prompt

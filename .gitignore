@@ -182,3 +182,6 @@ ui/node_modules/
 # convention) accidentally excludes the SPA's TypeScript lib source dir. The
 # parent dirs (ui/src/) are not ignored, so this negation re-includes it.
 !ui/src/lib/
+
+# Persistent operator stop latch (per gateway)
+ot2_stop_state.json

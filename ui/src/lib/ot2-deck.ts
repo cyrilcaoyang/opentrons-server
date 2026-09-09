@@ -36,6 +36,13 @@ export const DECK_ROWS: number[][] = [
   [1, 2, 3],
 ];
 
+export function deckRows(deck: DeviceDeck | null): (number | string)[][] {
+  if (deck?.slots["A1"]) {
+    return ["A", "B", "C", "D"].map((row) => [1, 2, 3, 4].map((col) => `${row}${col}`));
+  }
+  return DECK_ROWS;
+}
+
 // Grid (rows × columns) per normalized labware `kind`. Used as a fallback when
 // the device doesn't send rows/columns, and for legacy kind strings.
 export const KIND_GRID: Record<string, { rows: number; columns: number }> = {
@@ -179,7 +186,7 @@ export function declaredMapFromDeck(deck: DeviceDeck): Record<string, string> {
  */
 export function nextDeclaration(
   declaredMap: Record<string, string>,
-  slot: number,
+  slot: number | string,
   value: string | null,
 ): Record<string, string> {
   const next: Record<string, string> = { ...declaredMap };
@@ -216,7 +223,7 @@ export interface SlotView {
 }
 
 export function buildSlotView(
-  slot: number,
+  slot: number | string,
   deviceDeck: DeviceDeck | null,
   legacyLabware: Record<string, string>,
 ): SlotView {
@@ -300,8 +307,8 @@ export interface PairedModule {
 export function pairModuleSlots(
   deviceDeck: DeviceDeck | null,
   robotModules: RobotModule[],
-): Map<number, PairedModule> {
-  const moduleSlots = new Map<number, PairedModule>();
+): Map<number | string, PairedModule> {
+  const moduleSlots = new Map<number | string, PairedModule>();
   if (!deviceDeck) return moduleSlots;
   const used = new Set<RobotModule>();
   for (const [slotStr, s] of Object.entries(deviceDeck.slots)) {
@@ -313,13 +320,13 @@ export function pairModuleSlots(
       robotModules.find((m) => !used.has(m) && family != null && moduleFamily(m.type) === family) ??
       null;
     if (live) used.add(live);
-    moduleSlots.set(Number(slotStr), { name: s.module.module_name, live });
+    moduleSlots.set(/^\d+$/.test(slotStr) ? Number(slotStr) : slotStr, { name: s.module.module_name, live });
   }
   return moduleSlots;
 }
 
 export interface OverhangReadout extends PairedModule {
-  moduleSlot: number;
+  moduleSlot: number | string;
 }
 
 /**
@@ -332,12 +339,12 @@ export interface OverhangReadout extends PairedModule {
  */
 export function computeOverhangReadouts(
   deviceDeck: DeviceDeck | null,
-  moduleSlots: Map<number, PairedModule>,
-): Map<number, OverhangReadout> {
-  const overhang = new Map<number, OverhangReadout>();
+  moduleSlots: Map<number | string, PairedModule>,
+): Map<number | string, OverhangReadout> {
+  const overhang = new Map<number | string, OverhangReadout>();
   for (const [slot, m] of moduleSlots) {
     if (moduleFamily(m.name) !== "temperature") continue;
-    if (slot % 3 === 1) continue;
+    if (typeof slot !== "number" || slot % 3 === 1) continue;
     const left = slot - 1;
     const leftSlot = deviceDeck?.slots[String(left)];
     const leftIsFree = !leftSlot || (!leftSlot.module && !leftSlot.labware);
@@ -396,7 +403,7 @@ export function tipRacksFromStatus(status: Status): TipRackSummary[] {
       registered_at: typeof r.registered_at === "string" ? r.registered_at : undefined,
     });
   }
-  return out.sort((a, b) => Number(a.slot) - Number(b.slot));
+  return out.sort((a, b) => a.slot.localeCompare(b.slot, undefined, { numeric: true }));
 }
 
 /** One mounted tip from `details.mounted_tips` — which rack/well the tip on a

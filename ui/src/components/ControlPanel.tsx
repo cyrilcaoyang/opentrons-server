@@ -9,6 +9,7 @@ import {
   type DeckDeclareValue,
   postHome,
   postPause,
+  postStop,
   postResume,
   postReconcile,
   postSetLights,
@@ -168,7 +169,7 @@ function TempModuleControls({
   onSet,
   onOff,
 }: {
-  slot: number;
+  slot: number | string;
   live: RobotModule | null;
   disabled: boolean;
   hint?: string;
@@ -472,9 +473,10 @@ export function ControlPanel({
 }) {
   const { status } = snapshot;
   const { actionError, setActionError, reportError } = useActionErrorState();
-  const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<number | string | null>(null);
   const [declaring, setDeclaring] = useState(false);
   const [pending, setPending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   // Which rack is awaiting a refill confirmation (nickname), if any.
   const [refillConfirm, setRefillConfirm] = useState<string | null>(null);
   // Whether "clear all declared intent" is awaiting its confirmation.
@@ -564,8 +566,8 @@ export function ControlPanel({
   const mismatchSlots = deviceDeck
     ? Object.entries(deviceDeck.slots)
         .filter(([, s]) => s.slot_state === "mismatch")
-        .map(([slot]) => Number(slot))
-        .sort((a, b) => a - b)
+        .map(([slot]) => slot)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
     : [];
 
   /** Attach each labstore-backed slot's full definition before POSTing a
@@ -638,6 +640,15 @@ export function ControlPanel({
       .then(() => refetch())
       .catch((e: unknown) => reportError(e, name))
       .finally(() => setPending(false));
+  }
+
+  function stopRun() {
+    if (locked || stopping) return;
+    setStopping(true);
+    postStop(token)
+      .then(() => refetch())
+      .catch((e: unknown) => reportError(e, "stop"))
+      .finally(() => setStopping(false));
   }
 
   function refillRack(slot: string) {
@@ -852,8 +863,8 @@ export function ControlPanel({
             mid-scroll. */}
         <div className="mx-auto flex w-full max-w-xl flex-col gap-4 lg:mx-0 lg:max-w-none">
           {/* Session controls. The toggle connects/disconnects the GATEWAY control
-              session (NOT robot power); PAUSE pauses a running protocol (not an
-              e-stop).
+              session (NOT robot power); PAUSE applies between commands. STOP RUN
+              requests a software stop of the owned HTTP run.
 
               Sits at the top of the right column rather than spanning the page:
               as a full-width banner it was the widest thing on screen while
@@ -906,13 +917,22 @@ export function ControlPanel({
                 player: exactly one is live at a time, and once paused the play
                 button goes primary so the way out is the only thing lit. */}
             <TileButton
+              onClick={stopRun}
+              disabled={locked || stopping || !allowedActions.includes("stop")}
+              variant="danger"
+              ariaLabel="Stop this robot run"
+              title="Software stop over HTTP. Requires inspection and a fresh session; cannot replace a physical emergency stop."
+            >
+              {stopping ? "STOPPING…" : "STOP RUN"}
+            </TileButton>
+            <TileButton
               onClick={() => runControl("pause", () => postPause(token))}
               disabled={locked || pending || !allowedActions.includes("pause")}
               ariaLabel="Pause the running protocol"
               title={
                 controlHint ??
                 (allowedActions.includes("pause")
-                  ? "Pause a running protocol — not an emergency stop (use the robot's physical e-stop); does not disconnect"
+                  ? "Pause between commands; use STOP RUN to interrupt the owned HTTP run"
                   : isPaused
                     ? "Already paused"
                     : "Nothing to pause")
@@ -1129,7 +1149,7 @@ export function ControlPanel({
             ) : (
               <ul className="flex flex-col gap-2">
                 {Array.from(moduleSlots.entries())
-                  .sort(([a], [b]) => a - b)
+                  .sort(([a], [b]) => String(a).localeCompare(String(b), undefined, { numeric: true }))
                   .map(([slot, m]) => (
                     <li
                       key={slot}

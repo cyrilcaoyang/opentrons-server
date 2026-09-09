@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +36,9 @@ from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from .plans import PLAN_ACTIONS, PlanStep, PlanStore, StepValidationError
+from .plans import PlanStep, PlanStore, StepValidationError
+from .robot_profile import PROFILE, IS_FLEX
+from .documentation import action_catalog, equipment_documentation
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ _EMPTY_REPLY_NUDGE = (
 )
 
 _SYSTEM_PROMPT = """\
-You are the operator assistant for a single Opentrons OT-2 liquid handler, \
+You are the operator assistant for a single Opentrons {robot_model} liquid handler, \
 reached through its gateway. You help with simple, single-robot operations on \
 THIS robot only.
 
@@ -83,7 +86,7 @@ have started, run, or completed an operation — say you have proposed it and \
 that it is waiting for their approval.
 - You cannot connect or disconnect the robot, pause or resume a run, or \
 reconcile an unknown outcome. That list is exact and complete: `startup`, \
-`shutdown`, `pause`, `resume`, `reconcile`. Everything `list_actions` returns \
+`shutdown`, `pause`, `resume`, `stop`, `reconcile`. Everything `list_actions` returns \
 is yours to propose — an action being an assertion about the physical world \
 does not make it operator-only, because approving your draft is how the \
 operator makes that assertion. Never tell the operator to perform an action \
@@ -93,17 +96,18 @@ design come from the operator or their project's protocol. If asked to choose \
 one, decline and ask what they want.
 
 How to work:
+Use `get_equipment_docs` to understand API coverage, naming conventions and \
+limitations (including Python methods that have no gateway endpoint).
 1. Read the state first. A plan built without looking at the deck is a guess.
 2. Check consumables before proposing pipetting — a rack with no fresh tips or \
 an unloaded plate will fail at the first step.
 3. Use the exact argument names from `list_actions`; unknown keys are \
-rejected. Address labware by `labware_nickname`: the setup recipe's nickname \
-when one exists, else the deck slot (e.g. "9"). Address pipettes by the \
+rejected. Address labware by `labware_nickname`: the observed run nickname or ID \
+from status, else the declared deck slot. The setup recipe is not authoritative. Address pipettes by the \
 recipe nickname, else the mount ("left" / "right"). `pick_up_tip` may omit \
 the rack and position entirely — the gateway picks the next available tip \
 from a tracked, size-compatible rack. To discard a tip into the waste, \
-propose `drop_tip` with only the pipette: the fixed trash is the default \
-target and takes no location. Address a temperature module by `module` \
+{trash_guidance} Address a temperature module by `module` \
 (recipe nickname or deck slot). Omit `module` when exactly one temperature \
 module is on the deck. `tempmod.set` starts the ramp and returns immediately \
 — watch current vs target on the deck; it does not wait. \
@@ -111,7 +115,12 @@ module is on the deck. `tempmod.set` starts the ramp and returns immediately \
 4. Propose the smallest plan that does what was asked. Explain each step in one \
 short line.
 5. If a request is ambiguous, out of scope, or unsafe, say so plainly instead \
-of proposing something approximate.
+of proposing something approximate. Never propose a reset or metadata correction \
+just to bypass an interlock. Physical-state corrections require the operator's \
+explicit observation; never infer that a tip or rack is fresh.
+6. Preserve motion intent: force_direct=true omits the Z retract. Constant-height \
+XY motion requires the destination Z to equal the current Z. Never silently \
+replace a requested direct path with an arc or invent a clear path.
 """
 
 
@@ -219,6 +228,7 @@ class AssistantConfig:
     # Where the key came from, for /assistant/health. Answers the only question
     # an operator asks when the bubble stays hidden: "did it see my key?"
     key_source: Optional[str] = None
+    configuration_error: Optional[str] = None
 
     @classmethod
     def from_env(cls) -> "AssistantConfig":
@@ -231,25 +241,43 @@ class AssistantConfig:
                 return value
             return from_file.get(key, default)
 
-        key = setting("OPENROUTER_API_KEY") or setting("OPENAI_API_KEY")
-        source: Optional[str] = None
-        if key:
-            source = (
-                "environment"
-                if (os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY"))
-                else "file"
-            )
+        key = None
+        source = None
+        key_name = None
+        for origin, values in (("environment", os.environ), ("file", from_file)):
+            for name in ("OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+                if values.get(name):
+                    key, source, key_name = values[name], origin, name
+                    break
+            if key:
+                break
+        configuration_error = None
+        base_url = setting("OT2_ASSISTANT_BASE_URL")
+        if key_name == "OPENAI_API_KEY" and not base_url:
+            configuration_error = "OPENAI_API_KEY requires explicit OT2_ASSISTANT_BASE_URL and a model supported by that provider"
+        max_tokens, timeout_s = DEFAULT_MAX_TOKENS, DEFAULT_TIMEOUT_S
+        try:
+            max_tokens = int(setting("OT2_ASSISTANT_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
+            if max_tokens <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            configuration_error = "OT2_ASSISTANT_MAX_TOKENS must be a positive integer"
+        try:
+            timeout_s = float(setting("OT2_ASSISTANT_TIMEOUT_S", str(DEFAULT_TIMEOUT_S)))
+            if not math.isfinite(timeout_s) or timeout_s <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            configuration_error = "OT2_ASSISTANT_TIMEOUT_S must be a positive finite number"
         return cls(
             enabled=(setting("OT2_ASSISTANT_ENABLED", "true") or "true").lower()
             not in {"0", "false", "no", "off"},
             api_key=key,
             model=setting("OT2_ASSISTANT_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL,
-            base_url=setting("OT2_ASSISTANT_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL,
-            max_tokens=int(setting("OT2_ASSISTANT_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)) or 0)
-            or DEFAULT_MAX_TOKENS,
-            timeout_s=float(setting("OT2_ASSISTANT_TIMEOUT_S", str(DEFAULT_TIMEOUT_S)) or 0)
-            or DEFAULT_TIMEOUT_S,
+            base_url=base_url or DEFAULT_BASE_URL,
+            max_tokens=max_tokens,
+            timeout_s=timeout_s,
             key_source=source,
+            configuration_error=configuration_error,
         )
 
     def unavailable_reason(self) -> Optional[str]:
@@ -258,6 +286,8 @@ class AssistantConfig:
             return "assistant disabled (OT2_ASSISTANT_ENABLED=0)"
         if not self.api_key:
             return "no API key configured (set OPENROUTER_API_KEY)"
+        if self.configuration_error:
+            return self.configuration_error
         try:
             import openai  # noqa: F401
         except ImportError:
@@ -277,6 +307,18 @@ def _tool_schemas() -> List[Dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "get_equipment_docs",
+                "description": (
+                    "Read the equipment API guide: capabilities, schemas, units, "
+                    "agent boundaries and remaining Python API gaps. "
+                    "Does not contact the robot."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "get_status",
                 "description": (
                     "Health, activity, components, and which actions the robot "
@@ -289,7 +331,7 @@ def _tool_schemas() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_deck",
-                "description": "The normalized 12-slot deck: labware per slot and its provenance.",
+                "description": "The configured robot deck: labware per slot and its provenance.",
                 "parameters": {"type": "object", "properties": {}},
             },
         },
@@ -361,15 +403,18 @@ class Assistant:
     # validation errors.
     MAX_TOOL_ROUNDS = 16
 
-    def __init__(self, service: Any, plans: PlanStore, config: AssistantConfig) -> None:
+    def __init__(self, service: Any, plans: PlanStore, config: AssistantConfig,
+                 ensure_authorized: Optional[Callable[[], None]] = None) -> None:
         self._service = service
         self._plans = plans
         self._config = config
+        self._ensure_authorized = ensure_authorized
 
     # -- tools -------------------------------------------------------------
 
     def _tools(self) -> Dict[str, Callable[[Dict[str, Any]], Any]]:
         return {
+            "get_equipment_docs": lambda _a: equipment_documentation(),
             "get_status": lambda _a: self._service.get_status().model_dump(mode="json"),
             "get_deck": lambda _a: self._service.get_status()
             .details.get("snapshot", {})
@@ -392,16 +437,7 @@ class Assistant:
 
     @staticmethod
     def _actions() -> Dict[str, Any]:
-        return {
-            "actions": [
-                {
-                    "action": name,
-                    "idempotent": spec.idempotent,
-                    "args_schema": spec.model.model_json_schema() if spec.model else None,
-                }
-                for name, spec in sorted(PLAN_ACTIONS.items())
-            ]
-        }
+        return action_catalog()
 
     def _propose(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Create a draft. Validation errors are returned to the model, not
@@ -468,127 +504,142 @@ class Assistant:
             api_key=self._config.api_key,
             timeout=self._config.timeout_s,
         )
-        tools = self._tools()
-        convo: List[Dict[str, Any]] = [{"role": "system", "content": _SYSTEM_PROMPT}]
-        convo += [{"role": m["role"], "content": m["content"]} for m in messages]
+        try:
+            tools = self._tools()
+            convo: List[Dict[str, Any]] = [{"role": "system", "content": _SYSTEM_PROMPT.format(
+                robot_model=PROFILE.model,
+                trash_guidance=("Flex has no assumed fixed trash: register a physically present bin or name an explicit drop well."
+                                if IS_FLEX else "propose drop_tip with only the pipette when its fixed trash is registered."),
+            )}]
+            convo += [{"role": m["role"], "content": m["content"]} for m in messages]
 
-        used: List[str] = []
-        plan_id: Optional[str] = None
-        empty_nudges = 0
+            used: List[str] = []
+            plan_id: Optional[str] = None
+            empty_nudges = 0
 
-        for round_index in range(self.MAX_TOOL_ROUNDS):
-            yield {"type": "thinking", "round": round_index + 1}
-            response = client.chat.completions.create(
-                model=self._config.model,
-                messages=convo,
-                tools=_tool_schemas(),
-                max_tokens=self._config.max_tokens,
-            )
-            choice = response.choices[0].message
-            calls = getattr(choice, "tool_calls", None) or []
-            if not calls:
-                text = self._message_text(choice)
-                if not text and empty_nudges < _EMPTY_REPLY_NUDGES:
-                    empty_nudges += 1
-                    convo.append({"role": "user", "content": _EMPTY_REPLY_NUDGE})
-                    continue
-                yield {
-                    "type": "complete",
-                    "result": {
-                        "reply": text
-                        or (
-                            "The model finished after reading the robot but "
-                            "returned no reply. Try the request once more, or "
-                            "ask for a smaller step."
-                        ),
-                        "tools_used": used,
-                        "plan_id": plan_id,
-                        "model": response.model,
-                    },
-                }
-                return
-
-            convo.append(
-                {
-                    "role": "assistant",
-                    "content": choice.content or "",
-                    "tool_calls": [
-                        {
-                            "id": c.id,
-                            "type": "function",
-                            "function": {
-                                "name": c.function.name,
-                                "arguments": c.function.arguments,
-                            },
-                        }
-                        for c in calls
-                    ],
-                }
-            )
-            for call in calls:
-                name = call.function.name
-                used.append(name)
-                event_id = f"{round_index + 1}:{call.id}"
-                yield {
-                    "type": "tool_started",
-                    "id": event_id,
-                    "name": name,
-                }
-                try:
-                    args = json.loads(call.function.arguments or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                fn = tools.get(name)
-                if fn is None:
-                    result: Any = {"error": f"unknown tool {name!r}"}
-                else:
-                    try:
-                        result = fn(args)
-                    except Exception as exc:  # surfaced to the model, not the operator
-                        logger.warning("assistant tool %s failed: %s", name, exc)
-                        result = {"error": str(exc)}
-                tool_error = (
-                    str(result["error"])
-                    if isinstance(result, dict) and result.get("error")
-                    else None
+            for round_index in range(self.MAX_TOOL_ROUNDS):
+                if self._ensure_authorized:
+                    self._ensure_authorized()
+                yield {"type": "thinking", "round": round_index + 1}
+                response = client.chat.completions.create(
+                    model=self._config.model,
+                    messages=convo,
+                    tools=_tool_schemas(),
+                    max_tokens=self._config.max_tokens,
                 )
-                yield {
-                    "type": "tool_finished",
-                    "id": event_id,
-                    "name": name,
-                    "success": tool_error is None,
-                    "error": tool_error,
-                }
-                if name == "propose_plan" and isinstance(result, dict):
-                    plan_id = result.get("plan_id") or plan_id
+                choice = response.choices[0].message
+                calls = getattr(choice, "tool_calls", None) or []
+                if not calls:
+                    text = self._message_text(choice)
+                    if not text and empty_nudges < _EMPTY_REPLY_NUDGES:
+                        empty_nudges += 1
+                        convo.append({"role": "user", "content": _EMPTY_REPLY_NUDGE})
+                        continue
+                    yield {
+                        "type": "complete",
+                        "result": {
+                            "reply": text
+                            or (
+                                "The model finished after reading the robot but "
+                                "returned no reply. Try the request once more, or "
+                                "ask for a smaller step."
+                            ),
+                            "tools_used": used,
+                            "plan_id": plan_id,
+                            "model": response.model,
+                        },
+                    }
+                    return
+
                 convo.append(
                     {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": json.dumps(result, default=str),
+                        "role": "assistant",
+                        "content": choice.content or "",
+                        "tool_calls": [
+                            {
+                                "id": c.id,
+                                "type": "function",
+                                "function": {
+                                    "name": c.function.name,
+                                    "arguments": c.function.arguments,
+                                },
+                            }
+                            for c in calls
+                        ],
                     }
                 )
+                for call in calls:
+                    if self._ensure_authorized:
+                        self._ensure_authorized()
+                    name = call.function.name
+                    used.append(name)
+                    event_id = f"{round_index + 1}:{call.id}"
+                    yield {
+                        "type": "tool_started",
+                        "id": event_id,
+                        "name": name,
+                    }
+                    try:
+                        args = json.loads(call.function.arguments or "{}")
+                    except json.JSONDecodeError:
+                        args = {}
+                    fn = tools.get(name)
+                    if fn is None:
+                        result: Any = {"error": f"unknown tool {name!r}"}
+                    else:
+                        try:
+                            result = fn(args)
+                        except Exception as exc:  # surfaced to the model, not the operator
+                            logger.warning("assistant tool %s failed: %s", name, exc)
+                            result = {"error": str(exc)}
+                    tool_error = (
+                        str(result["error"])
+                        if isinstance(result, dict) and result.get("error")
+                        else None
+                    )
+                    yield {
+                        "type": "tool_finished",
+                        "id": event_id,
+                        "name": name,
+                        "success": tool_error is None,
+                        "error": tool_error,
+                    }
+                    if name == "propose_plan" and isinstance(result, dict):
+                        plan_id = result.get("plan_id") or plan_id
+                    convo.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "content": json.dumps(result, default=str),
+                        }
+                    )
 
-        # Out of rounds with the model still calling tools. Say so rather than
-        # inventing a summary of work whose outcome we did not see.
-        yield {
-            "type": "complete",
-            "result": {
-                "reply": (
-                    "I wasn't able to finish that within my tool-call budget. "
-                    "Try asking for one smaller step."
-                ),
-                "tools_used": used,
-                "plan_id": plan_id,
-                "model": self._config.model,
-            },
-        }
+            # Out of rounds with the model still calling tools. Say so rather than
+            # inventing a summary of work whose outcome we did not see.
+            yield {
+                "type": "complete",
+                "result": {
+                    "reply": (
+                        "I wasn't able to finish that within my tool-call budget. "
+                        "Try asking for one smaller step."
+                    ),
+                    "tools_used": used,
+                    "plan_id": plan_id,
+                    "model": self._config.model,
+                },
+            }
+        finally:
+            client.close()
 
     def chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Compatibility wrapper for non-streaming callers."""
-        for event in self.chat_events(messages):
-            if event["type"] == "complete":
-                return event["result"]
+        events = self.chat_events(messages)
+        try:
+            for event in events:
+                if event["type"] == "complete":
+                    return event["result"]
+        finally:
+            events.close()
         raise RuntimeError("assistant turn ended without a completion")
 
 

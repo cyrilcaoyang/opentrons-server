@@ -16,8 +16,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
+from .advanced import ADVANCED_ACTIONS
 from .claims import ClaimConflict, UnknownClaim
 from .deck import DeckDeclarationStore
+from .documentation import action_catalog, equipment_documentation
 from .labware import standard_definition, standard_summaries
 from .models import (
     ClaimRejection,
@@ -30,6 +32,7 @@ from .models import (
     HealthResponse,
     LightsRequest,
     LiquidMoveRequest,
+    DispenseRequest,
     LoadedPlate,
     MoveLabwareRequest,
     MoveToRequest,
@@ -55,7 +58,6 @@ from .assistant import (
     env_file_candidates,
 )
 from .plans import (
-    PLAN_ACTIONS,
     ApprovalRequiresClaim,
     Plan,
     PlanApproveRequest,
@@ -281,7 +283,9 @@ def create_app(
             "Conforms to lab status spec v1.2: this device's primary operation "
             "(what `activity` reports) is a protocol command in flight on the "
             "robot, and `metrics.cycles_total` counts the commands completed "
-            "since the gateway started."
+            "since the gateway started. Read `/docs/agent` for equipment guidance, "
+            "agent boundaries and Python API coverage; `/plans/actions` lists "
+            "proposable actions with their argument schemas."
         ),
     )
     # STATUS_SPEC best practice #10 asks for the dashboard's origin, not `*`.
@@ -440,6 +444,8 @@ def create_app(
             # checked here or OT2_REQUIRE_LOGIN would be silently bypassed.
             if require_login:
                 _require_identity(request)
+            if _resolve_identity(request)[1]:
+                raise HTTPException(status_code=403, detail="propose-only credentials cannot control equipment")
             return
         if service.claims.validate(x_claim_token):
             return
@@ -471,6 +477,15 @@ def create_app(
         snapshot.details["ui_mode"] = ui_mode
         snapshot.details["control_auth"] = control_auth
         return snapshot
+
+    @app.get("/docs/agent", tags=["documentation"])
+    def agent_docs() -> dict[str, Any]:
+        """Read-only equipment guide and generated action schemas for agents.
+
+        Available without a claim, including before startup. Does not contact
+        the robot. Live readiness and installed equipment come from /status.
+        """
+        return equipment_documentation()
 
     @app.get("/labware", tags=["ui"])
     def labware() -> dict[str, Any]:
@@ -593,6 +608,15 @@ def create_app(
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
+    @app.post("/control/stop", response_model=CommandResponse, tags=["control"])
+    def stop(_claim: None = Depends(require_claim)) -> CommandResponse:
+        """Software stop of this gateway's HTTP run; not a hardware emergency stop.
+
+        Returns success only after stopped readback. Requires operator inspection
+        and a fresh session. Remains available while a command is in flight.
+        """
+        return _run_non_idempotent(service.stop, "Run stopped; inspect before restarting")
+
     @app.post("/control/pause", response_model=CommandResponse, tags=["control"])
     def pause(_claim: None = Depends(require_claim)) -> CommandResponse:
         service.pause()
@@ -632,8 +656,23 @@ def create_app(
         return _run_non_idempotent(lambda: service.aspirate(request), "Aspirate complete")
 
     @app.post("/control/dispense", response_model=CommandResponse, tags=["control"])
-    def dispense(request: LiquidMoveRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
+    def dispense(request: DispenseRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
         return _run_non_idempotent(lambda: service.dispense(request), "Dispense complete")
+
+    def advanced_endpoint(name: str):
+        def endpoint(request, _claim: None = Depends(require_claim)) -> CommandResponse:
+            return _run_non_idempotent(
+                lambda: service.advanced_action(name, request), f"{name} complete"
+            )
+        endpoint.__name__ = name
+        endpoint.__annotations__["request"] = ADVANCED_ACTIONS[name].model
+        return endpoint
+
+    for name, operation in ADVANCED_ACTIONS.items():
+        app.add_api_route(
+            operation.path, advanced_endpoint(name), methods=["POST"],
+            response_model=CommandResponse, tags=["control"],
+        )
 
     @app.post("/control/move-labware", response_model=CommandResponse, tags=["control"])
     def move_labware(request: MoveLabwareRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
@@ -847,15 +886,7 @@ def create_app(
         unavailable = config.unavailable_reason()
         if unavailable:
             raise HTTPException(status_code=503, detail=unavailable)
-        if enforce_claims and not service.claims.current():
-            raise ClaimHTTPError(
-                status_code=423,
-                payload={
-                    "detail": "take control of the device before using the assistant",
-                    "claimed_by": None,
-                    "retry_after_s": None,
-                },
-            )
+        require_claim(http_request, http_request.headers.get("X-Claim-Token"))
         return config
 
     @app.get("/assistant/health", tags=["assistant"])
@@ -895,14 +926,18 @@ def create_app(
         # this way: /assistant/health already reports configured-ness openly.
         config = _assistant_config_for_request(http_request)
         try:
-            return Assistant(service, plans, config).chat(
+            return Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
+                http_request, http_request.headers.get("X-Claim-Token")
+            )).chat(
                 [m.model_dump() for m in request.messages]
             )
         except AssistantDisabled as exc:
             raise HTTPException(status_code=503, detail=exc.reason)
+        except (ClaimHTTPError, HTTPException):
+            raise
         except Exception as exc:
-            logger.warning("assistant turn failed: %s", exc)
-            raise HTTPException(status_code=502, detail=f"assistant request failed: {exc}")
+            logger.warning("assistant turn failed (%s)", type(exc).__name__)
+            raise HTTPException(status_code=502, detail=f"assistant request failed ({type(exc).__name__})")
 
     @app.post("/assistant/chat/stream", tags=["assistant"])
     def assistant_chat_stream(
@@ -920,15 +955,19 @@ def create_app(
 
         def events() -> Any:
             try:
-                for event in Assistant(service, plans, config).chat_events(messages):
+                for event in Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
+                    http_request, http_request.headers.get("X-Claim-Token")
+                )).chat_events(messages):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
             except AssistantDisabled as exc:
                 yield f"data: {json.dumps({'type': 'error', 'message': exc.reason})}\n\n"
+            except (ClaimHTTPError, HTTPException):
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Assistant stopped: device claim or identity is no longer valid.'})}\n\n"
             except Exception as exc:
-                logger.warning("assistant streaming turn failed: %s", exc)
+                logger.warning("assistant streaming turn failed (%s)", type(exc).__name__)
                 body = {
                     "type": "error",
-                    "message": f"assistant request failed: {exc}",
+                    "message": f"assistant request failed ({type(exc).__name__})",
                 }
                 yield f"data: {json.dumps(body, default=str)}\n\n"
 
@@ -951,17 +990,7 @@ def create_app(
         first time an action gained a field, and the drift would show up as an
         agent proposing steps the gateway rejects.
         """
-        return {
-            "actions": [
-                {
-                    "action": name,
-                    "idempotent": spec.idempotent,
-                    # None for actions that take no body (home, plate.unload).
-                    "args_schema": spec.model.model_json_schema() if spec.model else None,
-                }
-                for name, spec in sorted(PLAN_ACTIONS.items())
-            ]
-        }
+        return action_catalog()
 
     @app.get("/plans", tags=["plans"])
     def list_plans() -> list[dict[str, Any]]:
@@ -1020,11 +1049,12 @@ def create_app(
         changed under the reviewer and is refused with 409.
         """
         try:
-            plan = plans.approve(
-                plan_id,
-                step_hash=request.step_hash,
-                claimed_by=service.claims.current(),
-            )
+            with plans._lock:
+                plan = plans.approve(
+                    plan_id,
+                    step_hash=request.step_hash,
+                    claimed_by=service.claims.current(),
+                ).model_copy(deep=True)
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
         # Make the approval durable. Plans live in memory and die with the
@@ -1061,9 +1091,9 @@ def create_app(
         # Read the approving owner before executing: execute() spends the
         # approval, so afterwards `plan.approval` is None and the person who
         # authorised the run would be missing from its own completion record.
-        pending = plans.get(plan_id)
-        approver = pending.approval.owner if pending.approval else None
         try:
+            pending = plans.get(plan_id)
+            approver = pending.approval.owner if pending.approval else None
             plan = executor.execute(plan_id, claimed_by=service.claims.current())
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))

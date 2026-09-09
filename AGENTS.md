@@ -114,6 +114,21 @@ lab-skills / dashboard / agents          this repo                        robot
 - **Fail-fast style.** Do not add defensive code that swallows exceptions and
   hides failures — on this device a swallowed error becomes a robot whose state
   nobody can trust. Report truthfully.
+- **Agent API discovery:** `/docs/agent` serves a read-only equipment guide;
+  `/openapi.json` describes HTTP routes and `/plans/actions` supplies proposal
+  schemas. The built-in assistant and agent MCP expose `get_equipment_docs`.
+  Python transport methods are not automatically gateway endpoints; verify
+  the route and plan catalogs before advertising a capability.
+- **Robot profiles:** OT-2 is the default. A separate Flex instance sets
+  `OT2_ROBOT_MODEL=Flex` and `OT2_TRANSPORT=http` before process startup;
+  deck slots and schemas are selected at import. Use the shared profile,
+  not hard-coded numeric slots. See `docs/FLEX_HTTP_SUPPORT.md` for limits.
+- **Direct motion:** preserve `force_direct` on pipette moves. Flex
+  `robot/moveTo` plans an arc; direct gripper motion uses `robot/moveAxesTo`
+  or `robot/moveAxesRelative`. Substituting these changes the physical path.
+- **Stop recovery:** `ot2_stop_state.json` beside the tip-state file (override
+  `OT2_STOP_STATE_PATH`) blocks automatic reconnect after a software stop.
+  Give each gateway its own state paths; do not delete this latch to recover.
 - **Prefer reading source in `.venv/Lib/site-packages/`** over searching online
   for a dependency's usage (`sdl_lab_contract`, `paramiko`, `opentrons`).
 

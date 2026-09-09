@@ -1,6 +1,44 @@
 # Next Steps — OT-2 gateway work tracker
 
-Snapshot as of 2026-07-19 (originally the `develop-http-drive` tracker; that
+## Package review — 2026-09-09
+
+- [x] Fix claim ownership/release, assistant caller authorization, per-step
+  claim checks, plan cancellation/concurrency, and legacy command state gates.
+- [x] Validate gateway references and quote SSH setup data; update assistant
+  robot guidance, provider configuration diagnostics and client cleanup.
+- [x] Verify 624 offline unit tests and UI typecheck; packaged UI build included.
+- [ ] Resolve the legacy SSH manual-labware relocation workflow. Its gripper
+  alias is invalid for OT-2; HTTP relocation already records manual moves.
+- [ ] Update the central SDK/dashboard using the
+  [server handoff](DASHBOARD_UPDATE_PROMPT.md). This gateway commit is not a
+  deployment to either robot.
+
+See [review findings and limits](PACKAGE_REVIEW.md).
+
+## Implementation — 2026-09-08
+
+- [x] Expose shared OT-2 pipetting/module operations with typed HTTP routes,
+  matching proposal schemas, state/claim gates and agent documentation.
+- [x] Add independent HTTP software-stop API/button, confirmation readback,
+  persistent recovery latch and late-completion protection.
+- [x] Add an opt-in Flex profile, alphabetic deck and full 1/8-channel support,
+  managed gripper moves with offsets and native manual gripper commands.
+- [x] Preserve direct versus arced motion explicitly, including gripper XY
+  motion without a Z-retract waypoint.
+- [ ] Operator-planned physical acceptance, including stopping an in-flight
+  setup command and observing module states. Develop/test with fakes only;
+  OT-2 acceptance is Complexation only. No deployment performed.
+- [ ] Migrate central `lab-skills` action definitions and sample-prep callers
+  in their own repositories after reviewing the proposed external changes.
+- [ ] Future features: 96-channel/partial-layout tracking, moving tracked tip
+  racks, sensing/liquid classes, complex transfer compilation, relative pipette
+  helpers, uploaded protocol lifecycle and optional Flex modules. See
+  [coverage](HTTP_API_COVERAGE.md) and [Flex mapping](FLEX_HTTP_SUPPORT.md).
+
+## Earlier work and history
+
+The sections below retain the dated project history. Original snapshot:
+2026-07-19 (the `develop-http-drive` tracker; that
 branch merged to `main`, and the 2026-07-18/19 items land on
 `feature-http-ssh-parity`). Tracks the remaining work on the HTTP run-engine
 transport and the complexation bring-up. Companion to `HTTP_TRANSPORT.md`
@@ -78,10 +116,8 @@ See `HTTP_DRIVE_VALIDATION.md`. Complexation bring-up still not run.
 - ✅ **Multi-channel addressing** — no code change needed: the complexation test
   already uses row-A column addressing for the p20 multi; the `A1→B1` hazard was
   runbook-only and is fixed there. (New finding from the 2026-07-14 run.)
-- **`blow_out` endpoint + flow rate.** `blow_out` exists in the control adapters
-  but has no `/control/blow-out` route and no request field. If a complexation
-  step needs it, add the route + a `flow_rate` field (mirroring
-  aspirate/dispense) and a SkillDef.
+- ✅ **`blow_out` endpoint + flow rate.** `/control/blow-out` and the matching
+  plan action are implemented; `set_flow_rate` configures blow-out flow.
 - ✅ **OT-2 protocol-action SkillDefs** — shipped in `ac-organic-lab`
   2026-07-12 (16 SkillDefs with typed args); `move_to` added 2026-07-18
   alongside the gateway's `POST /control/move-to` (18 SkillDefs total).

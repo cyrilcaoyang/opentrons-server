@@ -473,6 +473,7 @@ class OT2HttpControl:
                     minimum_z_height=minimum_z_height,
                 )
             )
+            self._last_well[pip_name] = loc
 
     # -- tips --------------------------------------------------------------
 
@@ -731,12 +732,14 @@ class OT2HttpControl:
     ) -> None:
         """Emulated: move above the last-touched well's top (protocol-API
         default 5 mm), then aspirate in place."""
-        well = self._last_well.get(pip_name)
+        well = self._pending or self._last_well.get(pip_name)
         if well is None:
             raise RuntimeError(
                 f"air_gap: no current well for {pip_name!r}; aspirate/dispense at "
                 "a well first (mirrors the protocol API's location requirement)"
             )
+        if well["kind"] != "well":
+            raise ValueError("air_gap requires a well location")
         z = float(height) if height is not None else _AIR_GAP_DEFAULT_HEIGHT_MM
         pipette_id = self._pipette_id(pip_name)
         self.client.execute(
@@ -754,6 +757,8 @@ class OT2HttpControl:
             )
         )
         self._volumes[pip_name] = self._volumes.get(pip_name, 0.0) + float(volume)
+        self._last_well[pip_name] = well
+        self._pending = None
 
     def touch_tip(
         self,

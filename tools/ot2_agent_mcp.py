@@ -105,7 +105,7 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
 
     @mcp.tool()
     def get_deck() -> dict:
-        """Normalized 12-slot deck: what labware is on each slot, its kind and
+        """Normalized robot deck: what labware is on each slot, its kind and
         grid, and where that knowledge came from (a live run, the REPL, or an
         operator declaration)."""
         status = gateway.get("/status")
@@ -128,12 +128,20 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
         }
 
     @mcp.tool()
+    def get_equipment_docs() -> dict:
+        """Read equipment capabilities, argument schemas, naming conventions,
+        agent boundaries and remaining Python API gaps. This guide
+        describes the gateway software; read get_status for live readiness.
+        """
+        return gateway.get("/docs/agent")
+
+    @mcp.tool()
     def list_actions() -> dict:
         """The catalog a plan step may draw from, with each action's argument
         schema and whether it is idempotent.
 
         Read this before proposing. Actions not listed here cannot be planned —
-        notably startup, shutdown, pause, resume and reconcile, which are
+        notably startup, shutdown, pause, resume, stop and reconcile, which are
         operator-only by design.
         """
         return gateway.get("/plans/actions")
