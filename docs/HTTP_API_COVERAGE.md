@@ -15,6 +15,7 @@ An available schema does not mean a robot is ready: check `/status` and its
 
 | Operation | Gateway behavior |
 |---|---|
+| Tip disposal | `/control/drop-tip`: omit `labware_nickname` and `position` to use the registered fixed trash; explicit slot `12` / well `A1` attempts an invalid labware load on modern OT-2 servers |
 | Blow out | `/control/blow-out`: explicit well `location`, or `in_place: true`, exclusively |
 | Dispense push-out | Optional `push_out` in microliters on `/control/dispense` |
 | Touch tip | `/control/touch-tip`: pipette, loaded labware, well, radius, vertical offset and speed |
