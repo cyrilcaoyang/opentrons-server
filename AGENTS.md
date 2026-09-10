@@ -74,6 +74,11 @@ lab-skills / dashboard / agents          this repo                        robot
   `opentrons-shared-data`, which silently empties the `/labware` catalog and
   the UI's deck-declare picker. Same class of trap as the Cytation's
   `--extra plr`.
+- **OT-2 trash disposal:** propose `drop_tip` with only the pipette, for
+  example `{"pipette":"right"}`, to use the registered fixed trash. Do not
+  address disposal as labware `"12"` / well `"A1"`: modern robot servers
+  represent it as the `fixedTrash` addressable area, and loading labware into
+  slot 12 fails. Explicit rack/well destinations are for returning tips.
 - **Tests: use `.venv.test`, not `.venv`.**
   `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 532 tests, no
   hardware, about a minute. `.venv/` is the **running services'**
