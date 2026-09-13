@@ -195,7 +195,12 @@ lockout, each hang cost the gateway 2–17 min of "robot unreachable" (median
 4 min; back-to-back hangs hit the lockout — 40 lockout waits against 43
 reloads that day) — about 3.2 h of the 12.6 h after the repoint, and one PyPoe
 down/recovered pair every 30–50 min. The new cycle bounds a hang at roughly
-1–2 min, under the dashboard's two-sweep alert threshold for most events. The
+1–2 min, under the dashboard's two-sweep alert threshold for most events.
+**Verified live on the first hang after the deploy (18:15 UTC the same day):**
+the `-110` detector fired on the first failed check with no confirm wait, the
+driver was reloaded 8 s after the gateway lost the robot, and the gateway had
+it back after **21 s** (watchdog: check failed 18:15:41, reload 18:15:42,
+recovered 18:16:07). The dashboard's 60 s sweep never saw it. The
 previous script and installer are kept on the robot as
 `/data/*.bak-20260913`; restoring them and re-running the installer reverts.
 
