@@ -51,12 +51,19 @@ tailnet IP any more. Both robots' tailscale runs over campus Wi-Fi
 scanning; HTE 2026-09-06, Complexation 2026-08-30 and 2026-09-04). A
 driver reload over the wired/USB path recovers it without a reboot, and since
 2026-09-06 a timer on each robot does that reload itself — see
-`OT2_TAILSCALE.md` *Wi-Fi watchdog* and *Traps*. This is still why neither
-gateway may depend on a robot's Wi-Fi. HTE is on the lab switch by wire. Complexation has no lab
-Ethernet; its `eth0` (`169.254.40.81`) is the USB-B cable into the UPLC PC
+`OT2_TAILSCALE.md` *Wi-Fi watchdog* and *Traps*. HTE is on the lab switch by
+wire. **Complexation is the exception since 2026-09-12:** its USB-B link into
+the UPLC PC died that night and, by decision, the gateway now reaches the
+robot over its Wi-Fi + Tailscale address (`100.64.254.91:31950`). The cost is
+measured, not hypothetical — the firmware hangs 23–43 times a day on each
+OT-2 (kernel journal, 09-08 → 13) — so the robot-side watchdog was tightened
+on 2026-09-13 to bound each hang at ~1–2 min (see `OT2_TAILSCALE.md`). A
+USB-to-Ethernet adapter onto the lab switch remains the real fix. What
+follows describes the bridge that *was* the path 2026-09-05 → 09-12 and could
+be again if the USB link is repaired: the robot's `eth0` (`169.254.40.81`) is
+the USB-B cable into the UPLC PC
 (`sdl2-pc-06-uplc`, tailnet `100.64.254.19`), where a `netsh` portproxy
-listens on `31951` and forwards to it. The bridge is the standing path since
-2026-09-05. Since 2026-09-06 both bridge rules listen on **`0.0.0.0`** (the
+listens on `31951` and forwards to it. Since 2026-09-06 both bridge rules listen on **`0.0.0.0`** (the
 Windows firewall rules scope them by port, the tailnet ACL by caller), which
 removes the old failure where `iphlpsvc` bound nothing after a reboot because
 the tailscale address did not exist yet. If `31951` ever stops answering,

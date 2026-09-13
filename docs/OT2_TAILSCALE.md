@@ -146,25 +146,58 @@ the script by hand is exactly what it would do.
 
 ## Wi-Fi watchdog (all three robots, since 2026-09-06)
 
-Because the radio wedge recurs, each robot now checks its own Wi-Fi every two
-minutes and reloads the driver when it has died — so the tailnet and SSH come
+Because the radio wedge recurs, each robot now checks its own Wi-Fi every
+minute and reloads the driver when it has died — so the tailnet and SSH come
 back on their own instead of waiting for someone to notice a grey tile.
+
+**How often it fires (measured 2026-09-08 → 13, kernel journal):** the
+firmware hangs **23–43 times a day on each OT-2**, at every hour of the day —
+Complexation 28 / 23 / 26 / 27 / 43 reloads on 09-09 … 09-13, HTE 41 / 38 /
+43 / 39. Not power (no throttling or under-voltage), not heat (49 °C), not the
+AP (every disconnect is locally generated), not scans (none requested), signal
+−63 dBm with power save off. It is the Broadcom 43430 firmware on the 4.14
+kernel, and nothing short of bypassing that radio stops it. This was invisible
+while both control paths were wired/USB; it became the Complexation robot's
+availability the night its USB link died (2026-09-12) and control moved to
+Wi-Fi + Tailscale.
 
 | Path | Purpose |
 |---|---|
 | `/data/wifi_watchdog.sh` | the check and the recovery (below) |
 | `/data/install_wifi_watchdog.sh` | one-shot installer for the two units (remounts `/` rw, then ro) |
-| `/etc/systemd/system/wifi-watchdog.{service,timer}` | oneshot service + timer (`OnBootSec=3min`, `OnUnitActiveSec=2min`) |
+| `/etc/systemd/system/wifi-watchdog.{service,timer}` | oneshot service + timer (`OnBootSec=3min`, `OnUnitActiveSec=1min`, `AccuracySec=10s` — was 2 min / 30 s until 2026-09-13) |
 | `/tmp/wifi-watchdog.log` | every decision; empty while healthy |
+
+The source of truth for both files is `tools/ot2_wifi_watchdog/` in this repo
+(deployed 2026-09-13 to Complexation; HTE still runs the 2026-09-06 version).
+To (re)install: copy both to `/data/` on the robot, then
+`sh /data/install_wifi_watchdog.sh`.
 
 How it decides: **healthy** means a ping to `1.1.1.1` (or `8.8.8.8`) leaves
 and returns over the station interface (`wlan0` on the OT-2, `mlan0` on the
 Flex — the Flex's `uap0` access-point interface is never picked). The campus
-gateway does not answer ping, so it is not the probe. It acts only after **two
-consecutive** failed checks (≥ 4 min), at most **once per 10 min**, and always
-exits 0. Recovery is `modprobe -r brcmfmac; modprobe brcmfmac` where that
-driver is loaded (the OT-2s), or `nmcli radio wifi off/on` otherwise (the Flex
-has an NXP chip), followed by `nmcli con up <profile>`.
+gateway does not answer ping, so it is not the probe. Ping is only the
+*probe*, though — since 2026-09-13 (Complexation; HTE still runs the 09-06
+version) the *judge* is local evidence that the firmware is hung, so an
+internet blip never reloads a healthy radio: a failed ping is confirmed
+**15 s later** and acted on only if `dmesg` shows a `brcmfmac … -110` error in
+the last 90 s or `iw dev wlan0 link` no longer answers; otherwise it logs
+"radio looks healthy" and does nothing. Reloads are at most **once per
+2 min** (was 10 min), and the script always exits 0. Recovery is
+`modprobe -r brcmfmac; modprobe brcmfmac` where that driver is loaded (the
+OT-2s), or `nmcli radio wifi off/on` otherwise (the Flex has an NXP chip),
+followed by a rescan and `nmcli con up <profile>`, retried once — brought up
+too early, the fresh driver has not scanned and the profile fails with "The
+Wi-Fi network could not be found" (6 of 44 reloads on 2026-09-13 did).
+
+Why the 2026-09-13 tightening: with a 2-min timer, two-failure rule and 10-min
+lockout, each hang cost the gateway 2–17 min of "robot unreachable" (median
+4 min; back-to-back hangs hit the lockout — 40 lockout waits against 43
+reloads that day) — about 3.2 h of the 12.6 h after the repoint, and one PyPoe
+down/recovered pair every 30–50 min. The new cycle bounds a hang at roughly
+1–2 min, under the dashboard's two-sweep alert threshold for most events. The
+previous script and installer are kept on the robot as
+`/data/*.bak-20260913`; restoring them and re-running the installer reverts.
 
 Like the Tailscale unit, the units live in `/etc` and vanish with an OS
 update; `sh /data/install_wifi_watchdog.sh` puts them back. Check it with
