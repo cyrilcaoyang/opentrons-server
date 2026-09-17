@@ -264,14 +264,18 @@ catalog are keyed by `kind`/`id` — **no per-robot dashboard code is needed**
 
 ## 7. What about a Flex?
 
-Not covered by this runbook. The SSH control wrapper (`OT2Control`) carries
-some Flex-era methods (`load_trash_bin`, gripper `move_labware`) and
-`demo/` has Flex experiments, but the **gateway is OT-2-only today**: the
-deck model assumes 12 slots, the tip/plate stores and dispense harness are
-OT-2-shaped, and the HTTP run-engine transport explicitly excludes the Flex
-(its absolute-motion/gripper surface has no run-engine equivalent — see
-[`HTTP_TRANSPORT.md`](HTTP_TRANSPORT.md)). Bringing up a Flex is gateway
-work, not a bring-up exercise.
+Flex is now a separate, explicit robot profile, never an OT-2 bring-up with a
+different address. Set `OT2_ROBOT_MODEL=Flex` and `OT2_TRANSPORT=http`; the
+profile supplies A1-D4 slots, Flex command-schema validation, full 1/8-channel
+heads, gripper motion, and explicit movable-trash registration. The default
+profile remains OT-2.
+
+Do not reuse the OT-2 wet-motion acceptance in §5. Flex has its own envelope,
+deck fixtures, gripper, and unsupported 96-channel/partial-nozzle layouts.
+Offline coverage and remaining limits are in
+[`FLEX_HTTP_SUPPORT.md`](FLEX_HTTP_SUPPORT.md). The concrete no-motion Gibbie
+installation, with a separate service and operator page, is
+[`GIBBIE_FLEX_HTTP.md`](GIBBIE_FLEX_HTTP.md).
 
 ---
 

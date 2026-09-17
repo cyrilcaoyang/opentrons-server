@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OT-2 Gateway</title>
+    <title>Opentrons Gateway</title>
     <script>
       (function () {
         // Pre-apply the banner's stored theme before first paint; banner.js
@@ -17,8 +17,8 @@
         }
         applyTheme();
 
-        // Embedded (the dashboard frames us same-origin at
-        // /ot2/{hte,complexation}/ui/): the host page already shows the SDL2
+        // Embedded (the dashboard frames us same-origin
+        // under a gateway-specific /ui/ route): the host page already shows the SDL2
         // auth banner, so suppress ours — one banner, not two. window.EMBEDDED
         // gates the banner.js include at the bottom of the page. Mirrors the
         // xArm panel, which solved this first.

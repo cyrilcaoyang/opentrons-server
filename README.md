@@ -654,7 +654,10 @@ software stop, with no SSH interrupt or hardware emergency-stop guarantee.
 `OT2_TRANSPORT=http`. The default remains OT-2. Flex includes alphabetic deck
 slots, full 1/8-channel pipetting, gripper actions and explicit trash-bin setup.
 Startup checks robot identity and required HTTP command schemas before creating
-a run. See [Flex support and sample-prep mapping](docs/FLEX_HTTP_SUPPORT.md).
+a run. The Gibbie deployment deliberately reuses this operator UI and its
+proposal-only assistant as a separate service; see
+[Gibbie Flex HTTP gateway](docs/GIBBIE_FLEX_HTTP.md). For command coverage and
+sample-prep mapping, see [Flex support](docs/FLEX_HTTP_SUPPORT.md).
 
 The documentation describes the build serving the request. A checkout change
 becomes available on a running gateway only after a separate deployment.

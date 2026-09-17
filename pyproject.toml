@@ -11,7 +11,7 @@ authors = [
     { name="Yang Cao", email="cyrilcaoyang@gmail.com" },
     { name="Han Hao", email="clascclon@gmail.com" },
 ]
-description = "A package to control Opentrons OT-2 robots via SSH, with Prefect integration."
+description = "Operator UI and gateways for Opentrons OT-2 (SSH/HTTP) and Flex (HTTP) robots."
 readme = "README.md"                      # Assumes you have a README.md file
 requires-python = ">=3.10,<3.13"           # opentrons-shared-data pulls numpy~=1.26.4, which has NO wheel past
                                            # cp312 — a newer interpreter tries to build it from source and fails

@@ -1,4 +1,4 @@
-"""Optional in-page chat assistant for one OT-2.
+"""Optional in-page chat assistant for one Opentrons robot.
 
 The gateway is self-contained by design — it ships its own UI inside the wheel,
 its own claim protocol, its own identity gate, and runs with no dashboard, no

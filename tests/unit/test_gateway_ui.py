@@ -23,6 +23,16 @@ def test_ui_serves_index_when_built_and_enabled():
     assert "<div id=\"root\">" in resp.text
 
 
+def test_ui_source_and_bundle_use_profile_neutral_title():
+    """The shared page must not identify a Flex as an OT-2 before status loads."""
+    repo_root = UI_DIST_DIR.parent.parent.parent
+    source = (repo_root / "ui" / "index.html").read_text(encoding="utf-8")
+    assert "<title>Opentrons Gateway</title>" in source
+    if UI_BUILT:
+        built = (UI_DIST_DIR / "index.html").read_text(encoding="utf-8")
+        assert "<title>Opentrons Gateway</title>" in built
+
+
 def test_ui_spa_fallback_serves_index_for_unknown_paths():
     if not UI_BUILT:
         import pytest
