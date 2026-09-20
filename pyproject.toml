@@ -87,7 +87,10 @@ where = ["src"]  # Look for packages in the 'src' directory
 # Ship the prebuilt gateway UI (ui/ -> npm run build -> ui_dist/) inside the
 # wheel so `pip install` delivers the /ui page without any node tooling.
 [tool.setuptools.package-data]
-"opentrons_server" = ["ui_dist/*", "ui_dist/assets/*"]
+# docs/*.md is the lab-standard Markdown agent documentation served by
+# gateway/documentation.py at /agent-docs and /agent-docs/api-reference;
+# it must ship inside the wheel or those routes 500 on an installed copy.
+"opentrons_server" = ["ui_dist/*", "ui_dist/assets/*", "docs/*.md"]
 
 # If you want to include non-code files (e.g., data files) within your package:
 # [tool.setuptools.package-data]

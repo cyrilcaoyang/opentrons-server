@@ -1,6 +1,16 @@
-"""Read-only equipment guidance shared by HTTP and agent tool surfaces."""
+"""Read-only equipment guidance shared by HTTP and agent tool surfaces.
 
+Two surfaces live here. :func:`equipment_documentation` and
+:func:`action_catalog` generate the JSON guide behind ``GET /docs/agent`` and
+the typed catalog behind ``GET /plans/actions``. :data:`router` serves the
+lab-standard Markdown documentation shipped under ``opentrons_server/docs/``.
+"""
+
+from importlib.resources import files
 from typing import Any
+
+from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 from .models import PROTOCOL_VERSION
 from .robot_profile import PROFILE
@@ -88,3 +98,67 @@ def equipment_documentation() -> dict[str, Any]:
         },
         **action_catalog(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Markdown agent documentation, served from resources shipped in the package.
+#
+# The same shape as every other lab device service (torry-pines-shaker-server,
+# agilent-cytation-server, sense-every-zone, mt-xpr-balance-server): a Markdown
+# agent guide, a Markdown API reference and a plain-text ``/llms.txt`` index,
+# so an agent — or the dashboard's API reference page — can discover how to
+# drive this device without reading the repo.
+#
+# This is additive. The JSON ``GET /docs/agent`` guide above and the typed
+# ``GET /plans/actions`` catalog are unchanged and remain the machine-readable
+# surface; the Markdown documents are the prose that explains them.
+# ---------------------------------------------------------------------------
+
+router = APIRouter(tags=["documentation"])
+
+
+class MarkdownResponse(PlainTextResponse):
+    media_type = "text/markdown"
+
+
+def _document(name: str) -> str:
+    return files("opentrons_server").joinpath("docs", name).read_text(encoding="utf-8")
+
+
+@router.get("/agent-docs", response_class=MarkdownResponse, summary="Agent guide (Markdown)")
+async def agent_guide() -> str:
+    return _document("AGENT_GUIDE.md")
+
+
+@router.get(
+    "/agent-docs/api-reference",
+    response_class=MarkdownResponse,
+    summary="API reference (Markdown)",
+)
+async def api_reference() -> str:
+    return _document("API_REFERENCE.md")
+
+
+@router.get("/llms.txt", response_class=PlainTextResponse, summary="Discovery index for agents")
+async def llms_txt() -> str:
+    # Relative links only: the gateway is served behind a proxy prefix
+    # (`/ot2/complexation/...`) as well as on its own port, and an absolute
+    # path would resolve off the mount.
+    return (
+        "# Opentrons OT-2 gateway (STATUS_SPEC v1.2 liquid handler)\n\n"
+        "## Documentation\n\n"
+        "- [Agent guide](agent-docs): health vs activity, claims and gating, run "
+        "lifecycle, plan execution, preconditions, refusal codes.\n"
+        "- [API reference](agent-docs/api-reference): every route with its gate, "
+        "body and refusal codes.\n"
+        "- [OpenAPI](openapi.json): request/response schemas.\n\n"
+        "## Machine-readable device resources\n\n"
+        "- [Equipment guide, JSON](docs/agent): links, discovery order, conventions, "
+        "agent boundary and the generated action catalog. No claim, no hardware I/O.\n"
+        "- [Plannable actions](plans/actions): every proposable action with its "
+        "idempotence flag and argument schema.\n\n"
+        "## Live status\n\n"
+        "Read the gateway's `GET /status` through the lab-skills SDK or dashboard; "
+        "live status is not a documentation-proxy resource. Read allowed_actions "
+        "before acting, and never infer deck contents from this documentation.\n"
+    )

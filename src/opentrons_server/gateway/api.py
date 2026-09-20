@@ -20,6 +20,7 @@ from .advanced import ADVANCED_ACTIONS
 from .claims import ClaimConflict, UnknownClaim
 from .deck import DeckDeclarationStore
 from .documentation import action_catalog, equipment_documentation
+from .documentation import router as documentation_router
 from .labware import standard_definition, standard_summaries
 from .models import (
     ClaimRejection,
@@ -477,6 +478,12 @@ def create_app(
         snapshot.details["ui_mode"] = ui_mode
         snapshot.details["control_auth"] = control_auth
         return snapshot
+
+    # The lab-standard Markdown documentation surface: GET /agent-docs,
+    # /agent-docs/api-reference and /llms.txt. Open and side-effect-free, like
+    # the JSON guide below, and mounted before it so both appear under the
+    # same `documentation` tag in the OpenAPI document.
+    app.include_router(documentation_router)
 
     @app.get("/docs/agent", tags=["documentation"])
     def agent_docs() -> dict[str, Any]:
