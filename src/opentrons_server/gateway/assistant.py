@@ -30,9 +30,9 @@ import json
 import logging
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -51,8 +51,25 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 # from a fixed catalog and filling in a schema, so reasoning depth matters far
 # less than reliable structured output. Note that Nous Hermes models on
 # OpenRouter do NOT advertise tool support — pointing this at one silently
-# degrades to text-only replies with no proposals.
-DEFAULT_MODEL = "z-ai/glm-5.2"
+# degrades to text-only replies with no proposals. Was z-ai/glm-5.2 until
+# 2026-09-21, when the OpenRouter workspace guardrail stopped allowing it (a
+# blocked slug 404s every turn); both deployed gateways already ran a DeepSeek
+# flash model, so this default now matches them. It is a reasoning model —
+# the empty-reply nudge below is what keeps a spent token budget from
+# surfacing as a silent "…".
+DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+
+# What the operator may pick in the chat panel when OT2_ASSISTANT_MODELS is
+# unset. An allowlist, never free text: the chat endpoint is reachable by
+# whoever holds the claim, and an arbitrary slug could be a model with no tool
+# support (text-only replies, no proposals), one the OpenRouter guardrail
+# blocks, or one that bills far more per turn. OpenRouter slugs only — a
+# custom OT2_ASSISTANT_BASE_URL gets just its configured model unless
+# OT2_ASSISTANT_MODELS names others for that provider.
+DEFAULT_MODEL_CHOICES: Tuple[str, ...] = (
+    "deepseek/deepseek-v4.1-flash",
+    "z-ai/glm-5.3-flash",
+)
 
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_TIMEOUT_S = 60.0
@@ -145,6 +162,7 @@ ENV_FILE_KEYS = frozenset(
         "OPENAI_API_KEY",
         "OT2_ASSISTANT_ENABLED",
         "OT2_ASSISTANT_MODEL",
+        "OT2_ASSISTANT_MODELS",
         "OT2_ASSISTANT_BASE_URL",
         "OT2_ASSISTANT_MAX_TOKENS",
         "OT2_ASSISTANT_TIMEOUT_S",
@@ -229,6 +247,27 @@ class AssistantConfig:
     # an operator asks when the bubble stays hidden: "did it see my key?"
     key_source: Optional[str] = None
     configuration_error: Optional[str] = None
+    # Other models an operator may switch to per turn. ``model`` is always
+    # allowed as well; see ``choices``.
+    alternatives: Tuple[str, ...] = ()
+
+    @property
+    def choices(self) -> Tuple[str, ...]:
+        """Every model a request may name: the configured one first."""
+        return tuple(dict.fromkeys((self.model, *self.alternatives)))
+
+    def with_model(self, requested: Optional[str]) -> "AssistantConfig":
+        """This config answering with ``requested``, or unchanged for None.
+
+        Raises ``ValueError`` for a model outside ``choices`` — the caller
+        refuses the request rather than quietly using the default, so the
+        operator never believes one model answered when another did.
+        """
+        if requested is None or requested == self.model:
+            return self
+        if requested not in self.choices:
+            raise ValueError(f"model {requested!r} is not offered by this gateway")
+        return replace(self, model=requested)
 
     @classmethod
     def from_env(cls) -> "AssistantConfig":
@@ -268,6 +307,13 @@ class AssistantConfig:
                 raise ValueError
         except (TypeError, ValueError):
             configuration_error = "OT2_ASSISTANT_TIMEOUT_S must be a positive finite number"
+        listed = setting("OT2_ASSISTANT_MODELS")
+        if listed:
+            alternatives = tuple(m.strip() for m in listed.split(",") if m.strip())
+        elif not base_url:
+            alternatives = DEFAULT_MODEL_CHOICES
+        else:
+            alternatives = ()
         return cls(
             enabled=(setting("OT2_ASSISTANT_ENABLED", "true") or "true").lower()
             not in {"0", "false", "no", "off"},
@@ -278,6 +324,7 @@ class AssistantConfig:
             timeout_s=timeout_s,
             key_source=source,
             configuration_error=configuration_error,
+            alternatives=alternatives,
         )
 
     def unavailable_reason(self) -> Optional[str]:
@@ -658,3 +705,6 @@ class AssistantChatRequest(BaseModel):
     """
 
     messages: List[AssistantMessage] = Field(..., min_length=1, max_length=40)
+    # One of /assistant/health's ``models``; omitted means the configured
+    # default. Anything else is refused with 422, never substituted.
+    model: Optional[str] = Field(None, min_length=1, max_length=200)

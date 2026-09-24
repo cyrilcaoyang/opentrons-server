@@ -259,7 +259,11 @@ export interface AssistantMessage {
 export interface AssistantHealth {
   configured: boolean;
   reason: string | null;
+  /** The configured default. */
   model: string | null;
+  /** What the operator may pick per turn, default first; the gateway refuses
+   *  anything else. Empty when the assistant is not configured. */
+  models: string[];
 }
 
 export interface AssistantReply {

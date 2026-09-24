@@ -42,6 +42,9 @@ import type {
  */
 
 const STORAGE_KEY = "ot2-assistant-thread";
+// Session-scoped like the thread. Both gateways share the edge's origin, so a
+// saved pick is only honoured if this gateway still offers it.
+const MODEL_STORAGE_KEY = "ot2-assistant-model";
 const MAX_KEPT = 20;
 
 function loadThread(): AssistantMessage[] {
@@ -64,6 +67,7 @@ export function AssistantBubble({
   // Which model answers the chat (from /assistant/health), shown under the
   // input so operators know what they are talking to — dashboard parity.
   const [model, setModel] = useState<string | null>(null);
+  const [models, setModels] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [panelSize, setPanelSize] = useState({ width: 460, height: 520 });
@@ -156,6 +160,15 @@ export function AssistantBubble({
     [claim.token, refreshPlan],
   );
 
+  const chooseModel = useCallback((next: string) => {
+    setModel(next);
+    try {
+      sessionStorage.setItem(MODEL_STORAGE_KEY, next);
+    } catch {
+      /* private mode — the pick just won't survive a reload */
+    }
+  }, []);
+
   const clearThread = useCallback(() => {
     // Forgets the conversation only. Plans the assistant drafted live on the
     // gateway — clearing a chat must never silently discard something awaiting
@@ -179,7 +192,15 @@ export function AssistantBubble({
     void getAssistantHealth()
       .then((h) => {
         setAvailable(h.configured);
-        setModel(h.model ?? null);
+        const offered = h.models ?? [];
+        setModels(offered);
+        let saved: string | null = null;
+        try {
+          saved = sessionStorage.getItem(MODEL_STORAGE_KEY);
+        } catch {
+          /* private mode — fall back to the gateway default */
+        }
+        setModel(saved && offered.includes(saved) ? saved : (h.model ?? null));
       })
       .catch(() => setAvailable(false));
   }, []);
@@ -247,6 +268,7 @@ export function AssistantBubble({
         next.slice(-MAX_KEPT),
         claim.token,
         onProgress,
+        model,
       );
       // Fetch the steps of any plan it drafted so the operator sees what was
       // proposed *in the chat*. Best-effort: a failed fetch just omits the
@@ -308,7 +330,7 @@ export function AssistantBubble({
     } finally {
       setPending(false);
     }
-  }, [draft, pending, thread, claim.token]);
+  }, [draft, pending, thread, claim.token, model]);
 
   // Drag the panel by its header. Pointer events (not HTML5 drag) so it works
   // with touch; capture keeps the drag alive when the cursor outruns the
@@ -609,10 +631,28 @@ export function AssistantBubble({
             Send
           </button>
         </div>
-        {model && (
-          <p className="mt-1 text-center text-[10px] text-ink-subtle dark:text-slate-500">
-            model: {model}
-          </p>
+        {model && models.length > 1 ? (
+          <label className="mt-1 flex items-center justify-center gap-1 text-[10px] text-ink-subtle dark:text-slate-500">
+            model:
+            <select
+              value={model}
+              disabled={pending}
+              onChange={(e) => chooseModel(e.target.value)}
+              className="rounded border border-slate-300 bg-white px-1 py-0 text-[10px] text-ink focus:border-purple-500 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          model && (
+            <p className="mt-1 text-center text-[10px] text-ink-subtle dark:text-slate-500">
+              model: {model}
+            </p>
+          )
         )}
       </form>
     </section>
