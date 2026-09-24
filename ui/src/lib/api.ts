@@ -392,6 +392,8 @@ export async function assistantChatStream(
   messages: AssistantMessage[],
   token: string | null,
   onEvent: (event: AssistantProgressEvent) => void,
+  /** One of /assistant/health's `models`; omitted uses the gateway default. */
+  model?: string | null,
 ): Promise<AssistantReply> {
   const path = "/assistant/chat/stream";
   const res = await fetch(apiUrl(path), {
@@ -399,6 +401,7 @@ export async function assistantChatStream(
     headers: withToken(token),
     body: JSON.stringify({
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      ...(model ? { model } : {}),
     }),
   });
   if (!res.ok) throw await apiErrorFromResponse(res, path);

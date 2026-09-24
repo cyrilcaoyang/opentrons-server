@@ -596,3 +596,81 @@ def test_flex_prompt_does_not_assume_ot2_fixed_trash(monkeypatch):
     assert "Opentrons Flex" in prompt and "no assumed fixed trash" in prompt
     assert "force_direct=true" in prompt
     assert "`stop`" in prompt
+
+
+# ---------------------------------------------------------------------------
+# Operator-selectable model
+# ---------------------------------------------------------------------------
+
+
+def test_health_offers_the_default_model_choices_first(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    monkeypatch.setenv("OT2_ASSISTANT_MODEL", "z-ai/glm-5.3-flash")
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+
+    body = client.get("/assistant/health").json()
+
+    assert body["model"] == "z-ai/glm-5.3-flash"
+    assert body["models"][0] == "z-ai/glm-5.3-flash"
+    assert set(body["models"]) == {"z-ai/glm-5.3-flash", *assistant_mod.DEFAULT_MODEL_CHOICES}
+    assert len(body["models"]) == len(set(body["models"]))
+
+
+def test_models_setting_replaces_the_default_choices(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    monkeypatch.setenv("OT2_ASSISTANT_MODELS", " a/one , ,b/two")
+
+    assert AssistantConfig.from_env().choices == (assistant_mod.DEFAULT_MODEL, "a/one", "b/two")
+
+
+def test_custom_provider_offers_only_its_configured_model(monkeypatch):
+    """OpenRouter slugs mean nothing to another provider."""
+    monkeypatch.setenv("OPENAI_API_KEY", "k-test")
+    monkeypatch.setenv("OT2_ASSISTANT_BASE_URL", "http://provider.invalid/v1")
+    monkeypatch.setenv("OT2_ASSISTANT_MODEL", "local/model")
+
+    assert AssistantConfig.from_env().choices == ("local/model",)
+
+
+def test_health_offers_no_models_when_unconfigured(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+
+    assert client.get("/assistant/health").json()["models"] == []
+
+
+def test_chat_uses_the_requested_model(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+    token = client.post("/control/claim", json=CLAIM).json()["claim_token"]
+    calls = _fake_openai(monkeypatch, [_text("Hello.")])
+
+    resp = client.post(
+        "/assistant/chat",
+        json={"messages": [{"role": "user", "content": "hi"}], "model": "z-ai/glm-5.3-flash"},
+        headers={"X-Claim-Token": token},
+    )
+
+    assert resp.status_code == 200
+    assert calls["sent"][0]["model"] == "z-ai/glm-5.3-flash"
+
+
+@pytest.mark.parametrize("path", ["/assistant/chat", "/assistant/chat/stream"])
+def test_a_model_outside_the_allowlist_is_refused_not_substituted(monkeypatch, path):
+    """Free text would let whoever holds the claim pick a model with no tool
+    support, one the guardrail blocks, or one that bills far more."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+    token = client.post("/control/claim", json=CLAIM).json()["claim_token"]
+    calls = _fake_openai(monkeypatch, [_text("Hello.")])
+
+    resp = client.post(
+        path,
+        json={"messages": [{"role": "user", "content": "hi"}], "model": "openai/o9-ultra"},
+        headers={"X-Claim-Token": token},
+    )
+
+    assert resp.status_code == 422
+    assert "not offered" in resp.json()["detail"]
+    assert calls["sent"] == []

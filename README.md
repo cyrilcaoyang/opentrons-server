@@ -330,7 +330,8 @@ stop two gateways from overwriting each other's plate and tip records.
 | Setting | Purpose | Default |
 |---|---|---|
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | provider credential; `OPENAI_API_KEY` requires an explicit base URL | unset → off |
-| `OT2_ASSISTANT_MODEL` | any OpenAI-compatible model slug | `z-ai/glm-5.2` |
+| `OT2_ASSISTANT_MODEL` | any OpenAI-compatible model slug | `deepseek/deepseek-v4.1-flash` |
+| `OT2_ASSISTANT_MODELS` | comma-separated models the chat panel's picker may switch to per turn (the default model is always offered); the gateway refuses any other slug with 422 | OpenRouter: `deepseek/deepseek-v4.1-flash,z-ai/glm-5.3-flash`; custom base URL: none |
 | `OT2_ASSISTANT_BASE_URL` | provider endpoint | OpenRouter |
 | `OT2_ASSISTANT_ENABLED` | `0` disables it even with a key — per-instance kill switch | `true` |
 | `OT2_ASSISTANT_MAX_TOKENS` / `_TIMEOUT_S` | per-reply cap, per-request wallclock | 4096 / 60 s |
@@ -353,7 +354,8 @@ and you get text-only replies that never propose anything.
 
 ```bash
 curl http://<gateway>/assistant/health
-# {"configured": true, "model": "z-ai/glm-5.2", "key_source": "file",
+# {"configured": true, "model": "deepseek/deepseek-v4.1-flash",
+#  "models": ["deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flash"], "key_source": "file",
 #  "env_file_searched": ["C:\\...\\opentrons-server\\.env"]}
 ```
 

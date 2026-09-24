@@ -885,8 +885,10 @@ def create_app(
     # approve or run anything.
     # -----------------------------------------------------------------
 
-    def _assistant_config_for_request(http_request: Request) -> AssistantConfig:
-        """Validate login, configuration, and claim before starting a turn."""
+    def _assistant_config_for_request(
+        http_request: Request, model: Optional[str] = None
+    ) -> AssistantConfig:
+        """Validate login, configuration, claim, and model before a turn."""
         if require_login:
             _require_identity(http_request)
         config = AssistantConfig.from_env()
@@ -894,7 +896,10 @@ def create_app(
         if unavailable:
             raise HTTPException(status_code=503, detail=unavailable)
         require_claim(http_request, http_request.headers.get("X-Claim-Token"))
-        return config
+        try:
+            return config.with_model(model)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     @app.get("/assistant/health", tags=["assistant"])
     def assistant_health() -> dict[str, Any]:
@@ -910,6 +915,9 @@ def create_app(
             "configured": reason is None,
             "reason": reason,
             "model": cfg.model if reason is None else None,
+            # What the chat panel may offer, default first. Empty when the
+            # assistant cannot run, so the picker never shows for nothing.
+            "models": list(cfg.choices) if reason is None else [],
             # Where the key was found ("environment" | "file" | null). The one
             # thing an operator needs when the bubble stays hidden after they
             # dropped a key somewhere. Never the key itself.
@@ -931,7 +939,7 @@ def create_app(
         # leads nowhere — taking the claim would change nothing. Answer the
         # question the caller actually hit. Nothing is disclosed by ordering it
         # this way: /assistant/health already reports configured-ness openly.
-        config = _assistant_config_for_request(http_request)
+        config = _assistant_config_for_request(http_request, request.model)
         try:
             return Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
                 http_request, http_request.headers.get("X-Claim-Token")
@@ -957,7 +965,7 @@ def create_app(
         failures retain their normal HTTP status. Provider failures after the
         stream starts arrive as a terminal ``error`` event.
         """
-        config = _assistant_config_for_request(http_request)
+        config = _assistant_config_for_request(http_request, request.model)
         messages = [m.model_dump() for m in request.messages]
 
         def events() -> Any:
