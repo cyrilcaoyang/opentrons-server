@@ -51,6 +51,7 @@ import { LastErrorBadge } from "./LastErrorBadge";
 import { StalenessIndicator } from "./StalenessIndicator";
 import { StatusPill } from "./StatusPill";
 import { TileButton } from "./TileButton";
+import { CameraControl } from "./CameraControl";
 
 // ---------------------------------------------------------------------------
 // Small presentational helpers
@@ -1030,6 +1031,7 @@ export function ControlPanel({
               />
               Light
             </TileButton>
+            <CameraControl />
           </div>
 
           {/* Directly under the control strip it belongs to: the strip acts on

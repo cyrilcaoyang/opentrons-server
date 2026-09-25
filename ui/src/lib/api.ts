@@ -440,3 +440,18 @@ export async function assistantChatStream(
   if (!completed) throw new Error("assistant stream ended without a completion");
   return completed;
 }
+
+
+export interface GatewayCamera { id: string; kind: string; }
+export function getCameras(signal: AbortSignal): Promise<{ cameras: GatewayCamera[] }> {
+  return fetchJson("/cameras", { signal, cache: "no-store" });
+}
+export async function getCameraSnapshot(id: string, signal: AbortSignal): Promise<Blob> {
+  const path = `/cameras/${encodeURIComponent(id)}/snapshot.jpg`;
+  const response = await fetch(apiUrl(path), { signal, cache: "no-store", credentials: "same-origin" });
+  if (!response.ok) throw await apiErrorFromResponse(response, path);
+  if (!response.headers.get("Content-Type")?.startsWith("image/jpeg")) {
+    throw new Error("Camera did not return an image; check your login and retry");
+  }
+  return response.blob();
+}

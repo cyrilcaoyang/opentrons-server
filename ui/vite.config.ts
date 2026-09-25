@@ -19,6 +19,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      "/cameras": "http://127.0.0.1:8020",
       "/status": "http://127.0.0.1:8020",
       "/health": "http://127.0.0.1:8020",
       "/control": "http://127.0.0.1:8020",

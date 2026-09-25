@@ -43,6 +43,7 @@ dependencies = [                          # List runtime dependencies
     # is configured, and gateway/assistant.py imports openai defensively, so a
     # venv without it serves a healthy gateway either way.
     "openai>=1.0.0",
+    "httpx>=0.25.0",  # Standalone camera service client
 ]
 
 [project.optional-dependencies]

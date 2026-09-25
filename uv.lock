@@ -1396,6 +1396,7 @@ source = { editable = "." }
 dependencies = [
     { name = "asyncssh" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "openai" },
     { name = "paramiko" },
     { name = "pydantic" },
@@ -1431,6 +1432,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "fastapi", specifier = ">=0.104.1" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "httpx", specifier = ">=0.25.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.25.0" },
     { name = "isort", marker = "extra == 'dev'", specifier = ">=5.12.0" },
     { name = "mcp", marker = "extra == 'dev'", specifier = ">=1.0" },

@@ -1194,6 +1194,12 @@ def create_app(
             target=service.run_background_refresh, name="ot2-run-refresh", daemon=True
         ).start()
 
+    # Only the instance with explicit local camera configuration exposes this.
+    camera_config = os.environ.get("OT2_CAMERA_SERVICE_CONFIG")
+    if camera_config:
+        from .camera_proxy import camera_router
+        app.include_router(camera_router(camera_config, _require_identity))
+
     return app
 
 
