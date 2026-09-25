@@ -2,7 +2,7 @@
 
 Base: the deployed gateway's `http://<host>:8020` (HTE) or `:8021`
 (Complexation). Both run the same code, so the surface below is identical;
-only identity, robot address and state-file paths differ. All timestamps are
+identity, robot address, state-file paths and optional camera configuration differ. All timestamps are
 UTC ISO-8601. Exact request/response schemas: `/openapi.json`. Tags: `spec`,
 `documentation`, `ui`, `claim`, `control`, `plans`, `assistant`.
 
@@ -234,3 +234,29 @@ API key is configured.
 `lights.set`, `deck.declare`, `tempmod.set`, `tempmod.deactivate`, plus every
 advanced-action name while the device is `ready`. `reconcile` is a
 `required_actions` entry, not an `allowed_actions` one.
+
+
+## Attached cameras — identity required, no robot claim
+
+Available only when `OT2_CAMERA_SERVICE_CONFIG` is configured. All paths are
+relative to this gateway base, including an edge prefix such as `/ot2/hte`.
+HTE's overhead USB camera is exposed as `overhead`; discover rather than assuming
+this alias on another instance. These routes do not perform robot I/O.
+
+| Method + path | Returns / behavior |
+|---|---|
+| `GET /cameras` | Configured aliases, color capabilities and gateway-relative URLs; does not open a camera. |
+| `GET /cameras/{alias}/status` | Camera-service state; does not start video. |
+| `GET /cameras/{alias}/snapshot.jpg` | `image/jpeg`; starts camera on demand. `X-Frame-Number` identifies a camera-local frame. |
+| `GET /cameras/{alias}/stream.mjpg?fps=5` | Multipart JPEG stream; close the connection to stop this consumer. `fps` accepts 0.5–30 and limits delivery, not the hardware capture rate. |
+
+Authentication uses the existing gateway identity resolver: a verified edge
+session or configured `X-Api-Key`. No `X-Claim-Token` is needed. Missing identity
+returns 401 when login is required. Unknown aliases/operations or an unconfigured
+camera router return 404. Unavailable service/camera normally returns 503;
+upstream error responses are preserved. A disconnected stream may end after
+headers have been sent. Discard stale previews and report failure.
+
+The USB alias is color-only; this gateway does not expose camera depth, capture
+archive writes, or global start/stop controls. Closing a preview does not stop
+other consumers. Hardware idle shutdown belongs to the camera service.

@@ -321,6 +321,36 @@ agreed, to what hash) and `plan_executed` (what became of it).
   `details.snapshot.pipettes`; `details.session_recipe` is not authoritative.
   Have the operator confirm the physical deck before use.
 
+## Attached USB camera (optional)
+
+A configured camera belongs to this gateway's equipment context. OT-2 HTE uses
+alias `overhead` for the USB camera looking down at its deck. Discover aliases
+with `GET /cameras`; do not assume another gateway has the same camera. A gateway
+without camera configuration returns 404. Returned paths are relative to the
+**gateway base**, including its proxy prefix (for HTE, `/ot2/hte`).
+
+- `GET /cameras/overhead/status` reads camera state without starting video.
+- `GET /cameras/overhead/snapshot.jpg` returns a JPEG, starting capture on demand.
+- `GET /cameras/overhead/stream.mjpg?fps=5` opens an MJPEG preview. Close the
+  response when finished; do not open unattended or automatically playing streams.
+
+These routes require the gateway's verified identity (authenticated browser edge
+or a configured `X-Api-Key`), but **no robot claim**. They do not connect, home,
+move, or alter the OT-2. Camera-service credentials stay on the gateway host.
+USB provides color only: no stereo depth, metric distance, or calibrated robot
+coordinates. Images do not establish deck declarations, tip ownership, completed
+liquid transfers, or permission to move. Robot actions retain all existing gates.
+
+For an agent inspection, prefer one snapshot and retain its `X-Frame-Number`
+header with the image. Frame numbers are camera-local and may reset after restart;
+they are not timestamps or proof of synchronization with robot actions. Store
+experimental images in the approved evidence store, never git. Report camera
+errors as camera errors, without inferring a robot fault or retrying robot actions.
+
+The operator panel's Camera button beside Light opens a movable, resizable
+preview. Closing it stops that viewer's requests; the service releases the
+camera after its idle timeout if no other consumer remains.
+
 ## Discovery
 
 `llms.txt` (index) · `agent-docs` (this guide) ·
