@@ -1504,6 +1504,10 @@ class OT2Service:
         request = request or PlateBalanceRequest(timeout_s=30 if action == "tare" else 10)
         if action == "zero" and request.wait_until_stable:
             raise ValueError("wait_until_stable applies only to read or tare")
+        if action != "tare" and request.attempts is not None:
+            # Validate here, before _run_action: a request-shape error raised
+            # inside the command would be recorded as a failed command.
+            raise ValueError("attempts applies only to tare")
         balance = self.platebalance
         if balance is None or not balance.supports(action):
             raise ValueError("platebalanceV1 is unconfigured or operation is unsupported")
