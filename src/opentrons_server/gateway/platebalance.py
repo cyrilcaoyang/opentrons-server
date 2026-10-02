@@ -121,6 +121,13 @@ class BalanceNoFrame(TimeoutError):
 
 
 _TARE_ZERO_TOLERANCE_G = 0.0002  # Two WZB254-N display increments.
+# Floor for the per-read serial timeout while a wait loop runs down its
+# deadline. A 22-character SBI frame at 9600 baud takes ~25 ms, at the 1200
+# baud factory default ~200 ms; a timeout below that returns the frame cut
+# off mid-line ("-   0.0005 g  " with no CR/LF, observed live 2026-10-02),
+# which no parser should be asked to read. The loops still stop at their own
+# deadline after the read returns.
+_MIN_FRAME_READ_S = 0.5
 
 
 def validate_balance_plate(definition: dict[str, Any], *, max_height_mm: float = 25) -> None:
@@ -174,8 +181,8 @@ def matterlab_driver(config: PlateBalanceConfig) -> Any:
             previous_write_timeout = self.device.write_timeout
             try:
                 if timeout_s is not None:
-                    self.device.timeout = min(config.timeout, timeout_s)
-                    self.device.write_timeout = min(config.timeout, timeout_s)
+                    self.device.timeout = min(config.timeout, max(timeout_s, _MIN_FRAME_READ_S))
+                    self.device.write_timeout = min(config.timeout, max(timeout_s, _MIN_FRAME_READ_S))
                 # read_until already waits for a complete frame; no fixed delay.
                 response = self.query("\x1bP\r\n", num_bytes=64, read_delay=0)
                 if response == "":
@@ -270,11 +277,26 @@ class PlateBalanceV1:
 
             if action == "read":
                 deadline = time.monotonic() + request.timeout_s
+                unreadable: str | None = None
                 while True:
                     if request.wait_until_stable and time.monotonic() >= deadline:
-                        raise BalanceStabilityTimeout(f"Weight did not stabilize within {request.timeout_s:g} s")
-                    # Repeat only valid unstable readings, never serial failures.
-                    stable, weight = observe(deadline if request.wait_until_stable else None)
+                        raise BalanceStabilityTimeout(
+                            f"Weight did not stabilize within {request.timeout_s:g} s"
+                            + (f"; last frame was unreadable: {unreadable}" if unreadable else "")
+                        )
+                    # Repeat valid unstable readings and, while waiting, frames
+                    # the parser rejects (a frame cut off at the read timeout,
+                    # an overload or error code): none of them is a weight, and
+                    # a one-shot read still fails loudly on them.
+                    try:
+                        stable, weight = observe(deadline if request.wait_until_stable else None)
+                    except ValueError as exc:
+                        if not request.wait_until_stable:
+                            raise
+                        unreadable = str(exc)
+                        time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                        continue
+                    unreadable = None
                     if request.wait_until_stable and time.monotonic() >= deadline:
                         raise BalanceStabilityTimeout(f"Weight did not stabilize within {request.timeout_s:g} s")
                     if not request.wait_until_stable or stable:
@@ -290,6 +312,7 @@ class PlateBalanceV1:
                     deadline = time.monotonic() + request.timeout_s
                     consecutive = 0
                     no_frame_seen = False
+                    unreadable = None
                     while True:
                         if time.monotonic() >= deadline:
                             if no_frame_seen:
@@ -298,6 +321,7 @@ class PlateBalanceV1:
                                 )
                             raise BalanceReferenceTimeout(
                                 f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
+                                + (f"; last frame was unreadable: {unreadable}" if unreadable else "")
                             )
                         try:
                             stable, weight = observe(deadline)
@@ -308,7 +332,20 @@ class PlateBalanceV1:
                             no_frame_seen = True
                             time.sleep(min(0.25, max(0, deadline - time.monotonic())))
                             continue
+                        except ValueError as exc:
+                            # The scale answered, so it is alive and the tare
+                            # was delivered; this frame just is not a weight
+                            # (cut off at the read timeout, overload, error
+                            # code). Query again — the baseline needs two
+                            # stable near-zero readings, so an unreadable
+                            # frame can only cost time, never be mistaken
+                            # for one. Still never resend tare.
+                            no_frame_seen = False
+                            unreadable = str(exc)
+                            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                            continue
                         no_frame_seen = False
+                        unreadable = None
                         if time.monotonic() >= deadline:
                             raise BalanceReferenceTimeout(
                                 f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"

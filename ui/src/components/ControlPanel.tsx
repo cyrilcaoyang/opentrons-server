@@ -717,17 +717,25 @@ export function ControlPanel({
         <div className="flex shrink-0 items-center gap-1.5">
           <ActionErrorBadge error={actionError} />
           <LastErrorBadge error={status.last_error} />
-          {status.equipment_status === "error" && (
+          {/* Offered whenever the gateway itself asks for reconciliation, not
+              only in `error`: an unknown outcome (a command whose fate the
+              gateway could not observe) also reports `manual_reconcile`, and
+              hiding the button there left the operator with no way out of
+              the panel (seen live 2026-10-02 after a balance tare). */}
+          {(status.equipment_status === "error" ||
+            (status.required_actions ?? []).includes("manual_reconcile")) && (
             <TileButton
               onClick={() => runControl("reconcile", () => postReconcile(token))}
               disabled={locked || pending}
               variant="danger"
               title={
                 controlHint ??
-                "Acknowledge the failed command and return the gateway to ready — check the robot first; this clears the error, it does not fix anything"
+                (status.equipment_status === "error"
+                  ? "Acknowledge the failed command and return the gateway to ready — check the robot first; this clears the error, it does not fix anything"
+                  : "The last command's outcome is unknown. Inspect the robot (and balance) yourself, then click to acknowledge and return the gateway to ready")
               }
             >
-              CLEAR ERROR
+              {status.equipment_status === "error" ? "CLEAR ERROR" : "RECONCILE"}
             </TileButton>
           )}
           <TileButton
