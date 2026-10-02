@@ -1871,6 +1871,9 @@ class OT2Service:
             # `rack` is the tracker's slot key and means nothing to the
             # protocol API.
             pip = self._ensure_session_pipette(request.pipette)
+            self._refuse_tip_state_conflict(
+                "pick_up_tip", request.pipette, pip, expect_tip=False, mounted=prior_mount
+            )
             if nickname and well:
                 self._require_control().get_location_from_labware(
                     self._resolve_session_labware(nickname), well
@@ -1887,6 +1890,9 @@ class OT2Service:
         # back onto that same well — a crash, or a second tip jammed onto the
         # first. So the rack assumes the tip left, and the clean-failure path
         # below puts it back.
+        # What the ledger said before this pick marks its own mount — the
+        # robot-disagreement message below must describe that, not the mark.
+        prior_mount = self.tips.get_mount(request.pipette)
         previous = self._displace_for_pick(rack, covered) if tracked and well else {}
         if tracked and well:
             self.tips.set_mount(
@@ -2006,6 +2012,9 @@ class OT2Service:
             # labware, the fixedTrash addressable area otherwise). Mirrors
             # pick_up_tip.
             pip = self._ensure_session_pipette(request.pipette)
+            self._refuse_tip_state_conflict(
+                "drop_tip", request.pipette, pip, expect_tip=True, mounted=mounted
+            )
             if nickname and position:
                 # Into a tracked rack, descend so the tip seats in the hole
                 # (releasing at the well top lands it crooked); into any other
@@ -2057,6 +2066,75 @@ class OT2Service:
                 to_rack=dest_rack,
                 to_wells=dest_wells or None,
             )
+
+    def _refuse_tip_state_conflict(
+        self,
+        action: str,
+        pipette: str,
+        session_pipette: str,
+        *,
+        expect_tip: bool,
+        mounted: Optional[TipMount],
+    ) -> None:
+        """Refuse a tip action the robot itself would reject, before any motion.
+
+        The gateway's tip ledger and the robot's run engine are two different
+        records. The ledger is bookkeeping an operator can correct
+        (``tips.mark`` releases a mount); the engine's ``hasTip`` flips only on
+        its own ``pickUpTip`` / ``dropTip``. A tip pulled off by hand after a
+        halted plan, or picked before a gateway restart, leaves the engine
+        believing a tip is on while ``details.mounted_tips`` shows none — and
+        the next ``pickUpTip`` then fails *mid-plan* with
+        ``UnexpectedTipAttachError`` and lands the gateway in ERROR. Asking the
+        robot first turns that into a 412 precondition refusal (state and
+        ``last_error`` untouched) that says what to do.
+
+        Only a definite ``True``/``False`` observed on the robot counts: the
+        SSH ``has_tip`` is the protocol API's own belief; over HTTP only the
+        engine's ``tipStates`` qualifies, never the adapter's client-side
+        ledger (which cannot see a pre-restart tip — the very case at issue).
+        No readback lets the engine be the judge, as before.
+        """
+        control = self._require_control()
+        observed = (
+            control.engine_has_tip(session_pipette)
+            if isinstance(control, OT2HttpControl)
+            else control.has_tip(session_pipette)
+        )
+        if observed is not True and observed is not False:
+            return
+        if observed == expect_tip:
+            return
+        ledger = (
+            f"a tip from rack {mounted.rack} well {mounted.well}" if mounted else "no tip"
+        )
+        if expect_tip:
+            detail = (
+                f"Cannot {action}: the robot reports no tip on {pipette!r}, so it "
+                f"would refuse the drop. The gateway's record shows {ledger}. If a "
+                "tip is physically on the head, remove it by hand; then, if the "
+                "record still shows one, release it with tips.mark (status=empty) "
+                "on its origin wells."
+            )
+        else:
+            detail = (
+                f"Cannot {action}: the robot reports a tip already on {pipette!r}, "
+                f"while the gateway's record shows {ledger}. Drop it first — "
+                f'drop_tip with only {{"pipette": "{pipette}"}} sends the head to '
+                "the fixed trash and clears the robot's record even if the head is "
+                "bare — then retry the pick."
+            )
+        raise TipUnavailable(
+            {
+                "detail": detail,
+                "rack": mounted.rack if mounted else None,
+                "well": mounted.well if mounted else None,
+                "tip_status": ON_PIPETTE if observed else None,
+                "robot_reports_tip": observed,
+                "requested_sample_id": None,
+                "retry_after_s": None,
+            }
+        )
 
     def _mark_tip_used(self, pipette: str, labware_nickname: str, position: str) -> None:
         """Record what the mounted tip touched, after a successful liquid step.
@@ -2871,10 +2949,20 @@ class OT2Service:
             # `run` deck source via normalize_run_slots.
             self._last_run_labware = {"labware": labware, "modules": modules}
             self._last_run_labware_at = time.monotonic()
+            # The engine's own tip belief, per pipette — the record its
+            # pickUpTip/dropTip are gated on, which can disagree with the
+            # gateway's ledger (see _refuse_tip_state_conflict). Absent on
+            # servers without the currentState route.
+            tip_states = (
+                self.control.tip_states() if isinstance(self.control, OT2HttpControl) else {}
+            )
             self.last_snapshot = {
                 "run_id": run.get("id"),
                 "pipettes": {
-                    (entry.get("mount") or entry.get("id") or f"pipette_{i}"): entry
+                    (entry.get("mount") or entry.get("id") or f"pipette_{i}"): (
+                        {**entry, "has_tip": tip_states[entry["id"]]}
+                        if entry.get("id") in tip_states else entry
+                    )
                     for i, entry in enumerate(pipettes)
                 },
                 "labwares": self._key_run_entries_by_slot(labware),

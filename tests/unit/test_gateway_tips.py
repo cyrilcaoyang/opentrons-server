@@ -99,6 +99,58 @@ def _move(service, kind, labware, well, pipette="p300"):
     getattr(service, kind)(request)
 
 
+def test_pick_refused_before_motion_when_the_robot_reports_a_tip(service):
+    """A tip the engine still believes is on (picked before a restart, or
+    pulled off by hand after a halted plan) used to surface mid-plan as
+    UnexpectedTipAttachError and ERROR. Ask the robot first: 412, state and
+    ledger untouched, and the body says how to clear it."""
+    service.setup_protocol(RECIPE)
+    service.control.has_tip.return_value = True
+
+    with pytest.raises(TipUnavailable) as excinfo:
+        _pick(service, "A1")
+
+    body = excinfo.value.body
+    assert body["robot_reports_tip"] is True
+    assert "drop_tip" in body["detail"] and '"pipette": "p300"' in body["detail"]
+    assert "no tip" in body["detail"]  # the ledger's side of the disagreement
+    assert service.state == OT2ServiceState.READY
+    assert service.last_error is None
+    assert service.tips.status("4", "A1") == "new"  # the pick was never marked
+    assert service.tips.get_mount("p300") is None
+    service.control.pick_up_tip.assert_not_called()
+
+
+def test_drop_refused_before_motion_when_the_robot_reports_no_tip(service):
+    service.setup_protocol(RECIPE)
+    service.control.has_tip.return_value = False
+    _pick(service, "A1")  # ledger: tip on p300 from 4/A1
+
+    with pytest.raises(TipUnavailable) as excinfo:
+        service.drop_tip(TipRequest(pipette="p300"))
+
+    body = excinfo.value.body
+    assert body["robot_reports_tip"] is False
+    assert body["rack"] == "4" and body["well"] == "A1"
+    assert "tips.mark" in body["detail"]
+    assert service.state == OT2ServiceState.READY
+    assert service.tips.get_mount("p300") is not None  # the ledger keeps its claim
+    service.control.drop_tip.assert_not_called()
+
+
+def test_tip_actions_proceed_when_the_robot_agrees_or_cannot_say(service):
+    service.setup_protocol(RECIPE)
+    # Mock() is neither True nor False: no readback, the engine stays the judge.
+    _pick(service, "A1")
+    service.control.pick_up_tip.assert_called_once()
+    service.control.has_tip.return_value = True  # robot agrees a tip is on
+    service.drop_tip(TipRequest(pipette="p300"))
+    service.control.drop_tip.assert_called_once()
+    service.control.has_tip.return_value = False  # robot agrees the head is bare
+    _pick(service, "B1")
+    assert service.control.pick_up_tip.call_count == 2
+
+
 def test_setup_registers_tipracks_only(service):
     service.setup_protocol(RECIPE)
 
