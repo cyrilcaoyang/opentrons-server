@@ -186,8 +186,11 @@ lab-skills / dashboard / agents          this repo                        robot
   | `ot2-gateway-hte` | Cytation PC | 8020 | `C:\SDL_Deploy\ot2-hte` |
   | `ot2-gateway-complexation` | UPLC PC | 8021 | `C:\SDL_Deploy\ot2-complexation` |
 
-  Complexation runs as LocalService using the venv Python directly. Include
-  `--extra platebalance` as well as `--extra labware` when syncing its environment.
+  Complexation runs as `.\sdl2` (since 2026-10-02) using the venv Python
+  directly. Its service-local Claude Code login supplies the optional Sonnet
+  assistant; preserve `OT2_ASSISTANT_CLAUDE_PATH` and every other NSSM
+  environment entry when changing service settings. When syncing, use
+  `--extra labware --extra platebalance`.
   Its former Cytation service is disabled; never start both instances.
 
   Editing `Projects\opentrons-server` is therefore safe — it changes nothing a
