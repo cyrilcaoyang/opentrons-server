@@ -1007,10 +1007,6 @@ export function ControlPanel({
                 {isPaused ? "Paused" : "Pausing…"}
               </span>
             )}
-            {/* Second line: things that are not run control — lights, camera,
-                and clearing a head — so the top line stays HOME / STOP /
-                PAUSE / play and nothing else. */}
-            <div className="h-0 basis-full" aria-hidden />
             <TileButton
               onClick={() => runControl("lights.set", () => postSetLights(token, !lightsOn))}
               disabled={locked || pending}
@@ -1034,6 +1030,10 @@ export function ControlPanel({
               />
               Light
             </TileButton>
+            {/* Second line: camera and clearing a head. The light stays on
+                the first line with the run controls, where it is reached for
+                most often. */}
+            <div className="h-0 basis-full" aria-hidden />
             <CameraControl stream={status.equipment_id === "ot2_complexation" ? "cam_echem_tapo_c100_main" : undefined} />
             {/* One per attached pipette. Drops into the fixed trash with no
                 location, which is also the recovery when the robot's run
