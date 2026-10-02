@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opentrons_server"                 # The distribution name on PyPI
-version = "0.3.0"                         # 0.3.0: consolidate parallel files
+version = "0.4.0"                         # 0.4.0: balance, assemblies, manual pipette, plate report, tip-state precheck
 authors = [
     { name="Yang Cao", email="cyrilcaoyang@gmail.com" },
     { name="Han Hao", email="clascclon@gmail.com" },
