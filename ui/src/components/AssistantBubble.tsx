@@ -719,7 +719,7 @@ export function AssistantBubble({
                 void send();
               }
             }}
-            rows={2}
+            rows={4}
             disabled={pending}
             placeholder={
               pending
@@ -738,7 +738,7 @@ export function AssistantBubble({
               aria-label="Stop assistant reply"
               className="self-stretch rounded bg-slate-700 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {stopping ? "Stopping…" : "Stop reply"}
+              {stopping ? "Stopping…" : "Stop"}
             </button>
           ) : (
             <button
@@ -751,13 +751,13 @@ export function AssistantBubble({
           )}
         </div>
         {model && models.length > 1 ? (
-          <label className="mt-1 flex items-center justify-center gap-1 text-[10px] text-ink-subtle dark:text-slate-500">
-            model:
+          <label className="mt-1.5 flex items-center justify-center gap-1.5 text-xs text-ink-subtle dark:text-slate-400">
+            Model
             <select
               value={model}
               disabled={pending}
               onChange={(e) => chooseModel(e.target.value)}
-              className="rounded border border-slate-300 bg-white px-1 py-0 text-[10px] text-ink focus:border-purple-500 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs text-ink focus:border-purple-500 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
               {models.map((m) => (
                 <option key={m} value={m}>
@@ -768,8 +768,8 @@ export function AssistantBubble({
           </label>
         ) : (
           model && (
-            <p className="mt-1 text-center text-[10px] text-ink-subtle dark:text-slate-500">
-              model: {model}
+            <p className="mt-1.5 text-center text-xs text-ink-subtle dark:text-slate-400">
+              Model {model}
             </p>
           )
         )}
