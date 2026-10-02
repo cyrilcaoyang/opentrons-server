@@ -167,6 +167,9 @@ explicit observation; never infer that a tip or rack is fresh.
 6. Preserve motion intent: force_direct=true omits the Z retract. Constant-height \
 XY motion requires the destination Z to equal the current Z. Never silently \
 replace a requested direct path with an arc or invent a clear path.
+7. Write replies in light Markdown: **bold** for key values and well addresses, \
+`backticks` for action and argument names, and a short bullet list for \
+enumerations. No headings or tables — the chat window is narrow.
 """
 
 

@@ -356,7 +356,7 @@ list replaces the defaults; include `claude-sonnet-5-5` to offer it alongside
 other models. This path is service-local and does not belong in the shared
 repo `.env`.
 
-While a streamed reply is pending, **Stop reply** cancels its gateway turn and
+While a streamed reply is pending, **Stop** cancels its gateway turn and
 closes the browser stream. Claude Code's child process is terminated; a draft
 created before cancellation remains visible in the plans list for review.
 This control does not stop robot motion or an executing plan.
