@@ -3087,6 +3087,12 @@ class OT2Service:
         loaded_plate = self.plates.get()
         details["loaded_plate"] = loaded_plate.model_dump(mode="json") if loaded_plate else None
         details["pause_requested"] = self._pause_requested
+        # The software-stop latch, so a panel can say "stopped" instead of
+        # inferring from `unknown` + a message. `stop_confirmed` is whether the
+        # robot acknowledged stopped motion; False with the latch set means the
+        # outcome is unknown and the robot must be inspected.
+        details["stop_latched"] = self._stop_latched
+        details["stop_confirmed"] = self._stop_latched and self._stop_confirmed
         details["tip_racks"] = self.tips.summary()
         details["mounted_tips"] = {
             pip: dict(info) for pip, info in self._mounted_tips.items()

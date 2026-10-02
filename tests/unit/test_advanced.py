@@ -180,6 +180,8 @@ def test_stop_failure_is_unknown_never_ready(app):
     assert svc.state == OT2ServiceState.UNKNOWN_OUTCOME
     assert svc._observed_activity() == "unknown"
     assert svc._stop_latched and not svc._stop_confirmed
+    details = svc.get_status().details
+    assert details["stop_latched"] is True and details["stop_confirmed"] is False
 
 
 def test_ssh_stop_is_not_falsely_advertised(app):
@@ -242,6 +244,8 @@ def test_stop_latch_survives_gateway_restart(app, monkeypatch):
     restarted.boot_reconnect()
     assert restarted._stop_latched and restarted._operator_shutdown
     assert "startup" in restarted.allowed_actions()
+    details = restarted.get_status().details
+    assert details["stop_latched"] is True  # a panel can say STOPPED, not "disconnected"
     assert "home" not in restarted.allowed_actions()
 
 

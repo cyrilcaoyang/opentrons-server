@@ -48,6 +48,7 @@ Top level: `protocol_version`, `equipment_id`, `equipment_name`,
 | `session_recipe` | what `/control/setup` loaded. **Not authoritative** for what is on the deck |
 | `loaded_plate` | the orchestrator-tracked `LoadedPlate`, or `null` |
 | `tip_racks` | per-rack tip-status summary |
+| `stop_latched` / `stop_confirmed` | the software-stop latch: set from `/control/stop` until the next successful `startup`; `stop_confirmed` is whether the robot acknowledged stopped motion (false with the latch set = unknown outcome, inspect the robot) |
 | `mounted_tips` | tips currently on each pipette: origin rack/well, covered span, channels, `last_sample`, `contacted_liquid`, `uncertain` |
 | `pipette_channels` | tip wells consumed per pick, per pipette |
 | `pipette_volumes` | `{pipette: {min_ul, max_ul}}` — the **effective** live envelope the 412 guard uses |
