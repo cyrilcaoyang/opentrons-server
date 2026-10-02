@@ -195,7 +195,10 @@ action by calling `/control/*` directly or by talking to the robot-server.
    and while `activity == "running"` every run-starting action is withheld
    from `allowed_actions`.
 4. **`POST /control/pause` / `resume`** — control flow; `PAUSED` reports
-   `degraded` and allows only `resume` and `shutdown`.
+   `degraded` and allows only `resume` and `shutdown`. Pause never interrupts
+   motion: a command in flight finishes and the gateway pauses as it ends
+   (`details.pause_requested: true` until then); an executing plan waits at
+   its next step and continues on `resume`. Interrupting motion is `stop`.
 5. **`POST /control/shutdown`** — ends the session. The gateway then reports
    `requires_init`. Do not end an agent session with the device shut down
    unless you were asked to; release your claim and leave it connected.

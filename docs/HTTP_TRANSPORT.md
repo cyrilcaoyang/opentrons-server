@@ -128,8 +128,12 @@ that's the path.
 
 Consequences:
 
-- `/control/pause`/`resume` are **no-ops** on this transport — each command
-  already blocks to completion; there is no queue to pause.
+- `/control/pause`/`resume` send nothing to the robot on this transport — each
+  command already blocks to completion; there is no queue to pause. The gateway
+  pauses itself at the next command boundary instead: an in-flight command
+  finishes, the gateway becomes `PAUSED` as it ends (`details.pause_requested`
+  meanwhile), and a plan executing through the gateway waits at its next step
+  until `resume`. Nothing here interrupts motion; that is `stop`.
 - `moveLabware` may only use `strategy: manualMoveWithoutPause`.
   `manualMoveWithPause` dispatches a run-level pause that (a) hangs the
   blocking POST until something issues `play` and (b) once played, ends

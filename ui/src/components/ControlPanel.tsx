@@ -545,6 +545,7 @@ export function ControlPanel({
   // endpoint must never disagree" rule, applied to the UI.
   const allowedActions = status.allowed_actions ?? [];
   const isPaused = protocol?.state === "paused";
+  const pausePending = status.details?.pause_requested === true;
 
   const lightsRaw = components["lights"]?.state;
   const lightsOn = lightsRaw === "on";
@@ -953,15 +954,17 @@ export function ControlPanel({
             </TileButton>
             <TileButton
               onClick={() => runControl("pause", () => postPause(token))}
-              disabled={locked || pending || !allowedActions.includes("pause")}
+              disabled={locked || pending || pausePending || !allowedActions.includes("pause")}
               ariaLabel="Pause the running protocol"
               title={
                 controlHint ??
-                (allowedActions.includes("pause")
-                  ? "Pause between commands; use STOP to interrupt the owned HTTP run"
-                  : isPaused
-                    ? "Already paused"
-                    : "Nothing to pause")
+                (pausePending
+                  ? "Pausing: the running command finishes first"
+                  : allowedActions.includes("pause")
+                    ? "Pause after the current command finishes; a running plan waits at its next step until you press play. Use STOP to interrupt motion."
+                    : isPaused
+                      ? "Already paused"
+                      : "Nothing to pause")
               }
             >
               <PauseGlyph />
@@ -973,14 +976,18 @@ export function ControlPanel({
               ariaLabel="Resume the paused protocol"
               title={
                 controlHint ??
-                (isPaused ? "Paused — click to resume" : "Nothing is paused")
+                (isPaused
+                  ? "Paused — click to resume"
+                  : pausePending
+                    ? "Pausing: the running command finishes first, then play resumes"
+                    : "Nothing is paused")
               }
             >
               <PlayGlyph />
             </TileButton>
-            {isPaused && (
+            {(isPaused || pausePending) && (
               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-                Paused
+                {isPaused ? "Paused" : "Pausing…"}
               </span>
             )}
             <TileButton

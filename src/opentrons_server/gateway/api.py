@@ -665,12 +665,22 @@ def create_app(
 
     @app.post("/control/pause", response_model=CommandResponse, tags=["control"])
     def pause(_claim: None = Depends(require_claim)) -> CommandResponse:
-        service.pause()
-        return CommandResponse(message="OT-2 paused", state=service.state.value)
+        try:
+            service.pause()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+        pending = service.state.value == "busy"
+        return CommandResponse(
+            message="Pausing after the current command finishes" if pending else "OT-2 paused",
+            state=service.state.value,
+        )
 
     @app.post("/control/resume", response_model=CommandResponse, tags=["control"])
     def resume(_claim: None = Depends(require_claim)) -> CommandResponse:
-        service.resume()
+        try:
+            service.resume()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
         return CommandResponse(message="OT-2 resumed", state=service.state.value)
 
     @app.post("/control/platebalance/{action}", tags=["control"])

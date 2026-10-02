@@ -326,6 +326,9 @@ class OT2Service:
         self._command_lock = threading.Lock()
         self._stop_lock = threading.Lock()
         self._stop_latched = False
+        # Operator pause requested while a command was in flight: honoured
+        # when that command ends (see _run_action_locked), never mid-motion.
+        self._pause_requested = False
         self._stop_confirmed = False
         self.transport = (transport or os.getenv("OT2_TRANSPORT") or "ssh").lower()
         if IS_FLEX and self.transport != "http":
@@ -1415,16 +1418,48 @@ class OT2Service:
             self._stop_lock.release()
 
     def pause(self) -> None:
-        self._run_action("pause", lambda: self._require_control().pause(), idempotent=True)
-        with self._state_lock:
-            if not self._stop_latched:
-                self.state = OT2ServiceState.PAUSED
+        """Pause at the next command boundary.
+
+        Idle: PAUSED at once. A command in flight runs to completion — nothing
+        here interrupts motion; that is what ``stop`` is for — and the gateway
+        becomes PAUSED as it ends instead of READY. A plan executing through
+        the gateway then waits at its next step until ``resume``. Reported
+        meanwhile as ``details.pause_requested``.
+        """
+        if not self._command_lock.acquire(blocking=False):
+            with self._state_lock:
+                if self._stop_latched:
+                    raise RuntimeError("run stopped; inspect and start a fresh session")
+                self._pause_requested = True
+            return
+        try:
+            if self._stop_latched:
+                raise RuntimeError("run stopped; inspect and start a fresh session")
+            self._run_action_locked("pause", lambda: self._require_control().pause(), idempotent=True)
+            with self._state_lock:
+                if not self._stop_latched:
+                    self.state = OT2ServiceState.PAUSED
+        finally:
+            self._command_lock.release()
 
     def resume(self) -> None:
-        self._run_action("resume", lambda: self._require_control().resume(), idempotent=True)
-        with self._state_lock:
-            if not self._stop_latched:
-                self.state = OT2ServiceState.READY
+        """Leave PAUSED, or cancel a pause still waiting on the running command."""
+        if not self._command_lock.acquire(blocking=False):
+            with self._state_lock:
+                if self._pause_requested:
+                    self._pause_requested = False
+                    return
+            raise RuntimeError("another command is in flight")
+        try:
+            if self._stop_latched:
+                raise RuntimeError("run stopped; inspect and start a fresh session")
+            self._pause_requested = False
+            self._run_action_locked("resume", lambda: self._require_control().resume(), idempotent=True)
+            with self._state_lock:
+                if not self._stop_latched:
+                    self.state = OT2ServiceState.READY
+        finally:
+            self._command_lock.release()
 
     def set_location_from_well(
         self,
@@ -2963,6 +2998,7 @@ class OT2Service:
                 else f"Slot {self.platebalance.slot} has another occupant. Reconcile its records and clear the slot declaration.")
         loaded_plate = self.plates.get()
         details["loaded_plate"] = loaded_plate.model_dump(mode="json") if loaded_plate else None
+        details["pause_requested"] = self._pause_requested
         details["tip_racks"] = self.tips.summary()
         details["mounted_tips"] = {
             pip: dict(info) for pip, info in self._mounted_tips.items()
@@ -3557,6 +3593,14 @@ class OT2Service:
             with self._state_lock:
                 if not self._stop_latched and self.state == OT2ServiceState.BUSY:
                     self.state = previous_state
+                if self._pause_requested:
+                    # The operator asked while this command ran. It has now
+                    # ended, whatever its outcome; hold here if the gateway
+                    # would otherwise be open for the next command. A fault
+                    # keeps its own state — pausing an ERROR means nothing.
+                    self._pause_requested = False
+                    if not self._stop_latched and self.state == OT2ServiceState.READY:
+                        self.state = OT2ServiceState.PAUSED
             # Exact span end, whatever the outcome — including the
             # UNKNOWN_OUTCOME path, where "still running?" is genuinely
             # unanswerable until an operator reconciles.
