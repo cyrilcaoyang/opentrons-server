@@ -18,14 +18,15 @@ duplicated here — read them, do not guess:
   Pydantic models that validate a proposed step. Catalog membership is *not*
   live readiness; cross-check `/status.allowed_actions`.
 
-For a balance weight after dispensing, a plan may start with `platebalance.zero`
-or `platebalance.tare`, then dispense, `delay`, and `platebalance.read` with
-`{"wait_until_stable": true}` if a stable value is required. After the operator
-approves and runs the plan, inspect its status and step results in
-`GET /plans/{id}`. A read result contains grams, stability, and observation
-time. A Zero/Tare result of `sent_unconfirmed` means the serial write was sent
-without acknowledgment; a later reading does not prove the reference changed.
-Plan results are ephemeral and are not scientific records.
+For balance dosing with a loaded plate, tare it before aspirating, then inspect
+the tare result before proposing a separate dispensing plan. Tare sends its
+command once and waits up to 30 seconds for two stable near-zero readings;
+`baseline_observed` means the baseline was measured. If that does not happen,
+the plan halts before its next step. Zero is for an unloaded balance and still
+returns `sent_unconfirmed`; a later reading cannot prove that its command
+changed the reference. A post-dispense `platebalance.read` can use
+`{"wait_until_stable": true}`. Inspect plan status and step results in
+`GET /plans/{id}`. Results are ephemeral and are not scientific records.
 
 ## Deployments
 

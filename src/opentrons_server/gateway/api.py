@@ -671,7 +671,7 @@ def create_app(
     @app.post("/control/platebalance/{action}", tags=["control"])
     def platebalance_action(action: Literal["read", "tare", "zero"], request: PlateBalanceRequest | None = None,
                             _claim: None = Depends(require_claim)) -> dict[str, Any]:
-        """Explicit balance operation; reads may wait for stability within a deadline."""
+        """Explicit balance operation; tare waits for stable zero, and reads may wait for stability."""
         try:
             return service.platebalance_action(action, request)
         except ValueError as exc:

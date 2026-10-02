@@ -3,7 +3,9 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 
-from opentrons_server.gateway.platebalance import BalancePipettingGeometry, BalanceStabilityTimeout, PlateBalanceConfig, PlateBalanceRequest, PlateBalanceV1, parse_weight
+from opentrons_server.gateway.platebalance import BalancePipettingGeometry, BalanceReferenceTimeout, BalanceStabilityTimeout, PlateBalanceConfig, PlateBalanceRequest, PlateBalanceV1, parse_weight
+from opentrons_server.gateway.advanced import BlowOutRequest
+from opentrons_server.gateway.limits import OutOfEnvelope
 from opentrons_server.gateway.models import DispenseRequest, MoveToRequest, WellLocation
 from opentrons_server.gateway.service import OT2Service, OT2ServiceState, UnknownOutcomeError
 from opentrons_server.gateway.api import create_app
@@ -45,11 +47,15 @@ def test_read_and_distinct_reference_operations(tmp_path):
     result = service.platebalance_action("read")
     assert result["reading"]["value"] == -1.2345
     assert result["reading"]["stable"] is True
-    for action in ("tare", "zero"):
-        result = service.platebalance_action(action)
-        assert result["reading"] is None
-        assert result["last_operation"]["outcome"] == "sent_unconfirmed"
-        driver.set_reference.assert_called_with(action)
+    driver._weigh.side_effect = [(False, 0.01), (True, 0.0001), (True, 0.0)]
+    result = service.platebalance_action("tare")
+    assert result["reading"]["stable"] is True
+    assert result["reading"]["value"] == 0.0
+    assert result["last_operation"]["outcome"] == "baseline_observed"
+    assert driver._weigh.call_count == 4
+    result = service.platebalance_action("zero")
+    assert result["reading"] is None
+    assert result["last_operation"]["outcome"] == "sent_unconfirmed"
     assert driver.set_reference.call_count == 2
 
 
@@ -132,7 +138,7 @@ def test_driver_wire_commands_use_distinct_tare_and_zero_without_open_on_init(mo
     from opentrons_server.gateway.platebalance import matterlab_driver
     monkeypatch.setattr("opentrons_server.gateway.platebalance.time.sleep", lambda _: None)
     monkeypatch.setattr("matterlab_serial_device.serial_device.time.sleep", lambda _: None)
-    driver = matterlab_driver(PlateBalanceConfig(com_port="COM3"))
+    driver = matterlab_driver(PlateBalanceConfig(com_port="COM3", balance_blow_out_enabled=True))
     assert driver.device is None
     transport = Mock()
     transport.read_until.return_value = b"+     12.3456 g  \r\n"
@@ -257,12 +263,64 @@ def test_bad_wait_options_rejected(body):
         PlateBalanceRequest(**body)
 
 
-def test_reference_does_not_accept_stability_wait(tmp_path):
+def test_zero_does_not_accept_stability_wait(tmp_path):
     service, _, factory = make_service(tmp_path)
-    for action in ("tare", "zero"):
-        with pytest.raises(ValueError, match="only to read"):
-            service.platebalance_action(action, PlateBalanceRequest(wait_until_stable=True))
+    with pytest.raises(ValueError, match="only to read or tare"):
+        service.platebalance_action("zero", PlateBalanceRequest(wait_until_stable=True))
     factory.assert_not_called()
+
+
+def test_tare_timeout_halts_before_dosing_and_preserves_last_reading(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    driver._weigh.return_value = (True, 1.0)
+    with pytest.raises(BalanceReferenceTimeout, match="stable zero was not observed"):
+        service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
+    assert driver.set_reference.call_count == 1
+    assert driver._weigh.call_count > 1
+    assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
+    assert service.platebalance.snapshot()["reading"]["value"] == 1.0
+    assert service.state == OT2ServiceState.READY
+
+
+def test_tare_holds_command_lock_until_stable_baseline(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    def assert_stationary(**kwargs):
+        assert service._command_lock.locked()
+        assert service.get_status().activity == "running"
+        with pytest.raises(RuntimeError, match="in flight"):
+            service._run_action("move_to", lambda: pytest.fail("robot must not move"), idempotent=True)
+        return True, 0.0
+    driver._weigh.side_effect = assert_stationary
+    result = service.platebalance_action("tare")
+    assert result["last_operation"]["outcome"] == "baseline_observed"
+    assert driver._weigh.call_count == 2
+    assert service.state == OT2ServiceState.READY
+
+
+def test_tare_does_not_accept_zero_after_deadline(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    def late_zero(**kwargs):
+        balance_clock.sleep(2)
+        return True, 0.0
+    driver._weigh.side_effect = late_zero
+    with pytest.raises(BalanceReferenceTimeout):
+        service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
+    assert driver.set_reference.call_count == 1
+    assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
+
+
+def test_stop_during_tare_verification_never_repeats_reference(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    def interrupted_zero(**kwargs):
+        service._stop_latched = True
+        service.state = OT2ServiceState.UNKNOWN_OUTCOME
+        return True, 0.0
+    driver._weigh.side_effect = interrupted_zero
+    with pytest.raises(UnknownOutcomeError, match="interrupted"):
+        service.platebalance_action("tare")
+    driver.set_reference.assert_called_once_with("tare")
+    assert driver._weigh.call_count == 1
+    assert service.state == OT2ServiceState.UNKNOWN_OUTCOME
 
 
 def test_api_read_options_and_validation(tmp_path):
@@ -472,3 +530,41 @@ def test_balance_dispense_defaults_to_two_mm_and_half_rate(tmp_path, transport, 
     with pytest.raises(ValueError, match="at least"):
         service.dispense(request.model_copy(update={"location": WellLocation(
             labware_nickname="9", position="A1", top=1)}))
+
+
+def test_balance_blow_out_requires_opt_in_clearance_and_capped_flow(tmp_path):
+    service, _, _ = qualified_balance(tmp_path)
+    service.control = Mock()
+    service.control.get_flow_rate.return_value = {"blow_out": 40.0}
+    service._ensure_session_pipette = Mock(return_value="right")
+    service._mark_tip_used = Mock()
+    request = BlowOutRequest(pipette="right", location=WellLocation(
+        labware_nickname="9", position="A1"))
+
+    with pytest.raises(ValueError, match="operator-qualified"):
+        service.advanced_action("blow_out", request)
+    service.control.blow_out.assert_not_called()
+    assert service.state == OT2ServiceState.READY
+
+    service.platebalance.config.balance_blow_out_enabled = True
+    service.advanced_action("blow_out", request)
+    assert service.control.get_location_from_labware.call_args.kwargs["default_offset"] == 2
+    assert service.control.move_to_pip.call_args.kwargs["minimum_z_height"] == 123
+    calls = [entry[0] for entry in service.control.mock_calls]
+    assert calls.index("get_location_from_labware") < calls.index("move_to_pip") < calls.index("blow_out")
+    service.control.blow_out.assert_called_once_with("right")
+    service._mark_tip_used.assert_called_once_with("right", "9", "A1")
+
+    service.control.reset_mock()
+    service.control.get_flow_rate.return_value = {"blow_out": 47.0}
+    with pytest.raises(OutOfEnvelope, match="at most"):
+        service.advanced_action("blow_out", request)
+    assert service.state == OT2ServiceState.READY
+    service.control.get_location_from_labware.assert_not_called()
+    service.control.move_to_pip.assert_not_called()
+    service.control.blow_out.assert_not_called()
+
+    with pytest.raises(ValueError, match="at least"):
+        service.advanced_action("blow_out", request.model_copy(update={"location": WellLocation(
+            labware_nickname="9", position="A1", top=0)}))
+    service.control.blow_out.assert_not_called()

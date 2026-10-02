@@ -17,6 +17,7 @@ Install with `uv sync --extra labware --extra platebalance`. Set
   "model": "WZB254-N",
   "slot": "9",
   "adapter_height_mm": null,
+  "balance_blow_out_enabled": false,
   "max_labware_height_mm": 25,
   "com_port": "COM3",
   "baudrate": 9600,
@@ -114,22 +115,35 @@ well moves require an explicit offset at least 2 mm above the rim and an arced
 path. Dispense defaults to that clearance and caps flow at half the official
 GEN2 model default, including explicit flow rates. This path accepts only
 single-channel GEN2 pipettes until a multi-channel clearance is qualified.
-Aspirate, mix, touch tip,
-tip handling and other contact actions remain blocked at the balance. This
-configuration applies to Complexation; do not apply it to HTE.
+Aspirate, mix, touch tip, tip handling and other contact actions remain blocked
+at the balance. A separate `balance_blow_out_enabled` config flag, off by
+default, permits a balance-well `blow_out` only after operator acceptance on
+Complexation. It requires the same exact plate geometry, qualified
+single-channel GEN2 pipette, 2 mm rim clearance and guarded arc as dispense.
+The current pipette blow-out flow rate must be no more than half its documented
+dispense default; set it explicitly before the blow-out if needed. The gateway
+refuses a faster rate before motion and never silently changes it. Use an
+explicit well destination; `in_place=true` has no balance placement or flow
+check and must not be used as a balance workaround. This configuration applies
+to Complexation; do not apply it to HTE. Blow-out moves the plunger beyond
+its usual dispense position to expel residual liquid, but only a stable
+balance read measures what reached the plate.
 
 ## Operator controls
 
 `POST /control/platebalance/{read|tare|zero}` requires the existing gateway
 claim and authentication. Actions also require an idle, ready gateway, valid
 slot placement and no stop latch or unresolved outcome. They are published in
-`allowed_actions`. Read, Tare, and Zero are also proposable plan actions, so an
-operator-approved plan can set a reference, dispense, wait, then measure weight
-in order. The read step contains `reading` with value in grams, stability and observation time. An
+`allowed_actions`. Read, Tare, and Zero are also proposable plan actions. A
+loaded plate should be tared and its stable near-zero baseline observed before
+aspiration and dosing. The read step contains `reading` with value in grams, stability and observation time. An
 unstable single read is labelled unstable; request `wait_until_stable: true`
 when the plan requires a stable weight. A timeout fails the step and skips later
-steps. Tare and Zero are non-idempotent plan steps; their result records
-`sent_unconfirmed` because the serial protocol does not acknowledge the change.
+steps. Tare and Zero are non-idempotent plan steps. Tare sends its serial
+command once, then waits up to 30 seconds for two fresh stable readings within
+0.0002 g of zero. Its successful result is `baseline_observed`; a timeout
+halts the plan before the next action and records `baseline_unconfirmed`.
+Zero remains `sent_unconfirmed` because its write has no acknowledgment.
 
 - **Weight** (API action `read`) sends `ESC P CR LF` once and returns the reported weight, stability,
   unit and observation time. Invalid, partial, overload and error frames fail.
@@ -146,7 +160,7 @@ steps. Tare and Zero are non-idempotent plan steps; their result records
   The gateway holds the command lock throughout. A software stop ends the loop
   after the current bounded serial transaction; no recovery motion is issued.
   Use a client request timeout longer than the wait budget plus serial I/O overhead.
-- **Tare** sends `ESC U CR LF` once.
+- **Tare** sends `ESC U CR LF` once, then reads until the stable baseline is observed or the bounded wait expires.
 - **Zero** sends `ESC V CR LF` once.
 
 The model-specific commands extend `matterlab-balances==1.1.0` using
@@ -155,14 +169,23 @@ repeated stable-tare routine are not used. See the manufacturer's
 [WZB operating instructions, §8.3–8.5, pp. 32–38](https://api.sartorius.com/document-hub/dam/download/190205/Manual_Weigh_Cells_WZB_N_WZB254-NC_WWZ6018-e221001.pdf).
 Zero is distinct from calibration; no adjustment commands are exposed.
 
-Tare/Zero return `sent_unconfirmed`: the protocol write does not acknowledge
-completion. Previous weight readback is invalidated; use Read to inspect the
-new weight. A failed reference command latches `unknown_outcome` and is never
-automatically repeated. A cached reading is timestamped and is not proof of
-current connectivity. Simulation/dry run perform no serial I/O.
-`sent_unconfirmed` is the expected response to a successful serial write;
-it does not itself block a new read or prove that the reference changed. The
-plan result reports the measured weight under the balance's current reference.
+Use Tare to make an already loaded plate the baseline; Zero is for the unloaded
+balance and has a limited zero range (2% of maximum load by default). The
+driver waits one second after sending either command. For Tare, the gateway
+then queries the balance under the same command lock until two stable values
+within 0.0002 g of zero are observed; this verifies the baseline, not receipt
+of a serial acknowledgment. The manufacturer's default setting tares after
+stability, so vibration from nearby robot motion can delay the baseline. A
+gateway robot command cannot run during the tare wait. Park the robot and let
+motion settle before starting a tare; the gateway cannot stop motion commanded
+outside its own session. A timeout stops the plan before any following
+dispense. The last observed reading is retained for inspection, and Tare is
+never repeated automatically. A communication failure after the serial write
+latches `unknown_outcome` for operator reconciliation. Zero returns
+`sent_unconfirmed`; a later reading cannot prove that command changed the
+reference. A cached reading is timestamped and is not proof of current
+connectivity. Simulation/dry run perform no serial I/O. Plan results report
+observed weight under the balance's current reference.
 
 An existing slot-9 declaration or observed occupant is preserved, never silently
 overwritten. Reconcile the old rack/plate records and clear its slot declaration

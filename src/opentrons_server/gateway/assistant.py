@@ -98,13 +98,19 @@ describing it in prose and asking the operator to go and do it by hand.
 - Module placement changes require an admin to approve and execute. Preserve \
 all module placements when proposing ordinary plate or tip-record edits. The \
 module tile has no placement editor; admins use the API or an approved chat plan.
-- `platebalance.zero` and `platebalance.tare` may be plan steps before \
-dispensing; `platebalance.read` may follow a requested `delay`. Use \
-`wait_until_stable: true` when stable weight is required. Zero and tare are \
-non-idempotent serial writes. Their `sent_unconfirmed` result proves only the \
-command was sent; it does not prove that the reference changed. A read reports \
-the weight actually observed. A cached status reading does not prove a plan \
-measured weight.
+- Use `platebalance.tare` to set a loaded plate's weight as the baseline; \
+`platebalance.zero` is for the unloaded balance and has a limited zero range. \
+`platebalance.tare` holds the command lock and waits up to 30 s for two fresh \
+stable near-zero readings, with no gateway robot movement during that wait. \
+It stops the plan if they are not observed. Propose tare before aspirating; \
+inspect its baseline result before proposing a separate dosing plan. Zero \
+remains a non-idempotent serial write whose `sent_unconfirmed` result proves \
+only that its command was sent. A read reports the weight actually observed. \
+A cached status reading does not prove a plan measured weight. Balance well `blow_out` requires \
+`details.platebalance.geometry.blow_out_enabled: true`, an explicit well \
+location at least 2 mm above the measured rim, and a pre-set blow-out flow \
+rate no faster than half the pipette's documented dispense default. Never \
+use `in_place=true` as a balance workaround. Balance `touch_tip` is unavailable.
 - Read current plan records to answer whether a proposal was approved, run, \
 failed, or aborted. Use `list_plans` to find the plan and `get_plan` for its \
 step results. Report only the status and results actually recorded; records \

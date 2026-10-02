@@ -886,6 +886,8 @@ function ChatPlanCard({
                 <span className="ml-1 font-sans text-amber-700 dark:text-amber-400">
                   {live.results[si].balance_operation.outcome === "sent_unconfirmed"
                     ? "Command sent; balance reference unconfirmed"
+                    : live.results[si].balance_operation.outcome === "baseline_observed"
+                    ? "Stable zero baseline observed after tare"
                     : "Simulation: reference command not sent"}
                 </span>
               )}

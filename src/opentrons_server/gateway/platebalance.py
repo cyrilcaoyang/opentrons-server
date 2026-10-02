@@ -84,6 +84,8 @@ class PlateBalanceConfig(BaseModel):
     # Metadata only until a qualified plate/support geometry is implemented.
     adapter_height_mm: float | None = Field(default=None, gt=0, le=200, allow_inf_nan=False)
     pipetting_geometry: BalancePipettingGeometry | None = None
+    # Enabled only after the guarded blow-out path is accepted on this holder.
+    balance_blow_out_enabled: bool = False
     max_labware_height_mm: float | None = Field(default=25, gt=0, le=25, allow_inf_nan=False)
     com_port: str | None = Field(default=None, pattern=r"^(COM[1-9][0-9]*|/dev/[A-Za-z0-9_./-]+)$")
     baudrate: int = Field(default=9600, ge=300, le=115200)
@@ -101,13 +103,20 @@ class PlateBalanceRequest(BaseModel):
 
 
 class PlateBalanceReferenceRequest(BaseModel):
-    """Tare and zero take no parameters; reject read-only wait options."""
+    """Reference plan steps take no parameters; tare verifies its baseline."""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class BalanceStabilityTimeout(RuntimeError):
     """Valid readbacks were received, but stability was not reached in time."""
+
+
+class BalanceReferenceTimeout(BalanceStabilityTimeout):
+    """Tare was sent, but a stable zero baseline was not observed in time."""
+
+
+_TARE_ZERO_TOLERANCE_G = 0.0002  # Two WZB254-N display increments.
 
 
 def validate_balance_plate(definition: dict[str, Any], *, max_height_mm: float = 25) -> None:
@@ -179,7 +188,7 @@ def matterlab_driver(config: PlateBalanceConfig) -> Any:
 
     # Defer opening the port until an explicit operator action. The serial
     # dependency version supporting this option is pinned by the extra.
-    return WZB254N(**config.model_dump(exclude={"model", "slot", "adapter_height_mm", "pipetting_geometry", "max_labware_height_mm"}),
+    return WZB254N(**config.model_dump(exclude={"model", "slot", "adapter_height_mm", "pipetting_geometry", "balance_blow_out_enabled", "max_labware_height_mm"}),
                   connect_hardware=False, write_timeout=config.timeout)
 
 
@@ -219,6 +228,8 @@ class PlateBalanceV1:
             "geometry": {"adapter_height_mm": self.config.adapter_height_mm,
                          "max_labware_height_mm": self.config.max_labware_height_mm or 25,
                          "pipetting_enabled": self.config.pipetting_geometry is not None,
+                         "blow_out_enabled": (self.config.balance_blow_out_enabled
+                                              and self.config.pipetting_geometry is not None),
                          "qualified_plate": (self.config.pipetting_geometry.model_dump(mode="json")
                                              if self.config.pipetting_geometry else None)},
         }
@@ -228,32 +239,36 @@ class PlateBalanceV1:
 
     def execute(self, action: str, *, request: PlateBalanceRequest | None = None,
                 cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
-        request = request or PlateBalanceRequest()
+        request = request or PlateBalanceRequest(timeout_s=30 if action == "tare" else 10)
         if not self.supports(action):
             raise ValueError("Balance is unconfigured or this operation is unsupported")
-        if action != "read" and request.wait_until_stable:
-            raise ValueError("wait_until_stable applies only to read")
+        if action == "zero" and request.wait_until_stable:
+            raise ValueError("wait_until_stable applies only to read or tare")
         if action != "read":
             self._reading = None  # A pre-tare net weight no longer describes this reference.
         try:
             if self._driver is None:
                 self._driver = self._factory(self.config)
+            def observe(deadline: float | None = None) -> tuple[bool, float]:
+                if cancelled():
+                    raise RuntimeError("Balance read interrupted by stop")
+                stable, weight = (self._driver._weigh(timeout_s=max(0.001, deadline - time.monotonic()))
+                                  if deadline is not None else self._driver._weigh())
+                if type(stable) is not bool or not math.isfinite(float(weight)):
+                    raise ValueError("Balance returned an invalid weight or stability flag")
+                self._reading = {"value": float(weight), "unit": "g", "stable": stable,
+                                 "observed_at": datetime.now(timezone.utc).isoformat()}
+                if cancelled():
+                    raise RuntimeError("Balance read interrupted by stop")
+                return stable, float(weight)
+
             if action == "read":
                 deadline = time.monotonic() + request.timeout_s
                 while True:
-                    if cancelled():
-                        raise RuntimeError("Balance read interrupted by stop")
                     if request.wait_until_stable and time.monotonic() >= deadline:
                         raise BalanceStabilityTimeout(f"Weight did not stabilize within {request.timeout_s:g} s")
                     # Repeat only valid unstable readings, never serial failures.
-                    stable, weight = (self._driver._weigh(timeout_s=max(0.001, deadline - time.monotonic()))
-                                      if request.wait_until_stable else self._driver._weigh())
-                    if type(stable) is not bool or not math.isfinite(float(weight)):
-                        raise ValueError("Balance returned an invalid weight or stability flag")
-                    self._reading = {"value": float(weight), "unit": "g", "stable": stable,
-                                     "observed_at": datetime.now(timezone.utc).isoformat()}
-                    if cancelled():
-                        raise RuntimeError("Balance read interrupted by stop")
+                    stable, weight = observe(deadline if request.wait_until_stable else None)
                     if request.wait_until_stable and time.monotonic() >= deadline:
                         raise BalanceStabilityTimeout(f"Weight did not stabilize within {request.timeout_s:g} s")
                     if not request.wait_until_stable or stable:
@@ -262,15 +277,38 @@ class PlateBalanceV1:
                 outcome = "observed"
             else:
                 self._driver.set_reference(action)  # one write, never repeat automatically
-                outcome = "sent_unconfirmed"  # driver provides no acknowledgment
+                outcome = "sent_unconfirmed"  # zero has no acknowledgment
+                if action == "tare":
+                    # The serial write is not an acknowledgment. Observe two
+                    # fresh, stable near-zero values before the next plan step.
+                    deadline = time.monotonic() + request.timeout_s
+                    consecutive = 0
+                    while True:
+                        if time.monotonic() >= deadline:
+                            raise BalanceReferenceTimeout(
+                                f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
+                            )
+                        stable, weight = observe(deadline)
+                        if time.monotonic() >= deadline:
+                            raise BalanceReferenceTimeout(
+                                f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
+                            )
+                        consecutive = consecutive + 1 if stable and abs(weight) <= _TARE_ZERO_TOLERANCE_G else 0
+                        if consecutive >= 2:
+                            outcome = "baseline_observed"
+                            break
+                        time.sleep(min(0.25, max(0, deadline - time.monotonic())))
             self._error = None
             self._operation = {"action": action, "outcome": outcome,
                                "at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:
             self._error = str(exc)
-            self._operation = {"action": action, "outcome": ("stability_timeout" if isinstance(exc, BalanceStabilityTimeout)
+            self._operation = {"action": action, "outcome": ("baseline_unconfirmed" if isinstance(exc, BalanceReferenceTimeout)
+                               else "stability_timeout" if isinstance(exc, BalanceStabilityTimeout)
                                else "failed" if action == "read" else "unknown_outcome"),
                                "at": datetime.now(timezone.utc).isoformat()}
+            if isinstance(exc, BalanceReferenceTimeout):
+                raise
             if action != "read":
                 raise OSError(f"Balance {action} outcome is unknown: {exc}") from exc
             raise

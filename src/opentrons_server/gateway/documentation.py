@@ -68,7 +68,7 @@ def equipment_documentation() -> dict[str, Any]:
             "units": "Liquid volumes in microliters, coordinates in millimeters, temperature in Celsius.",
             "deck_declare": "Full-layout replacement, not a patch; omitted slots are cleared.",
             "temperature": "tempmod.set accepts a target without waiting for the block to reach it.",
-            "balance": "platebalance.zero, platebalance.tare, and platebalance.read are plannable. Zero/Tare are non-idempotent and return sent_unconfirmed after a serial write; a read returns observed weight, with wait_until_stable=true when required. Inspect plan status and step results after operator execution. Plan results are ephemeral, not scientific records.",
+            "balance": "platebalance.zero, platebalance.tare, and platebalance.read are plannable. Tare sends one non-idempotent command, then waits up to 30 s for two stable near-zero readings before a plan can continue; timeout halts the plan without repeating tare. Zero remains sent_unconfirmed after its serial write. A read returns observed weight, with wait_until_stable=true when required. Inspect plan status and step results after operator execution. Plan results are ephemeral, not scientific records.",
             "motion": "move_to defaults to an arced path. force_direct=true omits the Z-retract waypoint; constant-height XY travel requires destination Z equal to current Z. Flex absolute gripper moves default to direct; relative gripper dz=0 retains height.",
             "manual_panel": "The operator Direct Drive panel offers one-step XYZ jogs, speed, explicit position reads and Copy XYZ. jog and pipette_position are claim-gated operator endpoints, not plan actions. Jog uses fresh controller coordinates and a straight path; transport loss is unknown_outcome and must not be retried. Position reads do not home, and /status never triggers them.",
         },
@@ -85,7 +85,7 @@ def equipment_documentation() -> dict[str, Any]:
         ],
         "liquid_handling": {
             "blow_out": {"gateway_http_endpoint": "/control/blow-out", "plan_action": "blow_out",
-                         "description": "Expel residual liquid at location, or explicitly in_place=true. Dispense does not automatically call blow-out."},
+                         "description": "Expel residual liquid at location, or explicitly in_place=true. Dispense does not automatically call blow-out. Balance-well blow-out requires opt-in qualified geometry, explicit well location at least 2 mm above the rim, and a pre-set capped blow-out flow; never use in_place as a balance workaround."},
             "touch_tip": "POST /control/touch-tip names loaded labware and a well. The run engine uses labware geometry; existing tip contact tracking is updated.",
             "air_gap": "POST /control/air-gap requires a well and height above its top. Accounts for liquid already held when capacity is known.",
             "dispense": "Optional push_out is plunger air volume in uL, separate from a full blow-out.",

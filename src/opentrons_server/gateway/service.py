@@ -1466,9 +1466,9 @@ class OT2Service:
         return bool(slot.module and slot.module.local_peripheral and slot.slot_state != "mismatch")
 
     def platebalance_action(self, action: str, request: PlateBalanceRequest | None = None) -> Dict[str, Any]:
-        request = request or PlateBalanceRequest()
-        if action != "read" and request.wait_until_stable:
-            raise ValueError("wait_until_stable applies only to read")
+        request = request or PlateBalanceRequest(timeout_s=30 if action == "tare" else 10)
+        if action == "zero" and request.wait_until_stable:
+            raise ValueError("wait_until_stable applies only to read or tare")
         balance = self.platebalance
         if balance is None or not balance.supports(action):
             raise ValueError("platebalanceV1 is unconfigured or operation is unsupported")
@@ -1657,6 +1657,13 @@ class OT2Service:
         """Execute only a typed catalog entry through the existing state machine."""
         operation = ADVANCED_ACTIONS[name]
         request = operation.model.model_validate(request)
+        balance_blow_out = None
+        if name == "blow_out" and request.location is not None:
+            balance_blow_out = self._qualified_balance_location(request.location, require_explicit_top=False)
+            if balance_blow_out is not None:
+                if not self.platebalance.config.balance_blow_out_enabled:
+                    raise ValueError("Balance blow-out requires operator-qualified acceptance")
+                self._balance_pipette_model(request.pipette, request.pipette)
         if not self.dry_run and name not in self.allowed_actions():
             raise RuntimeError(f"{name} is not allowed in {self.state.value}")
         if name in {"mix", "air_gap"}:
@@ -1681,7 +1688,25 @@ class OT2Service:
                 if request.in_place:
                     control.blow_out_in_place(pip)
                 else:
-                    self.set_location_from_well(request)
+                    if balance_blow_out is not None:
+                        cap = self._balance_dispense_cap(request.pipette, pip)
+                        current = float(control.get_flow_rate(pip)["blow_out"])
+                        if not 0 < current < float("inf") or current > cap + 1e-9:
+                            raise OutOfEnvelope({
+                                "detail": f"Balance blow-out flow rate must be at most {cap:g} uL/s; current rate is {current:g} uL/s",
+                                "pipette": request.pipette,
+                                "requested_ul_s": current,
+                                "max_ul_s": cap,
+                                "retry_after_s": None,
+                            })
+                    self.set_location_from_well(
+                        request,
+                        default_origin="top",
+                        default_offset=balance_blow_out[1] if balance_blow_out is not None else 0,
+                        allow_balance=balance_blow_out is not None,
+                    )
+                    if balance_blow_out is not None:
+                        control.move_to_pip(pip, minimum_z_height=balance_blow_out[0].rim_height_mm + 2.0)
                     contact_attempted = True
                     control.blow_out(pip)
             elif name == "touch_tip":

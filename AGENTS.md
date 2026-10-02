@@ -133,11 +133,17 @@ lab-skills / dashboard / agents          this repo                        robot
   in their slot declaration; preserve this marker and full definition. This is
   weighing-only placement by default. Optional exact-definition geometry can
   qualify arced moves and slow, rim-cleared dispenses for single-channel GEN2
-  pipettes; all other balance well actions stay blocked. Do not configure it
+  pipettes. Balance-well blow-out has a separate `balance_blow_out_enabled`
+  config flag, off by default; it keeps the same rim clearance and arc and
+  requires the pipette's blow-out flow rate to be at most half its documented
+  dispense default. It needs operator acceptance on Complexation. Touch tip
+  and other balance contact actions stay blocked. Do not configure it
   until the holder datum and travel path are qualified on Complexation.
   `platebalance.read`, `platebalance.tare`, and `platebalance.zero` can be
   proposed as plan steps. Read returns a timestamped measurement; tare/zero
-  are non-idempotent and report `sent_unconfirmed` after the serial write. See
+  are non-idempotent. Tare waits up to 30 seconds for two stable near-zero
+  readings and halts a plan if they are absent; Zero remains `sent_unconfirmed`.
+  See
   `docs/PLATEBALANCE_V1.md`.
 - **Module placement:** the panel has no module assignment controls. Assign, move,
   or remove modules through admin-authenticated API calls or approved chat plans.

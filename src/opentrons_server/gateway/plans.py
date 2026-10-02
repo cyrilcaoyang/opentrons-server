@@ -191,8 +191,8 @@ PLAN_ACTIONS: Dict[str, ActionSpec] = {
     "tempmod.deactivate": ActionSpec(
         TempmodDeactivateRequest, True, lambda svc, a: svc.deactivate_tempmod(a)
     ),
-    # Reference writes are non-idempotent and report only that the serial
-    # command was sent. A later read observes weight, not reference success.
+    # Reference writes are non-idempotent. Tare waits for an observed stable
+    # baseline; zero still reports only that its serial command was sent.
     "platebalance.read": ActionSpec(
         PlateBalanceRequest, True, lambda svc, a: svc.platebalance_action("read", a)
     ),
@@ -604,12 +604,19 @@ class PlanExecutor:
                     if not isinstance(output, dict):
                         raise ValueError("Balance reference command returned no result")
                     balance_operation = output.get("last_operation")
-                    expected = "not_executed" if output.get("simulation") else "sent_unconfirmed"
+                    expected = ("not_executed" if output.get("simulation") else
+                                "baseline_observed" if step.action == "platebalance.tare" else "sent_unconfirmed")
                     if (not isinstance(balance_operation, dict)
                             or balance_operation.get("action") != step.action.removeprefix("platebalance.")
                             or balance_operation.get("outcome") != expected):
                         raise ValueError("Balance reference command returned an invalid outcome")
+                    if step.action == "platebalance.tare" and not output.get("simulation"):
+                        reading = output.get("reading")
+                        if (not isinstance(reading, dict) or reading.get("stable") is not True
+                                or not isinstance(reading.get("value"), (int, float))):
+                            raise ValueError("Balance tare returned no stable baseline measurement")
                     step_message = ("Simulation: reference command was not sent" if output.get("simulation")
+                                    else "Stable zero baseline observed after tare" if step.action == "platebalance.tare"
                                     else "Reference command sent; change unconfirmed")
             except Exception as exc:
                 with self._store._lock:

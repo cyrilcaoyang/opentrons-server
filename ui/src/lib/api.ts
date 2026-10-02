@@ -487,4 +487,5 @@ export async function getCameraSnapshot(id: string, signal: AbortSignal): Promis
 
 export const postPlateBalance = (token: string | null, action: "read" | "tare" | "zero", waitUntilStable = false) =>
   controlPost(`platebalance/${action}`, action === "read"
-    ? { wait_until_stable: waitUntilStable, timeout_s: 10 } : {}, token);
+    ? { wait_until_stable: waitUntilStable, timeout_s: 10 }
+    : action === "tare" ? { timeout_s: 30 } : {}, token);

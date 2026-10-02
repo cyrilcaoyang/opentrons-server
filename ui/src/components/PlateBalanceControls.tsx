@@ -20,8 +20,9 @@ export function PlateBalanceControls({ balance, disabled, allowedActions, onActi
     <label className="flex items-center gap-2 text-ink-subtle">
       <input type="checkbox" checked={waitUntilStable} disabled={disabled}
         onChange={event => setWaitUntilStable(event.target.checked)} />
-      Wait until stable · 10 s max
+      Weight read: wait until stable · 10 s max
     </label>
+    <p className="text-ink-subtle">Tare waits up to 30 s for a stable zero baseline.</p>
     <div className="flex gap-2">
       {(["read", "tare", "zero"] as const).map(action => <button key={action} type="button"
         disabled={disabled || !balance.configured || !allowedActions.includes(`platebalance.${action}`)}
@@ -31,6 +32,8 @@ export function PlateBalanceControls({ balance, disabled, allowedActions, onActi
       </button>)}
     </div>
     {balance.last_operation?.outcome === "sent_unconfirmed" && <p className="text-ink-subtle">Command sent · Weight to check.</p>}
+    {balance.last_operation?.outcome === "baseline_observed" && <p className="text-emerald-700 dark:text-emerald-400">Stable zero baseline observed after tare.</p>}
+    {balance.last_operation?.outcome === "baseline_unconfirmed" && <p className="text-red-600 dark:text-red-400">Tare sent · Stable zero was not observed.</p>}
     {balance.last_error && <p role="alert" className="text-red-600 dark:text-red-400">{balance.last_error}</p>}
   </div>;
 }
