@@ -1234,6 +1234,16 @@ transports:
   mount claiming that well's tip is elsewhere. Only the bookkeeping is dropped —
   a tip on the head stays there, and dropping it to the trash still works. This
   is the recovery path when the gateway and the bench disagree.
+- **The robot keeps its own tip record, and the gateway asks it first.** Over
+  HTTP, `has_tip` reads the run engine's `GET /runs/{id}/currentState`
+  (`tipStates`), and the snapshot carries it as
+  `details.snapshot.pipettes.<mount>.has_tip`. `pick_up_tip` is refused
+  pre-motion (412, `robot_reports_tip: true`) when the robot believes a tip is
+  on — the case that used to halt a plan mid-way with
+  `UnexpectedTipAttachError` after a tip was pulled off by hand or picked before
+  a restart — and `drop_tip` is refused when it believes none is. The body
+  names the fix: `drop_tip` with only the pipette clears the robot's record
+  even on a bare head; `tips.mark` clears the gateway's.
 - **A drop into a tracked rack well is a relocation, not a disposal.** The
   destination wells take the tip and its history — the sample it last touched,
   `"new"` for a tip that never touched liquid (so it stays available), or

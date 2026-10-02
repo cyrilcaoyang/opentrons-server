@@ -56,6 +56,7 @@ from .http_run import (
     RunEngineClient,
     RunEngineCommands,
     RunEngineError,
+    RunEngineHTTPError,
     deck_slot,
 )
 
@@ -617,11 +618,45 @@ class OT2HttpControl:
         self._volumes[pip_name] = 0.0
 
     def has_tip(self, pip_name: str) -> bool:
-        """Client-tracked: True between a pick_up_tip and a drop/return through
-        this adapter. Unlike the SSH readback it cannot see tips acquired by
-        other clients or before a gateway restart."""
-        self._pipette_id(pip_name)  # raise on unknown pipette, like SSH would
+        """Whether the run engine believes a tip is on this pipette.
+
+        Read from ``GET /runs/{id}/currentState`` (``tipStates``), so it sees a
+        tip picked before a gateway restart or by another client — the cases
+        the client-side ledger cannot. The engine's belief is what gates its
+        own ``pickUpTip`` (``UnexpectedTipAttachError``) and ``dropTip``
+        (``TipNotAttachedError``), so this is the readback a precondition
+        check needs. Falls back to the client-tracked ledger only when the
+        server has no ``currentState`` route (pre-7.1 robot-servers) or does
+        not report this pipette; an unreachable robot raises, as every other
+        readback does.
+        """
+        engine = self.engine_has_tip(pip_name)
+        if engine is not None:
+            return engine
         return pip_name in self._tip_origin
+
+    def engine_has_tip(self, pip_name: str) -> Optional[bool]:
+        """The run engine's belief alone — ``None`` when it reports nothing for
+        this pipette (no ``currentState`` route). Unlike :meth:`has_tip` this
+        never substitutes the client-side ledger, so a caller can tell an
+        observation from a guess."""
+        pipette_id = self._pipette_id(pip_name)  # raise on unknown pipette, like SSH would
+        return self.tip_states().get(pipette_id)
+
+    def tip_states(self) -> Dict[str, bool]:
+        """``{pipette_id: hasTip}`` as the run engine reports it; empty when the
+        server has no ``currentState`` route."""
+        try:
+            state = self.client.get_current_state() or {}
+        except RunEngineHTTPError as exc:
+            if exc.status_code in (404, 405):
+                return {}
+            raise
+        out: Dict[str, bool] = {}
+        for pipette_id, entry in (state.get("tipStates") or {}).items():
+            if isinstance(entry, dict) and isinstance(entry.get("hasTip"), bool):
+                out[str(pipette_id)] = entry["hasTip"]
+        return out
 
     def set_starting_tip(self, pip_name: str, tiprack_nickname: str, position: str) -> None:
         raise NotImplementedError(

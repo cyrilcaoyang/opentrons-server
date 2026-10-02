@@ -49,6 +49,7 @@ class FakeClient:
         self.lights_on = False
         self.lights_calls = []
         self.modules = []  # GET /modules payload
+        self.current_state = {}  # GET /runs/{id}/currentState payload
 
     def create_run(self):
         self.created = True
@@ -68,6 +69,11 @@ class FakeClient:
     def add_labware_definition(self, definition):
         self.labware_defs.append(definition)
         return "custom/plate/1"
+
+    def get_current_state(self):
+        if isinstance(self.current_state, Exception):
+            raise self.current_state
+        return self.current_state
 
     def get_run(self):
         return {
@@ -364,6 +370,38 @@ def test_pick_up_tip_tracks_origin_and_has_tip():
     ctl.get_location_from_labware("plate", "A1")
     ctl.drop_tip("p300")
     assert ctl.has_tip("p300") is False
+
+
+def test_has_tip_prefers_the_engines_tip_state():
+    """The run engine's belief gates its own pickUpTip/dropTip, so has_tip must
+    report it — a tip picked before a gateway restart is invisible to the
+    client-side ledger (observed live on ot2_complexation 2026-10-02)."""
+    ctl, client = _loaded_control()
+    assert ctl.has_tip("p300") is False
+    client.current_state = {"tipStates": {"p300": {"hasTip": True}}}
+    assert ctl.has_tip("p300") is True
+    assert ctl.tip_states() == {"p300": True}
+    ctl.get_location_from_labware("tips", "A1")
+    ctl.pick_up_tip("p300")
+    client.current_state = {"tipStates": {"p300": {"hasTip": False}}}
+    assert ctl.has_tip("p300") is False  # engine wins over the ledger
+
+
+def test_has_tip_falls_back_to_the_ledger_without_current_state():
+    from opentrons_server.control.http_run import RunEngineHTTPError, RunEngineUnreachable
+
+    ctl, client = _loaded_control()
+    client.current_state = RunEngineHTTPError(404, "not found", path="/runs/run-1/currentState")
+    assert ctl.tip_states() == {}
+    ctl.get_location_from_labware("tips", "A1")
+    ctl.pick_up_tip("p300")
+    assert ctl.has_tip("p300") is True
+    client.current_state = {"tipStates": {"other": {"hasTip": True}}}  # pipette not reported
+    assert ctl.has_tip("p300") is True
+    assert ctl.engine_has_tip("p300") is None  # a guess is not an observation
+    client.current_state = RunEngineUnreachable("GET currentState: timeout")
+    with pytest.raises(RunEngineUnreachable):
+        ctl.has_tip("p300")
 
 
 def test_pick_up_tip_rejects_repl_only_kwargs():

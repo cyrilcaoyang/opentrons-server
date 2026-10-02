@@ -55,6 +55,9 @@ class FakeClient:
     def get_run(self):
         return {"id": "run-1", "labware": []}
 
+    def get_current_state(self):
+        return getattr(self, 'current_state', {})
+
     def stop_run(self):
         self.stopped = True
 
@@ -180,6 +183,55 @@ def test_http_drop_tip_without_location_routes_to_the_fixed_trash(fake_http):
     assert move[1]["addressableAreaName"] == "fixedTrash"
     drop = next(c for c in fake_http.commands if c[0] in ("dropTip", "dropTipInPlace"))
     assert drop[0] == "dropTipInPlace"
+
+
+def test_http_pick_refused_when_the_engine_reports_a_tip(fake_http):
+    """Live failure on ot2_complexation 2026-10-02: the engine still held a tip
+    from before a restart, the ledger showed none, and the first pickUpTip of a
+    192-step plan failed with UnexpectedTipAttachError. Now refused before any
+    command is sent, with the state left READY."""
+    from opentrons_server.gateway.models import TipRequest
+    from opentrons_server.gateway.tip_state import TipUnavailable
+
+    service = _http_service_with_pipette(fake_http)
+    service.control.load_labware(
+        {"ot_default": True, "nickname": "tips", "loadname": "opentrons_96_tiprack_300ul", "location": "8"}
+    )
+    fake_http.current_state = {"tipStates": {"p300": {"hasTip": True}}}
+    before = list(fake_http.commands)
+
+    with pytest.raises(TipUnavailable) as excinfo:
+        service.pick_up_tip(TipRequest(pipette="p300", labware_nickname="tips", position="A1"))
+
+    assert excinfo.value.body["robot_reports_tip"] is True
+    assert fake_http.commands == before  # nothing moved
+    assert service.state == OT2ServiceState.READY
+    assert service.last_error is None
+
+    # The documented recovery: a plain drop clears the engine's record.
+    service.drop_tip(TipRequest(pipette="p300"))
+    assert fake_http.commands[-1][0] == "dropTipInPlace"
+
+    # And the mirror image: the engine reports a bare head, so a drop is refused.
+    fake_http.current_state = {"tipStates": {"p300": {"hasTip": False}}}
+    before = list(fake_http.commands)
+    with pytest.raises(TipUnavailable) as excinfo:
+        service.drop_tip(TipRequest(pipette="p300"))
+    assert excinfo.value.body["robot_reports_tip"] is False
+    assert fake_http.commands == before
+
+
+def test_http_snapshot_carries_the_engines_tip_belief(fake_http):
+    service = _http_service_with_pipette(fake_http)
+    fake_http.get_run = lambda: {
+        "id": "run-1", "labware": [],
+        "pipettes": [{"id": "p300", "mount": "right", "pipetteName": "p300_single_gen2"}],
+    }
+    fake_http.current_state = {"tipStates": {"p300": {"hasTip": True}}}
+    assert service.refresh_snapshot()["pipettes"]["right"]["has_tip"] is True
+    fake_http.current_state = {}
+    assert "has_tip" not in service.refresh_snapshot()["pipettes"]["right"]
+    assert service.last_error is None
 
 
 def test_http_snapshot_populates_deck_parity_from_run(fake_http):

@@ -770,6 +770,18 @@ class RunEngineClient:
             raise RunEngineError("no active run")
         return self._request("GET", f"/runs/{self.run_id}", timeout=self.request_timeout_s)
 
+    def get_current_state(self) -> Dict[str, Any]:
+        """``GET /runs/{id}/currentState`` — the engine's own live view of the
+        run: ``tipStates`` (per pipette id, ``{"hasTip": bool}``), nozzle
+        layouts, estop. This is the robot's belief, not the gateway's ledger,
+        which is exactly why :meth:`OT2HttpControl.has_tip` reads it."""
+        if self.run_id is None:
+            raise RunEngineError("no active run")
+        data = self._request(
+            "GET", f"/runs/{self.run_id}/currentState", timeout=self.request_timeout_s
+        )
+        return data if isinstance(data, dict) else {}
+
     def get_loaded_labware_definitions(self) -> List[Dict[str, Any]]:
         """Full schema-2 definitions of every labware loaded in the run.
 

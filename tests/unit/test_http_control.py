@@ -34,6 +34,9 @@ class FakeClient:
     def get_run(self):
         return {"id": "run-1", "labware": []}
 
+    def get_current_state(self):
+        return getattr(self, 'current_state', {})
+
     def stop_run(self):
         self.stopped = True
 
@@ -184,6 +187,9 @@ def test_adopted_http_pipette_uses_its_model_default():
             return {"id": "run-1", "labware": [], "pipettes": [
                 {"id": "existing", "mount": "right", "pipetteName": "p300_single_gen2"}
             ]}
+
+        def get_current_state(self):
+            return getattr(self, 'current_state', {})
 
     ctl = OT2HttpControl(AdoptedClient())
     assert ctl.get_flow_rate("existing")["dispense"] == pytest.approx(92.86)
