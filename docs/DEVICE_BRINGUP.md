@@ -38,39 +38,29 @@ Pick these before starting; everything below is written in terms of them.
 
 **Current fleet** (for port/name collision checks):
 
-| id | robot | robot IP | port | service |
-|---|---|---|---|---|
-| `ot2_hte` | `ot2cytation` | `192.168.254.50` (wired, lab switch) | 8020 | `ot2-gateway-hte` |
-| `ot2_complexation` | `ot2training` | `100.64.254.19:31951` (USB bridge on the UPLC PC) | 8021 | `ot2-gateway-complexation` |
+| id | gateway host | robot | robot address | port | service |
+|---|---|---|---|---|---|
+| `ot2_hte` | Cytation PC | `ot2cytation` | `192.168.254.50` (wired, lab switch) | 8020 | `ot2-gateway-hte` |
+| `ot2_complexation` | UPLC PC | `ot2training` | `169.254.40.81:31950` (direct USB network) | 8021 | `ot2-gateway-complexation` |
 
-**Network paths.** Neither gateway reaches its robot over the robot's own
-tailnet IP any more. Both robots' tailscale runs over campus Wi-Fi
-(`172.31/16`), which has dropped fleet-wide (2026-08-14) and, on
-**both** robots, wedges on its own (Broadcom `brcmfmac` firmware fault:
-`wlan0` may still read "connected" while nothing passes, or drop and stop
-scanning; HTE 2026-09-06, Complexation 2026-08-30 and 2026-09-04). A
-driver reload over the wired/USB path recovers it without a reboot, and since
-2026-09-06 a timer on each robot does that reload itself — see
-`OT2_TAILSCALE.md` *Wi-Fi watchdog* and *Traps*. HTE is on the lab switch by
-wire. **Complexation is the exception since 2026-09-12:** its USB-B link into
-the UPLC PC died that night and, by decision, the gateway now reaches the
-robot over its Wi-Fi + Tailscale address (`100.64.254.91:31950`). The cost is
-measured, not hypothetical — the firmware hangs 23–43 times a day on each
-OT-2 (kernel journal, 09-08 → 13) — so the robot-side watchdog was tightened
-on 2026-09-13 to bound each hang at ~1–2 min (see `OT2_TAILSCALE.md`). A
-USB-to-Ethernet adapter onto the lab switch remains the real fix. What
-follows describes the bridge that *was* the path 2026-09-05 → 09-12 and could
-be again if the USB link is repaired: the robot's `eth0` (`169.254.40.81`) is
-the USB-B cable into the UPLC PC
-(`sdl2-pc-06-uplc`, tailnet `100.64.254.19`), where a `netsh` portproxy
-listens on `31951` and forwards to it. Since 2026-09-06 both bridge rules listen on **`0.0.0.0`** (the
-Windows firewall rules scope them by port, the tailnet ACL by caller), which
-removes the old failure where `iphlpsvc` bound nothing after a reboot because
-the tailscale address did not exist yet. If `31951` ever stops answering,
-`Restart-Service iphlpsvc` on the UPLC PC is still the first thing to try.
-The same PC also forwards **`31952` → `192.168.254.50:31950`**, a second
-route to HTE's wired address for use if the Cytation PC's own lab-switch
-link is ever the problem.
+**Network paths.** HTE uses its wired lab-switch address. Since the
+2026-09-30 migration, the Complexation gateway runs on the UPLC PC and connects
+directly to the robot's USB network at `http://169.254.40.81:31950`. Check robot
+identity (`ot2training`, serial `weathered-dream`) with the required
+`Opentrons-Version: *` header. A headerless health request can return HTTP 422
+and must not be mistaken for an unreachable robot.
+
+Complexation runs from its own deploy checkout as LocalService, using the venv
+Python directly. Install both `labware` and `platebalance` extras without an
+elevated uv sync. Its WZB254-N local peripheral uses COM3; settings are in the
+instance's `OT2_PLATEBALANCE_CONFIG` file. The former Cytation gateway service
+remains disabled for rollback. Never start both gateway instances together.
+
+The older UPLC portproxy rules (`31951` to the USB robot and `31952` to HTE's
+wired address) are not required by the new Complexation gateway. They were not
+modified by the migration. Robot Wi-Fi/Tailscale remains a distinct path; see
+`OT2_TAILSCALE.md` for its watchdog and failure history.
+
 Repoint a gateway with `tools/ot2-set-robot-url.ps1` (elevated, RDP).
 HTE's wired address is a Buildroot `ifupdown` static config in
 `/etc/network/interfaces` (not a NetworkManager profile). It must **not**
@@ -78,10 +68,8 @@ carry a `gateway` line: the lab switch is on-link only, and the bogus
 `192.168.254.230` gateway it shipped with black-holed the robot's internet
 (NTP, Tailscale) from 2026-08-14 until removed 2026-09-06 — see
 `OT2_TAILSCALE.md` *Traps*.
-**Open:** replace the bridge with a direct wired link — a USB-to-Ethernet
-adapter in a robot USB-A port, patched to the lab switch like HTE — then
-repoint the gateway at the lab address and retire the bridge (tracked in
-`ac-organic-lab/docs/ROADMAP.md`, OT-2 sub-tasks).
+A future lab-switch connection for Complexation would require a separate
+connection change; the deployed gateway currently uses direct USB networking.
 
 > ⚠️ **Distinct state paths are mandatory.** The stores default to
 > `./ot2_*.json` relative to the working directory; two instances started

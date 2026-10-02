@@ -11,6 +11,12 @@ from .http_run import RunEngineCommands, RunEngineError
 
 
 class FlexHttpControl(OT2HttpControl):
+    def _default_dispense_flow(self, pip_name: str) -> float:
+        # Flex flow depends on both pipette and attached tip capacity. Keep the
+        # previous gateway default until that readback is available here; the
+        # OT-2 model table must never be applied to a Flex pipette.
+        return self.dispense_flow_rate if self.dispense_flow_rate is not None else 300.0
+
     def initialize_protocol(self, simulation: bool = False) -> None:
         health = self.client._request_raw("GET", "/health", timeout=self.client.request_timeout_s)
         model = str(health.get("robot_model") or "").lower()

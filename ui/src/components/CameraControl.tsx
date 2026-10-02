@@ -1,34 +1,43 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ApiError, getCameras, getCameraSnapshot, type GatewayCamera } from "../lib/api";
+import { CameraPlayer } from "./CameraPlayer";
 import { TileButton } from "./TileButton";
 
 /** Explicitly opened, read-only camera preview. Closing never stops other viewers. */
-export function CameraControl() {
+export function CameraControl({ stream }: { stream?: string }) {
   const [cameras, setCameras] = useState<GatewayCamera[]>([]);
   const [discoveryError, setDiscoveryError] = useState("");
+  const [loading, setLoading] = useState(!stream);
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    if (stream) { setLoading(false); return; }
     const abort = new AbortController();
-    getCameras(abort.signal).then((data) => setCameras(data.cameras)).catch((error) => {
-      if (!abort.signal.aborted && !(error instanceof ApiError && error.status === 404)) {
-        setDiscoveryError(error instanceof Error ? error.message : "Camera discovery failed");
+    getCameras(abort.signal).then((data) => {
+      if (abort.signal.aborted) return;
+      setCameras(data.cameras);
+      if (!data.cameras.length) setDiscoveryError("No camera stream configured for this robot.");
+    }).catch((error) => {
+      if (!abort.signal.aborted) {
+        setDiscoveryError(error instanceof ApiError && error.status === 404
+          ? "No camera stream configured for this robot."
+          : error instanceof Error ? error.message : "Camera discovery failed");
       }
-    });
+    }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
     return () => abort.abort();
   }, []);
-  if (!cameras.length && !discoveryError) return null;
   return <>
-    <TileButton onClick={() => setOpen(!open)} variant={open ? "primary" : "default"}
-      title={open ? "Turn off and hide camera preview" : "Show USB camera"}>
+    <TileButton disabled={loading} onClick={() => setOpen(!open)} variant={open ? "primary" : "default"}
+      title={loading ? "Finding camera stream…" : open ? "Turn off and hide camera preview" : "Show camera stream"}>
       Camera
     </TileButton>
-    {open && createPortal(<CameraWindow cameras={cameras} discoveryError={discoveryError}
+    {open && createPortal(<CameraWindow stream={stream} cameras={cameras} discoveryError={discoveryError}
       onClose={() => setOpen(false)} />, document.body)}
   </>;
 }
 
-function CameraWindow({ cameras, discoveryError, onClose }: {
+function CameraWindow({ stream, cameras, discoveryError, onClose }: {
+  stream?: string;
   cameras: GatewayCamera[]; discoveryError: string; onClose: () => void;
 }) {
   const [cameraId, setCameraId] = useState(cameras[0]?.id ?? "");
@@ -61,7 +70,7 @@ function CameraWindow({ cameras, discoveryError, onClose }: {
   }, []);
   useEffect(() => {
     setFrame(null);
-    if (!cameraId || !visible) return;
+    if (stream || !cameraId || !visible) return;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let objectUrl: string | null = null;
@@ -85,7 +94,7 @@ function CameraWindow({ cameras, discoveryError, onClose }: {
     }
     void next();
     return () => { abort.abort(); clearTimeout(timer); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [cameraId, visible, retry]);
+  }, [stream, cameraId, visible, retry]);
   const begin = (event: React.PointerEvent<HTMLElement>, kind: "move" | "resize") => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -100,7 +109,7 @@ function CameraWindow({ cameras, discoveryError, onClose }: {
       : { ...g.box, width: g.box.width + dx, height: g.box.height + dy }));
   };
   const end = () => { gesture.current = null; };
-  return <div ref={panel} role="dialog" aria-label="USB camera preview" tabIndex={-1}
+  return <div ref={panel} role="dialog" aria-label="Camera preview" tabIndex={-1}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}
     className="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-slate-500 bg-slate-950 text-slate-100 shadow-2xl"
     style={{ left: box.x, top: box.y, width: box.width, height: box.height }}>
@@ -111,14 +120,14 @@ function CameraWindow({ cameras, discoveryError, onClose }: {
         onKeyDown={(e) => {
           const d: Record<string, [number, number]> = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] };
           if (d[e.key]) { e.preventDefault(); const [x, y] = d[e.key]; setBox(clamp({ ...box, x: box.x + x, y: box.y + y })); }
-        }}>Camera · {cameraId || "USB"}</button>
+        }}>Camera · {stream ? "Complexation OT-2" : cameraId || "USB"}</button>
       <button type="button" onClick={onClose} aria-label="Turn off and hide camera" title="Turn off and hide"
         className="rounded px-2 py-1 text-lg hover:bg-slate-700">×</button>
     </div>
     {cameras.length > 1 && <select aria-label="Camera" value={cameraId} onChange={(e) => setCameraId(e.target.value)}
       className="m-2 rounded bg-slate-800 p-1">{cameras.map((c) => <option key={c.id}>{c.id}</option>)}</select>}
     <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
-      {frame && !error ? <img src={frame} alt="Live USB camera preview" className="h-full w-full object-contain" />
+      {stream ? <CameraPlayer src={`/streams/api/ws?src=${encodeURIComponent(stream)}`} className="h-full w-full" /> : frame && !error ? <img src={frame} alt="Live USB camera preview" className="h-full w-full object-contain" />
         : <div role="status" className="p-4 text-center text-sm text-slate-300">
           {error || (visible ? "Connecting to camera…" : "Preview paused")}
           {error && cameraId && <button type="button" className="mt-3 block w-full underline" onClick={() => setRetry(retry + 1)}>Retry</button>}

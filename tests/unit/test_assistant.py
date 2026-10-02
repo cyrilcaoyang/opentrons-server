@@ -24,7 +24,7 @@ from opentrons_server.gateway.assistant import (
     AssistantDisabled,
     _tool_schemas,
 )
-from opentrons_server.gateway.plans import PLAN_ACTIONS, PlanStore
+from opentrons_server.gateway.plans import PLAN_ACTIONS, PlanStep, PlanStore
 from opentrons_server.gateway.service import OT2Service
 
 CLAIM = {"owner": "ada@lab", "session_id": "s1", "ttl_s": 30.0}
@@ -164,6 +164,8 @@ def test_no_tool_can_move_the_robot():
         "get_consumables",
         "list_actions",
         "propose_plan",
+        "get_plan",
+        "list_plans",
     }
     for forbidden in (
         "approve_plan",   # the current name
@@ -200,14 +202,13 @@ def test_bookkeeping_corrections_are_proposable():
     assert "operator asserting" not in schema
 
 
-def test_the_operator_only_list_is_exactly_the_unplannable_actions():
-    """The prompt names five actions as operator-only. If one of them ever
-    becomes plannable, or the prompt grows a sixth, they have drifted apart and
-    the model is being told something false about its own catalog."""
-
+def test_the_operator_only_list_stays_unplannable():
     named = {"startup", "shutdown", "pause", "resume", "reconcile"}
     assert named.isdisjoint(PLAN_ACTIONS)
     for action in named:
+        assert f"`{action}`" in assistant_mod._SYSTEM_PROMPT
+    for action in ("platebalance.tare", "platebalance.zero"):
+        assert action in PLAN_ACTIONS
         assert f"`{action}`" in assistant_mod._SYSTEM_PROMPT
 
 
@@ -263,6 +264,42 @@ def test_reads_are_scoped_to_this_service(monkeypatch):
     result = a.chat([{"role": "user", "content": "what's the status"}])
 
     assert result["tools_used"] == ["get_status"]
+
+
+def test_assistant_can_read_completed_plan_measurements_without_device_io():
+    service = Mock()
+    store = PlanStore()
+    plan = store.create([PlanStep(action="platebalance.read", args={})], created_by="agent")
+    plan.status = "executed"
+    plan.results[0].outcome = "ok"
+    plan.results[0].reading = {"value": 0.125, "unit": "g", "stable": True,
+                               "observed_at": "2026-10-02T00:00:00+00:00"}
+    tools = Assistant(service, store, _config())._tools()
+
+    assert tools["get_plan"]({"plan_id": plan.plan_id})["results"][0]["reading"]["value"] == 0.125
+    assert tools["list_plans"]({})[0]["plan_id"] == plan.plan_id
+    assert tools["list_plans"]({})[0]["readings"][0]["value"] == 0.125
+    assert tools["list_plans"]({})[0]["results"][0]["outcome"] == "ok"
+    service.assert_not_called()
+
+
+def test_chat_receives_current_plan_outcome_even_when_history_says_draft(monkeypatch):
+    store = PlanStore()
+    plan = store.create([PlanStep(action="platebalance.zero", args={})], created_by="agent")
+    plan.status = "executed"
+    plan.results[0].outcome = "ok"
+    plan.results[0].balance_operation = {"action": "zero", "outcome": "sent_unconfirmed"}
+    calls = _fake_openai(monkeypatch, [_text("The operator ran the plan; zero was sent unconfirmed.")])
+
+    Assistant(Mock(), store, _config()).chat([
+        {"role": "assistant", "content": "I proposed a draft."},
+        {"role": "user", "content": "Did it run?"},
+    ])
+
+    current = calls["sent"][0]["messages"][1]["content"]
+    assert plan.plan_id in current
+    assert '"status": "executed"' in current
+    assert '"outcome": "sent_unconfirmed"' in current
 
 
 def test_chat_events_report_tool_progress(monkeypatch):

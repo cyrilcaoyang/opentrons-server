@@ -26,11 +26,15 @@ from ..control import (
     RunEngineHTTPError,
 )
 from ..control import state_readers as _state_readers
+from ..control.http_control import _OT2_GEN2_DISPENSE_FLOW_UL_S
 from ..version import __version__ as GATEWAY_VERSION
 from .advanced import ADVANCED_ACTIONS, FLEX_ACTIONS
 from .robot_profile import PROFILE, IS_FLEX
 from ..control.flex_control import FlexHttpControl
+from .platebalance import BalancePipettingGeometry, BalanceStabilityTimeout, PlateBalanceRequest, PlateBalanceV1, load_platebalance_config, validate_balance_plate
+from .module_access import require_module_admin
 from .claims import ClaimManager
+from .assemblies import PlateAssembly
 from .deck import (
     SLOTS,
     DeckDeclarationStore,
@@ -48,11 +52,16 @@ from .models import (
     PROTOCOL_VERSION,
     Activity,
     ComponentStatus,
+    CoordinateLocation,
     EquipmentStatus,
     ErrorCode,
     ErrorInfo,
     LoadedPlate,
     MetricValue,
+    PipetteCoordinates,
+    PipetteJogRequest,
+    PipettePositionRequest,
+    PipettePositionResponse,
     SlotLabware,
     SlotModule,
     TipMount,
@@ -175,6 +184,8 @@ _RUN_STARTING_ACTIONS = frozenset(
         "setup",
         "home",
         "move_to",
+        "jog",
+        "pipette_position",
         "pick_up_tip",
         "aspirate",
         "dispense",
@@ -183,6 +194,9 @@ _RUN_STARTING_ACTIONS = frozenset(
         "resume",
         "tempmod.set",
         "tempmod.deactivate",
+        "platebalance.read",
+        "platebalance.tare",
+        "platebalance.zero",
     }
 )
 
@@ -292,6 +306,7 @@ class OT2Service:
         events: Optional[EventsExporter] = None,
         transport: Optional[str] = None,
         http_run_state_path: Optional[str] = None,
+        platebalance: Optional[PlateBalanceV1] = None,
     ) -> None:
         self.equipment_id = equipment_id
         self.equipment_name = equipment_name
@@ -299,6 +314,10 @@ class OT2Service:
         self.password = password
         self.dry_run = dry_run
         self.simulation = simulation
+        balance_config = load_platebalance_config() if platebalance is None else None
+        self.platebalance = platebalance or (PlateBalanceV1(balance_config) if balance_config else None)
+        if self.platebalance is not None and IS_FLEX:
+            raise ValueError("platebalanceV1 currently supports OT-2 only")
         # Control-plane transport: "ssh" (default, the SSH REPL) or "http" (the
         # robot-server run engine, docs/HTTP_TRANSPORT.md). Opt-in and fully
         # reversible: unset OT2_TRANSPORT (or pass transport="ssh") to restore the
@@ -420,6 +439,7 @@ class OT2Service:
         # All describe the CURRENT control session only, so they reset with it
         # (startup / shutdown).
         self._session_labware: Dict[str, str] = {}
+        self._session_balance_load_name: str | None = None
         self._session_pipettes: Dict[str, str] = {}
         self._session_modules: Dict[str, str] = {}
         # Stamp the opening span so `activity_since` is a real instant from the
@@ -496,6 +516,7 @@ class OT2Service:
             # A new control session starts empty: anything the previous session
             # auto-loaded from the declared deck is gone with it.
             self._session_labware = {}
+            self._session_balance_load_name = None
             self._session_pipettes = {}
             self._session_modules = {}
             self.state = OT2ServiceState.READY
@@ -568,8 +589,14 @@ class OT2Service:
             finally:
                 self.control = None
         self._session_labware = {}
+        self._session_balance_load_name = None
         self._session_pipettes = {}
         self._session_modules = {}
+        # Successful session closure invalidates its loaded geometry and names.
+        # Keep operator declarations; they can now be edited before a new run.
+        self.session_recipe = {"labware": [], "instruments": [], "modules": []}
+        self.last_snapshot = self._empty_snapshot()
+        self._last_run_labware = None
         self.claims.force_clear()
         previous = self.state
         self.state = OT2ServiceState.DRY_RUN if self.dry_run else OT2ServiceState.REQUIRES_INIT
@@ -577,7 +604,77 @@ class OT2Service:
             "shutdown", from_state=previous.value, to_state=self.state.value
         )
 
+    def check_setup_module_access(self, setup: Dict[str, Any]) -> None:
+        previous_modules = self.session_recipe.get("modules", [])
+        proposed_modules = setup.get("modules", [])
+        if proposed_modules != previous_modules:
+            # First setup may use an already assigned module, but cannot invent
+            # its placement or change a previously loaded module configuration.
+            deck = self._build_deck_state()
+            if previous_modules:
+                require_module_admin()
+            for item in proposed_modules:
+                slot = deck.slots.get(str(item.get("location")))
+                placed = slot.module if slot else None
+                if (placed is None or placed.local_peripheral
+                        or placed.module_name != item.get("module_name")
+                        or (item.get("serial_number") and item["serial_number"] != placed.serial_number)):
+                    require_module_admin()
+        deck = self._build_deck_state()
+        for item in setup.get("labware", []):
+            slot = deck.slots.get(str(item.get("location")))
+            if slot and slot.module:
+                # Plates on a module must reference the module/adapter parent;
+                # a bare deck slot would replace its declared placement.
+                require_module_admin()
+
     def setup_protocol(self, setup: Dict[str, Any]) -> None:
+        setup = dict(setup)
+        self.check_setup_module_access(setup)
+        for module in setup.get("modules", []):
+            if "platebalance" in str(module).lower():
+                raise ValueError("platebalanceV1 is a local peripheral, not an Opentrons module")
+        if self.platebalance and any(str(item.get("location")) == self.platebalance.slot
+                                     for item in setup.get("labware", []) + setup.get("modules", [])):
+            raise ValueError(f"Slot {self.platebalance.slot} is reserved for platebalanceV1; pipetting geometry is not calibrated")
+        labware = []
+        for raw in setup.get("labware", []):
+            item = dict(raw)
+            if item.get("assembly") is not None:
+                assembly = PlateAssembly.model_validate(item["assembly"])
+                slot = str(item.get("location"))
+                if slot not in SLOTS or slot == "12":
+                    raise ValueError("assemblies require a deck slot, not a module or adapter")
+                if setup.get("modules"):
+                    raise ValueError("assembly setup with modules is not supported")
+                definition = assembly.compile_definition()
+                item.update(ot_default=False, config=definition,
+                            loadname=definition["parameters"]["loadName"],
+                            assembly=assembly.model_dump(mode="json"))
+            labware.append(item)
+        setup["labware"] = labware
+        declared_assemblies = {slot: item.assembly for slot, item in self._declared_slots().items()
+                               if getattr(item, "assembly", None)}
+        if declared_assemblies and setup.get("modules"):
+            raise ValueError("fixed assemblies require a layout without modules")
+        for item in labware:
+            slot = str(item.get("location"))
+            if slot in declared_assemblies and item.get("assembly") != declared_assemblies[slot].model_dump(mode="json"):
+                raise ValueError(f"setup for slot {slot} must preserve its declared assembly")
+        assembly_items = [item for item in labware if item.get("assembly")]
+        if assembly_items:
+            locations = [str(item.get("location")) for item in labware]
+            if len(set(locations)) != len(locations):
+                raise ValueError("an assembly occupies its entire deck slot")
+            identities = [plate["plate_id"] for item in assembly_items
+                          for plate in (item["assembly"]["top"], item["assembly"].get("collector")) if plate]
+            if len(set(identities)) != len(identities):
+                raise ValueError("plate IDs must be unique across assemblies")
+            aliases = set(SLOTS) | {f"slot_{slot}" for slot in SLOTS} | {item.get("nickname") for item in labware}
+            if any(identity in aliases for identity in identities):
+                raise ValueError("assembly plate IDs must differ from deck slots and session nicknames")
+            if any(s.module for s in self._build_deck_state().slots.values()):
+                raise ValueError("fixed assemblies require a layout without modules")
         previous_recipe = self.session_recipe
         self.session_recipe = {
             "labware": list(setup.get("labware", [])),
@@ -810,6 +907,11 @@ class OT2Service:
             return self._session_pipettes[mount]
         if mount not in {"left", "right"}:
             return ref
+        if isinstance(self.control, (OT2Control, OT2HttpControl)):
+            loaded = self.control.pipette_for_mount(mount)
+            if loaded is not None:
+                self._session_pipettes[mount] = loaded
+                return loaded
         attached = next(
             (
                 inst
@@ -841,7 +943,65 @@ class OT2Service:
             self._pipette_channels[mount] = channels
         return mount
 
-    def _resolve_session_labware(self, ref: str) -> str:
+    def _balance_plate_for_ref(self, ref: str) -> tuple[str, SlotLabware] | None:
+        if self.platebalance is None:
+            return None
+        slot = self.platebalance.slot
+        item = self._declared_slots().get(slot)
+        if not isinstance(item, SlotLabware) or item.support_module != "platebalanceV1":
+            return None
+        name = str(ref).strip()
+        if name in {slot, f"slot_{slot}", item.plate_id, item.nickname,
+                    self._session_labware.get(slot)} or self._nickname_to_slot().get(name) == slot:
+            return slot, item
+        return None
+
+    def _qualified_balance_location(self, location: Any, *, require_explicit_top: bool) -> tuple[BalancePipettingGeometry, float] | None:
+        target = self._balance_plate_for_ref(location.labware_nickname)
+        if target is None:
+            return None
+        if self.platebalance is None or self.platebalance.config.pipetting_geometry is None:
+            raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+        if not self._balance_placement_valid():
+            raise ValueError("Balance placement conflicts with the robot deck; reconcile before motion")
+        geometry = self.platebalance.config.pipetting_geometry
+        definition = target[1].definition
+        if not isinstance(definition, dict):
+            raise ValueError("Balance plate requires its complete qualified definition")
+        compiled = geometry.compile_definition(definition)
+        well = compiled["wells"].get(location.position)
+        if well is None:
+            raise ValueError(f"Balance plate has no well {location.position!r}")
+        well_top = float(well["z"]) + float(well["depth"])
+        minimum_top = compiled["dimensions"]["zDimension"] + 2.0 - well_top
+        if location.bottom is not None or location.center:
+            raise ValueError("Balance moves and dispenses require an offset above the well top")
+        if require_explicit_top and location.top is None:
+            raise ValueError("Balance move requires an explicit top offset")
+        if location.top is not None and location.top + 1e-6 < minimum_top:
+            raise ValueError(f"Balance tip must stay at least {minimum_top:g} mm above this well top")
+        return geometry, minimum_top
+
+    def _balance_pipette_model(self, requested_pipette: str, session_pipette: str) -> str:
+        instrument = next((item for item in self.session_recipe.get("instruments", []) or []
+                           if item.get("nickname") == requested_pipette), None)
+        model = instrument.get("instrument_name") if instrument else None
+        if model is None:
+            mount = str(requested_pipette).strip().lower()
+            model = next((item.get("name") for item in self._last_probe.get("instruments", []) or []
+                          if str(item.get("mount", "")).strip().lower() == mount), None)
+        if model is None and isinstance(self.control, OT2HttpControl):
+            model = self.control._pipette_models.get(session_pipette)
+        if model not in {"p20_single_gen2", "p300_single_gen2", "p1000_single_gen2"}:
+            raise ValueError(f"Balance motion requires a qualified single-channel OT-2 GEN2 pipette; found {model or requested_pipette!r}")
+        return str(model)
+
+    def _balance_dispense_cap(self, requested_pipette: str, session_pipette: str) -> float:
+        return _OT2_GEN2_DISPENSE_FLOW_UL_S[
+            self._balance_pipette_model(requested_pipette, session_pipette)
+        ] / 2.0
+
+    def _resolve_session_labware(self, ref: str, *, allow_balance: bool = False) -> str:
         """Resolve a labware reference to a session nickname, loading declared
         labware on demand.
 
@@ -853,6 +1013,51 @@ class OT2Service:
         """
 
         name = str(ref).strip()
+        balance_target = self._balance_plate_for_ref(name)
+        if balance_target is not None:
+            if not allow_balance:
+                raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+            slot, balance_item = balance_target
+            geometry = self.platebalance.config.pipetting_geometry if self.platebalance else None
+            if geometry is None or not isinstance(balance_item.definition, dict):
+                raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+            compiled = geometry.compile_definition(balance_item.definition)
+            load_name = compiled["parameters"]["loadName"]
+            if slot in self._session_labware:
+                if self._session_balance_load_name != load_name:
+                    raise ValueError("Balance plate geometry changed in an active session; shut down and restart")
+                return self._session_labware[slot]
+            nickname = f"slot_{slot}"
+            self._require_control().load_labware({
+                "ot_default": False, "nickname": nickname, "config": compiled, "location": slot,
+            })
+            self._session_labware[slot] = nickname
+            self._session_balance_load_name = load_name
+            return nickname
+        for slot, item in self._declared_slots().items():
+            if isinstance(item, SlotLabware) and item.support_module == "platebalanceV1":
+                if name in {slot, f"slot_{slot}", item.plate_id, item.nickname, self._session_labware.get(slot)} or self._nickname_to_slot().get(name) == slot:
+                    raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+        if self.platebalance and (name in {self.platebalance.slot, f"slot_{self.platebalance.slot}"} or
+                self._nickname_to_slot().get(name) == self.platebalance.slot):
+            raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+        for slot, item in self._declared_slots().items():
+            if not isinstance(item, SlotLabware):
+                continue
+            assembly = getattr(item, "assembly", None)
+            if not assembly:
+                continue
+            if assembly.collector and name == assembly.collector.plate_id:
+                raise ValueError("collection plate is covered by the filter; end the session and redeclare after removal")
+            if name == assembly.top.plate_id:
+                name = slot
+            if name == slot or self._nickname_to_slot().get(name) == slot or self._session_labware.get(slot) == name:
+                observed = self._build_deck_state().slots[slot]
+                if observed.slot_state == "mismatch":
+                    raise ValueError("loaded labware does not match the declared assembly; start a fresh session")
+                if (observed.source in {"run", "repl"} and observed.labware and
+                        observed.labware.load_name == item.load_name and observed.labware.nickname):
+                    return observed.labware.nickname
         if name in self._nickname_to_slot():
             return name
         if name in self._session_labware:
@@ -1227,6 +1432,7 @@ class OT2Service:
         *,
         default_origin: str = "top",
         default_offset: float = 0,
+        allow_balance: bool = False,
     ) -> None:
         """Stash the request's well as the pending location.
 
@@ -1243,13 +1449,94 @@ class OT2Service:
             default_origin, default_offset = "bottom", request.location.bottom
 
         self._require_control().get_location_from_labware(
-            self._resolve_session_labware(request.location.labware_nickname),
+            self._resolve_session_labware(request.location.labware_nickname, allow_balance=allow_balance),
             request.location.position,
             top=request.location.top or 0,
             bottom=request.location.bottom or 0,
             center=1 if request.location.center else 0,
             default_origin=default_origin,
             default_offset=default_offset,
+        )
+
+    def _balance_placement_valid(self) -> bool:
+        balance = self.platebalance
+        if balance is None:
+            return False
+        slot = self._build_deck_state().slots[balance.slot]
+        return bool(slot.module and slot.module.local_peripheral and slot.slot_state != "mismatch")
+
+    def platebalance_action(self, action: str, request: PlateBalanceRequest | None = None) -> Dict[str, Any]:
+        request = request or PlateBalanceRequest()
+        if action != "read" and request.wait_until_stable:
+            raise ValueError("wait_until_stable applies only to read")
+        balance = self.platebalance
+        if balance is None or not balance.supports(action):
+            raise ValueError("platebalanceV1 is unconfigured or operation is unsupported")
+        slot = self._build_deck_state().slots[balance.slot]
+        if slot.module is None or not slot.module.local_peripheral or slot.slot_state == "mismatch":
+            raise ValueError(f"Slot {balance.slot} conflicts with platebalanceV1; reconcile its placement first")
+        if f"platebalance.{action}" not in self.allowed_actions():
+            raise RuntimeError("Balance action is unavailable in the current gateway state")
+        result: Dict[str, Any] = {**balance.snapshot(), "simulation": True, "reading": None,
+                                 "last_operation": {"action": action, "outcome": "not_executed"}}
+        def execute() -> None:
+            if not self.simulation:
+                result.clear()
+                result.update(balance.execute(action, request=request, cancelled=lambda: self._stop_latched))
+        self._run_action(f"platebalance.{action}", execute, idempotent=action == "read")
+        return result
+
+    def pipette_position(self, request: PipettePositionRequest) -> PipettePositionResponse:
+        """Explicit controller read, serialized with motion. Never called by /status."""
+        coordinates = None
+        observed_at = datetime.now(timezone.utc)
+
+        def read() -> None:
+            nonlocal coordinates, observed_at
+            pipette = self._ensure_session_pipette(request.pipette)
+            coordinates = PipetteCoordinates.model_validate(
+                self._require_control().get_pipette_position(pipette)
+            )
+            observed_at = datetime.now(timezone.utc)
+
+        self._run_action("pipette_position", read, idempotent=True)
+        return PipettePositionResponse(
+            pipette=request.pipette, coordinates=coordinates,
+            source="dry_run" if self.dry_run else "simulation" if self.simulation else "robot", observed_at=observed_at,
+        )
+
+    def jog(self, request: PipetteJogRequest) -> PipettePositionResponse:
+        """Read, bound-check, move straight, and read again under one command lock.
+
+        Relative requests are non-idempotent: losing transport must never cause
+        an automatic second step. Never resolve a delta against browser state.
+        """
+        coordinates = None
+        observed_at = datetime.now(timezone.utc)
+
+        def step() -> None:
+            nonlocal coordinates, observed_at
+            pipette = self._ensure_session_pipette(request.pipette)
+            control = self._require_control()
+            position = PipetteCoordinates.model_validate(control.get_pipette_position(pipette))
+            target = position.model_dump()
+            target[request.axis] += request.distance_mm
+            try:
+                destination = CoordinateLocation.model_validate(target)
+            except ValueError as exc:
+                raise OutOfEnvelope({"detail": "Jog destination exceeds the configured deck-coordinate limits",
+                                     "coordinates": target}) from exc
+            if self._stop_latched:
+                raise RuntimeError("stop requested before jog; no move issued")
+            control.get_location_absolute(destination.x, destination.y, destination.z)
+            control.move_to_pip(pipette, speed=request.speed, force_direct=True)
+            coordinates = PipetteCoordinates.model_validate(control.get_pipette_position(pipette))
+            observed_at = datetime.now(timezone.utc)
+
+        self._run_action("jog", step, idempotent=False)
+        return PipettePositionResponse(
+            pipette=request.pipette, coordinates=coordinates,
+            source="dry_run" if self.dry_run else "simulation" if self.simulation else "robot", observed_at=observed_at,
         )
 
     def move_to(self, request: Any) -> None:
@@ -1260,20 +1547,30 @@ class OT2Service:
         ``unknown_outcome`` — same policy as ``home``.
         """
 
+        balance_target = (self._qualified_balance_location(request.location, require_explicit_top=True)
+                          if request.location is not None else None)
+        if balance_target is not None:
+            self._balance_pipette_model(request.pipette, request.pipette)
+        if balance_target and request.force_direct:
+            raise ValueError("Direct moves over the balance are unavailable")
+
         def _move_to() -> None:
             pip = self._ensure_session_pipette(request.pipette)
             if request.location is not None:
-                self.set_location_from_well(request)
+                self.set_location_from_well(request, allow_balance=balance_target is not None)
             else:
                 coords = request.coordinates
                 self._require_control().get_location_absolute(coords.x, coords.y, coords.z)
+            minimum_z_height = request.minimum_z_height
+            if balance_target is not None:
+                minimum_z_height = max(minimum_z_height or 0, balance_target[0].rim_height_mm + 2.0)
             self._require_control().move_to_pip(
                 pip,
                 speed=request.speed,
                 # False -> None keeps the SSH invoke minimal (kwargs formatter
                 # skips None); the protocol-API default is False anyway.
                 force_direct=request.force_direct or None,
-                minimum_z_height=request.minimum_z_height,
+                minimum_z_height=minimum_z_height,
             )
 
         self._run_action("move_to", _move_to, idempotent=True)
@@ -1306,6 +1603,11 @@ class OT2Service:
 
     def dispense(self, request: Any) -> None:
         flow_rate = getattr(request, "flow_rate", None)
+        balance_target = self._qualified_balance_location(request.location, require_explicit_top=False)
+        balance_cap = (self._balance_dispense_cap(request.pipette, request.pipette)
+                       if balance_target is not None else None)
+        if balance_cap is not None and flow_rate is not None and flow_rate > balance_cap + 1e-9:
+            raise ValueError(f"Balance dispense flow rate must be at most {balance_cap:g} uL/s")
         check_volume(
             request.pipette,
             request.volume_ul,
@@ -1315,12 +1617,33 @@ class OT2Service:
 
         def _dispense() -> None:
             pip = self._ensure_session_pipette(request.pipette)
+            default_offset = _DISPENSE_DEFAULT_TOP_MM
+            kwargs: Dict[str, Any] = {"flow_rate": flow_rate}
+            if balance_target is not None:
+                assert balance_cap is not None
+                _, default_offset = balance_target
+                current = float(self._require_control().get_flow_rate(pip)["dispense"])
+                if not 0 < current < float("inf"):
+                    raise ValueError("Current dispense flow rate is unavailable")
+                effective = min(current, balance_cap) if flow_rate is None else flow_rate
+                # SSH uses the per-command rate multiplier so the pipette's
+                # persistent flow setting is untouched. HTTP takes an absolute
+                # per-command flow rate directly.
+                kwargs = ({"flow_rate": effective} if self.transport == "http"
+                          else {"rate": effective / current})
             self.set_location_from_well(
                 request,
                 default_origin="top",
-                default_offset=_DISPENSE_DEFAULT_TOP_MM,
+                default_offset=default_offset,
+                allow_balance=balance_target is not None,
             )
-            kwargs = {"flow_rate": flow_rate}
+            if balance_target is not None:
+                # The dispense command has no minimum-Z travel argument. Move
+                # via a guarded arc first; its subsequent move is at the same
+                # well location, so there is no lateral travel left to plan.
+                self._require_control().move_to_pip(
+                    pip, minimum_z_height=balance_target[0].rim_height_mm + 2.0
+                )
             if getattr(request, "push_out", None) is not None:
                 kwargs["push_out"] = request.push_out
             self._require_control().dispense(pip, request.volume_ul, **kwargs)
@@ -1815,6 +2138,16 @@ class OT2Service:
         return self.tips.racks()[slot]
 
     def move_labware(self, request: Any) -> None:
+        if self.platebalance and str(request.new_location) == self.platebalance.slot:
+            raise ValueError("Balance plate geometry is not calibrated; robotic placement is unavailable")
+        for slot, item in self._declared_slots().items():
+            assembly = getattr(item, "assembly", None)
+            if assembly and (request.labware_nickname in {
+                slot, self._session_labware.get(slot), assembly.top.plate_id,
+                assembly.collector.plate_id if assembly.collector else None,
+            } or self._nickname_to_slot().get(request.labware_nickname) == slot
+                    or request.new_location == slot):
+                raise ValueError("fixed assemblies cannot be moved or dismantled in a session; end the session and redeclare")
         if getattr(request, "use_gripper", False) and self._tiprack_slot(request.labware_nickname) is not None:
             raise RuntimeError("moving tracked tip racks is not supported; rack tracking remains keyed by its declared slot")
         def move() -> None:
@@ -2261,6 +2594,7 @@ class OT2Service:
         previous = self.state
         self.control = None
         self._session_labware = {}
+        self._session_balance_load_name = None
         self._session_pipettes = {}
         self._session_modules = {}
         self.state = OT2ServiceState.REQUIRES_INIT
@@ -2598,6 +2932,10 @@ class OT2Service:
             },
             "session_recipe": self.session_recipe,
         }
+        if self.platebalance is not None:
+            details["platebalance"] = self.platebalance.snapshot()
+            details["platebalance"]["placement_error"] = (None if self._balance_placement_valid()
+                else f"Slot {self.platebalance.slot} has another occupant. Reconcile its records and clear the slot declaration.")
         loaded_plate = self.plates.get()
         details["loaded_plate"] = loaded_plate.model_dump(mode="json") if loaded_plate else None
         details["tip_racks"] = self.tips.summary()
@@ -2677,7 +3015,7 @@ class OT2Service:
         busy = self.state in {OT2ServiceState.BUSY, OT2ServiceState.EXTERNAL_CONTROL} or run_active
         repl = normalize_repl_slots((self.last_snapshot or {}).get("deck"))
         run = normalize_run_slots(self._last_run_labware) if self._last_run_labware else None
-        return build_deck(
+        deck = build_deck(
             run=run,
             run_modules=normalize_run_modules(self._last_run_labware),
             repl=repl,
@@ -2687,6 +3025,44 @@ class OT2Service:
             busy=busy,
             now=datetime.now(timezone.utc),
         )
+
+        if self.platebalance is not None:
+            slot = deck.slots[self.platebalance.slot]
+            geometry = self.platebalance.config.pipetting_geometry
+            declared_balance = self._declared_slots().get(self.platebalance.slot)
+            compiled_observed = (
+                geometry is not None
+                and isinstance(declared_balance, SlotLabware)
+                and declared_balance.support_module == "platebalanceV1"
+                and isinstance(declared_balance.definition, dict)
+                and BalancePipettingGeometry.digest(declared_balance.definition) == geometry.definition_sha256
+                and slot.labware is not None
+                and slot.labware.load_name == self._session_balance_load_name
+                and slot.labware.load_name == geometry.compiled_load_name()
+                and slot.source in {"run", "repl"}
+            )
+            if compiled_observed:
+                slot.module = SlotModule(module_name="platebalanceV1", status="unknown", local_peripheral=True)
+                slot.slot_state = "in_use" if busy else "occupied"
+            elif slot.source in {"run", "repl"} and slot.labware is not None:
+                # A normal plate in the reserved slot, or a stale compiled
+                # definition from another session, is a physical conflict even
+                # when its generic kind happens to match the declaration.
+                slot.slot_state = "mismatch"
+            supported_plate = (slot.source == "declared" and slot.labware is not None
+                               and slot.labware.support_module == "platebalanceV1")
+            if supported_plate:
+                try:
+                    validate_balance_plate(slot.labware.definition or {},
+                        max_height_mm=self.platebalance.config.max_labware_height_mm or 25)
+                except ValueError:
+                    supported_plate = False
+            if slot.module is None and (slot.labware is None or supported_plate):
+                slot.module = SlotModule(module_name="platebalanceV1", status="unknown", local_peripheral=True)
+                if slot.slot_state == "empty":
+                    slot.slot_state = "declared"
+                    slot.source = "declared"
+        return deck
 
     def _declared_slots(self) -> Dict[str, Union[SlotLabware, SlotModule]]:
         """Merge the standalone operator declaration with the realized setup recipe.
@@ -2703,10 +3079,29 @@ class OT2Service:
             loadname = lw.get("loadname") or lw.get("load_name")
             location = lw.get("location")
             if loadname and location is not None and str(location) in SLOTS:
+                if lw.get("assembly"):
+                    from .deck import _coerce_declaration
+                    declared[str(location)] = _coerce_declaration({"assembly": lw["assembly"]})
+                    continue
                 declared[str(location)] = make_slot_labware(
                     loadname, display_name=lw.get("nickname")
                 )
         return declared
+
+    def check_module_declaration_access(self, mapping: Dict[str, Any]) -> None:
+        from .deck import _coerce_declaration
+        proposed = {str(slot): _coerce_declaration(raw) for slot, raw in mapping.items() if raw is not None}
+        def module_placements(entries):
+            return {str(slot): (item.module_name, item.serial_number, item.local_peripheral)
+                    for slot, item in entries.items() if isinstance(item, SlotModule)}
+        if module_placements(proposed) != module_placements(self.decks.get()):
+            require_module_admin()
+        for slot, entry in self._build_deck_state().slots.items():
+            if entry.module and slot in proposed and not isinstance(proposed[slot], SlotModule):
+                if (entry.module.local_peripheral and entry.module.module_name == "platebalanceV1"
+                        and getattr(proposed[slot], "support_module", None) == "platebalanceV1"):
+                    continue
+                require_module_admin()
 
     def declare_deck(self, mapping: Dict[str, Any]):
         """Replace the operator-declared layout. Raises ValueError on a bad slot.
@@ -2717,12 +3112,56 @@ class OT2Service:
         in the panel.
         """
 
-        result = self.decks.declare(mapping)
-        self.register_tiprack_slots()
-        return result
+        if not self._command_lock.acquire(blocking=False):
+            raise ValueError("cannot change deck declarations while a command is in flight")
+        try:
+            from .deck import _coerce_declaration
+            current = self._declared_slots()
+            deck = self._build_deck_state()
+            proposed = {slot: _coerce_declaration(raw) for slot, raw in mapping.items() if raw is not None}
+            self.check_module_declaration_access(mapping)
+            for slot, item in proposed.items():
+                if isinstance(item, SlotModule) and (item.local_peripheral or item.module_name == "platebalanceV1"):
+                    raise ValueError("platebalanceV1 is configured locally, not through deck declarations")
+                supported = getattr(item, "support_module", None) == "platebalanceV1"
+                if supported:
+                    if not self.platebalance or str(slot) != self.platebalance.slot:
+                        raise ValueError("A balance plate must occupy the configured balance slot")
+                    validate_balance_plate(item.definition or {},
+                        max_height_mm=self.platebalance.config.max_labware_height_mm or 25)
+                    if deck.slots[str(slot)].source in {"run", "repl"}:
+                        raise ValueError("End the session before declaring a plate on the balance")
+                elif self.platebalance and str(slot) == self.platebalance.slot:
+                    raise ValueError(f"Slot {self.platebalance.slot} is reserved for platebalanceV1; declare a supported well plate")
+            has_assembly = any(getattr(item, "assembly", None) for item in proposed.values())
+            if has_assembly and (any(isinstance(item, SlotModule) for item in proposed.values()) or
+                                 any(s.module for s in deck.slots.values())):
+                raise ValueError("fixed assemblies require a layout without modules")
+            aliases = set(SLOTS) | {f"slot_{slot}" for slot in SLOTS} | set(self._nickname_to_slot())
+            for item in proposed.values():
+                assembly = getattr(item, "assembly", None)
+                if assembly and any(p and p.plate_id in aliases for p in (assembly.top, assembly.collector)):
+                    raise ValueError("assembly plate IDs must differ from deck slots and session nicknames")
+            for slot in set(current) | set(mapping):
+                old = getattr(current.get(slot), "assembly", None)
+                new_item = proposed.get(slot)
+                new = getattr(new_item, "assembly", None)
+                if not old and not new:
+                    continue
+                if new and (slot == "12" or any(s.module for s in deck.slots.values())):
+                    raise ValueError("fixed assemblies require bare deck slots; layouts with modules are unsupported")
+                if old != new and (slot in self._session_labware or
+                        slot in self._nickname_to_slot().values() or
+                        (slot in deck.slots and deck.slots[slot].source in {"run", "repl"})):
+                    raise ValueError(f"assembly in slot {slot} is loaded; end the session before changing the stack")
+            result = self.decks.declare(mapping)
+            self.register_tiprack_slots()
+            return result
+        finally:
+            self._command_lock.release()
 
     def clear_deck(self) -> None:
-        self.decks.clear()
+        self.declare_deck({})
 
     def run_background_refresh(self) -> None:
         """Daemon loop: periodically refresh the external-run probe.
@@ -2778,6 +3217,9 @@ class OT2Service:
         base_actions = self._allowed_for_state()
         if self.state == OT2ServiceState.READY:
             base_actions += list(ADVANCED_ACTIONS)
+        if self.platebalance is not None and self._balance_placement_valid() and self.state in {OT2ServiceState.READY, OT2ServiceState.DRY_RUN}:
+            base_actions += [f"platebalance.{action}" for action in ("read", "tare", "zero")
+                             if self.platebalance.supports(action)]
         actions = [a for a in base_actions if not self._blocked_by_activity(a)]
         # The two convenience actions used to be appended by the /status builder
         # instead of here, so this method returned a NARROWER list than the
@@ -2843,6 +3285,8 @@ class OT2Service:
             ]
         if self.state == OT2ServiceState.DRY_RUN:
             return [
+                "jog",
+                "pipette_position",
                 "startup",
                 "shutdown",
                 "home",
@@ -2857,6 +3301,8 @@ class OT2Service:
             return ["resume", "shutdown"]
         if self.state == OT2ServiceState.READY:
             return [
+                "jog",
+                "pipette_position",
                 "shutdown",
                 "home",
                 "setup",
@@ -3039,6 +3485,14 @@ class OT2Service:
                 self._cycles_total += 1
             self._emit_control_action(name, "ok", started)
             self.refresh_snapshot()
+        except BalanceStabilityTimeout as exc:
+            # A valid but unsettled measurement is not a robot fault. Keep the
+            # cached sample marked as observed; the requested operation failed.
+            with self._state_lock:
+                if not self._stop_latched:
+                    self.state = previous_state
+            self._emit_control_action(name, "failed", started, str(exc))
+            raise
         except (OutOfEnvelope, TipUnavailable):
             with self._state_lock:
                 if not self._stop_latched:

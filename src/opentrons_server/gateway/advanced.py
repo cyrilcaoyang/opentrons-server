@@ -136,6 +136,7 @@ ADVANCED_ACTIONS = {
     "air_gap": AdvancedAction(AirGapRequest, "air_gap"),
     "prepare_aspirate": AdvancedAction(PipetteRequest, "prepare_aspirate"),
     "home_pipette": AdvancedAction(PipetteRequest, "home_pipette", idempotent=True),
+    "home_pipette_z": AdvancedAction(PipetteRequest, "home_pipette_z", idempotent=True),
     "home_plunger": AdvancedAction(PipetteRequest, "home_plunger", idempotent=True),
     "set_flow_rate": AdvancedAction(FlowRateRequest, "set_flow_rate", idempotent=True),
     "set_speed": AdvancedAction(PipetteSpeedRequest, "set_speed", idempotent=True),

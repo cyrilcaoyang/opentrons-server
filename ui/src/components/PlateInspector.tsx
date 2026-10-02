@@ -2,14 +2,14 @@
  * Expanded view of the deck slot selected in the DeckPanel — the top of the
  * right column.
  *
- * Two drawings of the same labware, from the same per-well model
+ * Shared drawings of labware, from the same per-well model
  * (`lib/plate-wells.ts`):
  *
- * - **Plan** (top-down): every well, with row/column labels, coloured by real
+ * - **Plan** (top-down, shown in the left deck preview): every well, with row/column labels, coloured by real
  *   state — a tip rack's fresh / touched / empty from `details.tip_racks`, a
  *   plate's tracked samples from the slot's own wells. Wells whose tips are on
  *   a pipette right now are ringed.
- * - **Elevation** (side cross-section): the labware's true profile in
+ * - **Elevation** (selected-slot side cross-section): the labware's true profile in
  *   millimetres, in the manner of the dashboard's `utils/labware_builder`,
  *   drawn as an outline with one cavity per *column*. Only a tip rack's tips
  *   are shaded — by that column's aggregate state — since they are the solid
@@ -586,11 +586,6 @@ export function PlateInspector({ slot, view, tipRacks, mountedTips }: PlateInspe
             : "No plate samples are tracked for this slot."}
         </p>
       )}
-
-      {/* Plan */}
-      <div className="rounded border border-slate-200 bg-white p-1.5 dark:border-slate-700 dark:bg-slate-900">
-        <PlanView model={model} geometry={geometry} />
-      </div>
 
       {/* Legend + counts */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-subtle dark:text-slate-400">

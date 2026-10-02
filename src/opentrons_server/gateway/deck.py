@@ -292,6 +292,8 @@ def _kinds_agree(a: SlotLabware, b: SlotLabware) -> bool:
     either side can't prove a conflict, so it agrees.
     """
 
+    if a.assembly or b.assembly or a.load_name.startswith("ac_assembly_") or b.load_name.startswith("ac_assembly_"):
+        return bool(a.load_name and b.load_name and a.load_name == b.load_name)
     if a.kind == "unknown" or b.kind == "unknown":
         return True
     if a.load_name and b.load_name:
@@ -331,6 +333,17 @@ def build_deck(
     plate_slot: Optional[str] = None
     if loaded_plate is not None:
         plate_slot = nickname_to_slot.get(loaded_plate.plate_id)
+        for slot, item in declared.items():
+            if isinstance(item, SlotLabware) and item.assembly and item.assembly.top.plate_id == loaded_plate.plate_id:
+                plate_slot = slot
+        if plate_slot in SLOTS:
+            existing = declared.get(plate_slot)
+            if isinstance(existing, SlotLabware) and existing.assembly:
+                # A collector has its own record. Never fold its samples onto
+                # the accessible filter just because both occupy the same slot.
+                if loaded_plate.plate_id == existing.assembly.top.plate_id:
+                    effective_declared[plate_slot] = existing.model_copy(update={"wells": loaded_plate.wells})
+                plate_slot = None
         if plate_slot in SLOTS:
             plate_lw = make_slot_labware(loaded_plate.model)
             plate_lw = plate_lw.model_copy(
@@ -422,6 +435,13 @@ def _resolve_slot(
 
     if observed is not None:
         labware = observed
+        if declared is not None and declared.assembly and observed.load_name == declared.load_name:
+            # Readback confirms the compiled definition name, not the physical
+            # stack. Its components remain solely in `declared.assembly`.
+            labware = labware.model_copy(update={
+                "definition": declared.definition, "display_name": declared.display_name,
+                "rows": declared.rows, "columns": declared.columns, "kind": declared.kind,
+            })
         # Carry plate_id / wells from the declared (plate-folded) entry when present.
         if declared is not None and declared.wells is not None and labware.wells is None:
             labware = labware.model_copy(
@@ -570,6 +590,14 @@ class DeckDeclarationStore:
             if value is None:
                 continue
             resolved[slot] = _coerce_declaration(value)
+        identities: set[str] = set()
+        for item in resolved.values():
+            if isinstance(item, SlotLabware) and item.assembly:
+                for plate in (item.assembly.top, item.assembly.collector):
+                    if plate:
+                        if plate.plate_id in identities:
+                            raise ValueError(f"plate ID {plate.plate_id!r} occurs in multiple assemblies")
+                        identities.add(plate.plate_id)
         with self._lock:
             self._slots = resolved
             self._persist_locked()
@@ -600,9 +628,13 @@ class DeckDeclarationStore:
                 # `load_name`/`kind`. Round-trips model_dump() from either type.
                 if isinstance(item_raw, dict) and "module_name" in item_raw:
                     parsed[str(slot)] = SlotModule.model_validate(item_raw)
+                elif isinstance(item_raw, dict) and (item_raw.get("assembly") or item_raw.get("support_module")):
+                    parsed[str(slot)] = _coerce_declaration(item_raw)
                 else:
                     parsed[str(slot)] = SlotLabware.model_validate(item_raw)
             except Exception:
+                if isinstance(item_raw, dict) and (item_raw.get("assembly") or item_raw.get("support_module")):
+                    raise ValueError(f"invalid persisted supported plate or assembly in slot {slot}")
                 logger.exception("deck declaration slot %s is malformed; ignoring", slot)
         self._slots = parsed
 
@@ -640,6 +672,36 @@ def _coerce_declaration(value: Union[str, Dict[str, Any]]) -> Union[SlotLabware,
             return SlotModule(module_name=_MODULE_KINDS[value])
         return _from_load_name_or_kind(value)
     if isinstance(value, dict):
+        if value.get("support_module") is not None:
+            from .labware import standard_definition
+            from .platebalance import validate_balance_plate
+
+            if value["support_module"] != "platebalanceV1" or value.get("assembly") or value.get("module_name"):
+                raise ValueError("Balance supports a single well plate, not an assembly or module")
+            name = value.get("load_name")
+            if not isinstance(name, str) or not name:
+                raise ValueError("Balance plate requires a load_name")
+            definition = value.get("definition")
+            if definition is None:
+                definition = standard_definition(name)
+            if not isinstance(definition, dict):
+                raise ValueError("Balance plate needs a known standard or complete custom definition")
+            validate_balance_plate(definition)
+            if definition["parameters"].get("loadName") != name:
+                raise ValueError("Balance plate load_name does not match its definition")
+            plate = _slot_labware_from_definition(name, definition, display_name=value.get("display_name"))
+            return SlotLabware.model_validate({**plate.model_dump(), "support_module": "platebalanceV1",
+                "plate_id": value.get("plate_id"), "wells": value.get("wells"), "nickname": value.get("nickname")})
+        if value.get("assembly") is not None:
+            from .assemblies import PlateAssembly
+
+            assembly = PlateAssembly.model_validate(value["assembly"])
+            definition = assembly.compile_definition()
+            # Always derive geometry server-side. Never trust a stale or
+            # caller-edited compiled definition alongside the assembly.
+            return _slot_labware_from_definition(
+                definition["parameters"]["loadName"], definition
+            ).model_copy(update={"assembly": assembly, "plate_id": assembly.top.plate_id})
         if value.get("module_name"):
             return SlotModule(
                 module_name=value["module_name"],

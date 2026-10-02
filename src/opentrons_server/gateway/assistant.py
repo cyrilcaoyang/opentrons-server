@@ -95,14 +95,30 @@ deck disagree — `tips.mark` (these wells are full / empty), `tips.reset` (a \
 fresh rack went in), `plate.load`, `well.update`, `deck.declare`. These are \
 in the catalog like any other action. Propose the correction rather than \
 describing it in prose and asking the operator to go and do it by hand.
+- Module placement changes require an admin to approve and execute. Preserve \
+all module placements when proposing ordinary plate or tip-record edits. The \
+module tile has no placement editor; admins use the API or an approved chat plan.
+- `platebalance.zero` and `platebalance.tare` may be plan steps before \
+dispensing; `platebalance.read` may follow a requested `delay`. Use \
+`wait_until_stable: true` when stable weight is required. Zero and tare are \
+non-idempotent serial writes. Their `sent_unconfirmed` result proves only the \
+command was sent; it does not prove that the reference changed. A read reports \
+the weight actually observed. A cached status reading does not prove a plan \
+measured weight.
+- Read current plan records to answer whether a proposal was approved, run, \
+failed, or aborted. Use `list_plans` to find the plan and `get_plan` for its \
+step results. Report only the status and results actually recorded; records \
+are in memory and disappear on restart.
 
 What you cannot do, and must never imply otherwise:
-- You cannot run anything. `propose_plan` creates a DRAFT. A human then \
-reviews it in the operator panel, approves it, and runs it. Never say you \
-have started, run, or completed an operation — say you have proposed it and \
-that it is waiting for their approval.
+- You cannot run anything. `propose_plan` creates a DRAFT. A human reviews, \
+approves, and runs it in chat. Say a newly proposed draft awaits approval. \
+For an existing plan, use its current gateway record. `executed` means all \
+steps finished; `failed` or `aborted` may include skipped steps, so inspect \
+each result before saying what ran. Never infer execution from earlier \
+conversation or a cached device status.
 - You cannot connect or disconnect the robot, pause or resume a run, or \
-reconcile an unknown outcome. That list is exact and complete: `startup`, \
+reconcile an unknown outcome. Operator-only actions include `startup`, \
 `shutdown`, `pause`, `resume`, `stop`, `reconcile`. Everything `list_actions` returns \
 is yours to propose — an action being an assertion about the physical world \
 does not make it operator-only, because approving your draft is how the \
@@ -129,6 +145,10 @@ from a tracked, size-compatible rack. To discard a tip into the waste, \
 module is on the deck. `tempmod.set` starts the ramp and returns immediately \
 — watch current vs target on the deck; it does not wait. \
 `tempmod.deactivate` turns the module off.
+For a declared balance plate, address wells by its declared slot (for example \
+`"9"`). The compiled run labware may appear as an adapter without wells in \
+the deck snapshot; the gateway resolves the wells from the exact declared \
+plate definition. Balance dispense clearance is above the highest rim.
 4. Propose the smallest plan that does what was asked. Explain each step in one \
 short line.
 5. If a request is ambiguous, out of scope, or unsafe, say so plainly instead \
@@ -433,6 +453,26 @@ def _tool_schemas() -> List[Dict[str, Any]]:
                 },
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_plan",
+                "description": "Read one plan and its step results, including any balance weight. No robot I/O.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"plan_id": {"type": "string"}},
+                    "required": ["plan_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_plans",
+                "description": "Read plans and their step results, including balance weights. No robot I/O.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
     ]
 
 
@@ -469,6 +509,30 @@ class Assistant:
             "get_consumables": lambda _a: self._consumables(),
             "list_actions": lambda _a: self._actions(),
             "propose_plan": self._propose,
+            "get_plan": lambda a: self._plans.get(a["plan_id"]).model_dump(mode="json"),
+            "list_plans": lambda _a: [
+                {
+                    "plan_id": plan.plan_id,
+                    "status": plan.status,
+                    "created_at": plan.created_at.isoformat(),
+                    "created_by": plan.created_by,
+                    "actions": [step.action for step in plan.steps],
+                    "halt_reason": plan.halt_reason,
+                    "results": [
+                        {"step": index + 1, "action": result.action,
+                         "outcome": result.outcome, "message": result.message,
+                         "reading": result.reading,
+                         "balance_operation": result.balance_operation}
+                        for index, result in enumerate(plan.results)
+                    ],
+                    "readings": [
+                        {"step": index + 1, **result.reading}
+                        for index, result in enumerate(plan.results)
+                        if result.reading is not None
+                    ],
+                }
+                for plan in self._plans.list()[:20]
+            ],
         }
 
     def _consumables(self) -> Dict[str, Any]:
@@ -499,7 +563,7 @@ class Assistant:
             "plan_id": plan.plan_id,
             "status": plan.status,
             "steps": [{"action": s.action, "args": s.args} for s in plan.steps],
-            "note": "Draft created. The operator must approve and run it in the panel.",
+            "note": "Draft created. The operator must approve and run it in chat.",
         }
 
     @staticmethod
@@ -558,6 +622,16 @@ class Assistant:
                 trash_guidance=("Flex has no assumed fixed trash: register a physically present bin or name an explicit drop well."
                                 if IS_FLEX else "propose drop_tip with only the pipette when its fixed trash is registered."),
             )}]
+            # History replays plain chat text, not earlier tool results. Give
+            # each turn the current plan states so an old draft claim cannot
+            # override an execution that happened between chat messages.
+            recent = self._tools()["list_plans"]({})[:10]
+            convo.append({"role": "system", "content": (
+                "Current gateway plan records (ephemeral; use get_plan for full details): "
+                + json.dumps(recent, default=str)
+                + (". No plans are currently held; do not infer their execution history."
+                   if not recent else "")
+            )})
             convo += [{"role": m["role"], "content": m["content"]} for m in messages]
 
             used: List[str] = []

@@ -18,6 +18,15 @@ duplicated here — read them, do not guess:
   Pydantic models that validate a proposed step. Catalog membership is *not*
   live readiness; cross-check `/status.allowed_actions`.
 
+For a balance weight after dispensing, a plan may start with `platebalance.zero`
+or `platebalance.tare`, then dispense, `delay`, and `platebalance.read` with
+`{"wait_until_stable": true}` if a stable value is required. After the operator
+approves and runs the plan, inspect its status and step results in
+`GET /plans/{id}`. A read result contains grams, stability, and observation
+time. A Zero/Tare result of `sent_unconfirmed` means the serial write was sent
+without acknowledgment; a later reading does not prove the reference changed.
+Plan results are ephemeral and are not scientific records.
+
 ## Deployments
 
 One process per robot; everything that distinguishes an instance is an
@@ -357,3 +366,19 @@ camera after its idle timeout if no other consumer remains.
 `agent-docs/api-reference` · `openapi.json` · `/docs` (Swagger UI) ·
 `/redoc` · `/docs/agent` (JSON guide) · `/plans/actions` (action schemas) ·
 `/status` (live state — read it, never infer it from this document).
+
+### Optional platebalanceV1
+
+A configured local Sartorius WZB254-N defaults to slot 9 (configurable) and has explicit Weight,
+Tare, and Zero controls. Weight can wait up to a bounded timeout for stability;
+see the `read` request options in the API reference. Inspect `details.platebalance` and `allowed_actions`.
+Cached weights have observation timestamps and do not establish current
+connectivity. Do not load this as an Opentrons module. Balance pipetting is
+blocked unless the local config qualifies the exact plate definition and
+measured height; `details.platebalance.geometry.pipetting_enabled` reports that
+configuration. When configured, only arced well moves above the rim and
+single-channel GEN2 dispenses at least 2 mm above the rim are supported; the
+dispense flow is capped at half the documented model default. Aspirate and
+contact actions remain blocked. Existing slot occupants must be reconciled by
+the operator. See `docs/PLATEBALANCE_V1.md` for the qualification and operator
+acceptance requirements. There are no balance-specific workflow proposal actions.

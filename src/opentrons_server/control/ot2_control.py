@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import keyword
+import json
 from typing import Any, Dict, List, Optional
 
 from ..transport import SSHClient
@@ -280,6 +281,29 @@ class OT2Control:
     def get_location_absolute(self, x: float, y: float, z: float, reference: str = None):
         self.invoke(f"location = Location(Point({x},{y},{z}), '{str(reference)}')")
 
+    def get_pipette_position(self, pip_name: str) -> Dict[str, float]:
+        name = self._validated_identifier(pip_name)
+        # v8.7 legacy and engine protocol cores expose the same synchronous
+        # hardware query. A single expression avoids the REPL prompt trap.
+        code = (
+            "print(json.dumps(dict(zip(('x', 'y', 'z'), "
+            f"protocol._core.get_hardware().gantry_position({name}._core.get_mount(), "
+            "refresh=True, fail_on_not_homed=True)))))"
+        )
+        position = json.loads(self._invoke_scalar_line(code))
+        if not isinstance(position, dict) or set(position) != {"x", "y", "z"}:
+            raise ValueError("SSH position query returned no complete XYZ position")
+        return position
+
+    def pipette_for_mount(self, mount: str) -> Optional[str]:
+        if mount not in {"left", "right"}:
+            raise ValueError("mount must be left or right")
+        if not self._invoke_bool(f"print({mount!r} in protocol.loaded_instruments)"):
+            return None
+        alias = f"_gateway_pipette_{mount}"
+        self.invoke(f"{alias} = protocol.loaded_instruments[{mount!r}]")
+        return alias
+
     def move_to_pip(
         self,
         pip_name: str,
@@ -452,6 +476,14 @@ class OT2Control:
 
     def home_pipette(self, pip_name: str):
         self.invoke(f"{pip_name}.home()")
+
+    def home_pipette_z(self, pip_name: str):
+        pip_name = self._validated_identifier(pip_name)
+        self.invoke(
+            "protocol._core.get_hardware().home(["
+            "__import__('opentrons.hardware_control.types', fromlist=['Axis']).Axis.by_mount("
+            f"{pip_name}._core.get_mount())])"
+        )
 
     def home_plunger(self, pip_name: str):
         self.invoke(f"{pip_name}.home_plunger()")

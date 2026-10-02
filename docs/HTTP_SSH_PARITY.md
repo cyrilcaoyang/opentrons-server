@@ -96,13 +96,27 @@ call. Only `move_to_pip` peeks.
 **Flow-rate model:** the run engine *requires* `flowRate` on every liquid
 command; the SSH path inherits protocol-API defaults. Effective rate per call:
 
+Qualified plate-balance dispenses use the same raised schema-2 labware
+definition on both transports. The gateway issues an arced well move with a
+minimum Z above the measured rim before dispensing. HTTP receives a capped
+absolute `flowRate`; SSH receives a per-command `rate` multiplier computed from
+the current pipette flow rate, so ordinary subsequent dispenses retain their
+previous setting. Both paths cap the balance dispense at half the documented
+single-channel GEN2 default. This path is offline-tested and awaits
+Complexation operator acceptance.
+
 ```
-explicit flow_rate  >  set_flow_rate(pip, ...) override  >  constructor/env default
+explicit flow_rate  >  set_flow_rate(pip, ...) override  >  constructor/env or model default
                                         × rate multiplier (default 1.0)
 ```
 
-Env defaults: `OT2_HTTP_ASPIRATE_FLOW_UL_S` (90), `OT2_HTTP_DISPENSE_FLOW_UL_S`
-(300), `OT2_HTTP_BLOWOUT_FLOW_UL_S` (100).
+HTTP aspirate and blow-out defaults remain 90 and 100 µL/s. If
+`OT2_HTTP_DISPENSE_FLOW_UL_S` is unset, ordinary HTTP dispense uses the official
+OT-2 GEN2 model rate: P20 single 7.56, P300 single 92.86, P1000 single 274.7,
+P20 multi 7.6, and P300 multi 94 µL/s (Protocol API ≥2.6). Unknown models
+require an explicit flow rate. An explicit deployment override still applies
+to every pipette. Flex retains its existing HTTP fallback; this table is OT-2
+only. Source: [Opentrons pipette characteristics](https://docs.opentrons.com/python-api/pipettes/characteristics/#ot-2-pipette-flow-rates).
 
 ### Pipette configuration & readbacks
 

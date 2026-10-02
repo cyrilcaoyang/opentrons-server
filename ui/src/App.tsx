@@ -2,7 +2,6 @@ import { useEffect } from "react";
 
 import { AssistantBubble } from "./components/AssistantBubble";
 import { ControlPanel } from "./components/ControlPanel";
-import { PlanReviewPanel } from "./components/PlanReviewPanel";
 import { panelTitle } from "./lib/format";
 import { useClaim } from "./lib/use-claim";
 import { useGatewayStatus } from "./lib/use-status";
@@ -18,7 +17,7 @@ export function App() {
   }, [name]);
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 p-4 sm:p-6">
+    <main className="mr-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-5 py-4 sm:px-8 sm:py-6 lg:px-10">
       {isPending && !snapshot && (
         <p className="text-sm text-ink-muted dark:text-slate-400">Loading gateway status…</p>
       )}
@@ -28,7 +27,6 @@ export function App() {
           service running on this host?
         </p>
       )}
-      <PlanReviewPanel claim={claim} />
       {snapshot && <ControlPanel snapshot={snapshot} refetch={refetch} claim={claim} />}
       <AssistantBubble claim={claim} snapshot={snapshot ?? null} />
     </main>

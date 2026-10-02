@@ -70,6 +70,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 from pydantic import BaseModel, ValidationError
 
 from .advanced import ADVANCED_ACTIONS
+from .platebalance import PlateBalanceReferenceRequest, PlateBalanceRequest
 from .models import (
     ClaimedBy,
     DeckDeclareRequest,
@@ -123,7 +124,7 @@ class ActionSpec:
 
     model: Optional[type[BaseModel]]
     idempotent: bool
-    invoke: Callable[[Any, Optional[BaseModel]], None]
+    invoke: Callable[[Any, Optional[BaseModel]], Any]
 
 
 # Deliberately excluded, and why — these are not oversights:
@@ -189,6 +190,17 @@ PLAN_ACTIONS: Dict[str, ActionSpec] = {
     ),
     "tempmod.deactivate": ActionSpec(
         TempmodDeactivateRequest, True, lambda svc, a: svc.deactivate_tempmod(a)
+    ),
+    # Reference writes are non-idempotent and report only that the serial
+    # command was sent. A later read observes weight, not reference success.
+    "platebalance.read": ActionSpec(
+        PlateBalanceRequest, True, lambda svc, a: svc.platebalance_action("read", a)
+    ),
+    "platebalance.tare": ActionSpec(
+        PlateBalanceReferenceRequest, False, lambda svc, _a: svc.platebalance_action("tare")
+    ),
+    "platebalance.zero": ActionSpec(
+        PlateBalanceReferenceRequest, False, lambda svc, _a: svc.platebalance_action("zero")
     ),
 }
 
@@ -279,6 +291,8 @@ class StepResult(BaseModel):
     action: str
     outcome: StepOutcome = "pending"
     message: Optional[str] = None
+    reading: Optional[Dict[str, Any]] = None
+    balance_operation: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
@@ -572,7 +586,31 @@ class PlanExecutor:
             # available. A command already started keeps its actual outcome.
             try:
                 spec = step.spec()
-                spec.invoke(self._service, step.validated_args())
+                output = spec.invoke(self._service, step.validated_args())
+                reading = None
+                balance_operation = None
+                step_message = None
+                if step.action == "platebalance.read":
+                    if not isinstance(output, dict):
+                        raise ValueError("Balance read returned no result")
+                    reading = output.get("reading")
+                    if reading is None:
+                        if not output.get("simulation"):
+                            raise ValueError("Balance read returned no measurement")
+                        step_message = "Simulation: no weight was measured"
+                    elif not isinstance(reading, dict):
+                        raise ValueError("Balance read returned an invalid measurement")
+                elif step.action in {"platebalance.tare", "platebalance.zero"}:
+                    if not isinstance(output, dict):
+                        raise ValueError("Balance reference command returned no result")
+                    balance_operation = output.get("last_operation")
+                    expected = "not_executed" if output.get("simulation") else "sent_unconfirmed"
+                    if (not isinstance(balance_operation, dict)
+                            or balance_operation.get("action") != step.action.removeprefix("platebalance.")
+                            or balance_operation.get("outcome") != expected):
+                        raise ValueError("Balance reference command returned an invalid outcome")
+                    step_message = ("Simulation: reference command was not sent" if output.get("simulation")
+                                    else "Reference command sent; change unconfirmed")
             except Exception as exc:
                 with self._store._lock:
                     result.outcome = "failed"
@@ -583,6 +621,9 @@ class PlanExecutor:
                     return plan
             with self._store._lock:
                 result.outcome = "ok"
+                result.message = step_message
+                result.reading = reading.copy() if reading is not None else None
+                result.balance_operation = balance_operation.copy() if balance_operation is not None else None
                 result.finished_at = datetime.now(timezone.utc)
                 if plan.status != "executing":
                     return plan

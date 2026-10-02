@@ -103,6 +103,8 @@ export interface DeviceDeckSlot {
     /** Exact schema-2 definition supplied with an operator-declared custom
      * labware item. It is authoritative for its own preview geometry. */
     definition?: unknown | null;
+    support_module?: "platebalanceV1" | null;
+    assembly?: PlateAssembly | null;
     /** The setup recipe's name for this labware — the key `details.tip_racks`
      *  and `/control/*` use. Stamped per slot so it survives run/REPL
      *  precedence, unlike `display_name`. */
@@ -110,6 +112,7 @@ export interface DeviceDeckSlot {
   } | null;
   module: {
     module_name: string;
+    local_peripheral?: boolean;
     status?: string | null;
     serial_number?: string | null;
   } | null;
@@ -118,9 +121,34 @@ export interface DeviceDeckSlot {
   /** The operator/recipe declaration on this slot, set whatever won the merge —
    *  including once a run/REPL source occupies it, when `slot_state` no longer
    *  says "declared". The declared-layout round-trip depends on this. */
-  declared?: { kind: string; load_name: string; definition?: unknown } | null;
+  declared?: { kind: string; load_name: string; support_module?: "platebalanceV1" | null; definition?: unknown; assembly?: PlateAssembly | null } | null;
   /** As `declared`, when the declaration is a sticky module rather than labware. */
-  declared_module?: { module_name: string; serial_number?: string | null } | null;
+  declared_module?: { module_name: string; local_peripheral?: boolean; serial_number?: string | null } | null;
+}
+
+export interface PlateAssembly {
+  schema_version: 1;
+  kind: "plate_on_riser" | "filter_stack";
+  riser_height_mm: 0 | 5;
+  top: { plate_id: string; definition: unknown };
+  collector: { plate_id: string; definition: unknown } | null;
+  nesting_overlap_mm: number;
+}
+
+export interface AssemblyPreview {
+  assembly: PlateAssembly;
+  definition: unknown;
+  top_origin_z_mm: number;
+  total_height_mm: number;
+}
+
+export interface PipettePosition {
+  pipette: string;
+  coordinates: { x: number; y: number; z: number } | null;
+  source: "robot" | "simulation" | "dry_run";
+  observed_at: string;
+  reference: "pipette_critical_point";
+  coordinate_limits?: Record<"x" | "y" | "z", [number, number]>;
 }
 
 export interface DeviceDeck {
@@ -171,6 +199,7 @@ export interface LabwareSummary {
   columns?: number;
   well_count?: number;
   well_volume_ul?: number | null;
+  height_mm?: number | null;
   version?: number;
   namespace?: string;
   /** Manufacturer metadata from the definition's schema-2 `brand` object.
@@ -208,8 +237,17 @@ export interface StepResult {
   action: string;
   outcome: StepOutcome;
   message: string | null;
+  reading: WeightReading | null;
+  balance_operation: { action: string; outcome: string; at?: string } | null;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface WeightReading {
+  value: number;
+  unit: string;
+  stable: boolean;
+  observed_at: string;
 }
 
 export interface StepApproval {
@@ -292,3 +330,12 @@ export type AssistantProgressEvent =
     }
   | { type: "complete"; result: AssistantReply }
   | { type: "error"; message: string };
+
+export interface PlateBalanceStatus {
+  placement_error?: string | null;
+  configured: boolean;
+  model: string;
+  reading: WeightReading | null;
+  last_error: string | null;
+  last_operation: { action: string; outcome: string; at?: string } | null;
+}

@@ -47,6 +47,7 @@ dependencies = [                          # List runtime dependencies
 ]
 
 [project.optional-dependencies]
+platebalance = ["matterlab-balances==1.1.0", "matterlab-serial-device==1.2.1"]
 workflows = [
     "prefect>=2.14.0",
 ]

@@ -159,6 +159,36 @@ def test_dispense_flow_rate_override_beats_default():
     assert params["flowRate"] == 75.0  # not the 200.0 default
 
 
+@pytest.mark.parametrize("model, expected", [
+    ("p20_single_gen2", 7.56),
+    ("p300_single_gen2", 92.86),
+    ("p1000_single_gen2", 274.7),
+    ("p20_multi_gen2", 7.6),
+    ("p300_multi_gen2", 94.0),
+])
+def test_http_default_dispense_matches_documented_ot2_rate(model, expected):
+    client = FakeClient()
+    ctl = OT2HttpControl(client)
+    ctl.load_instrument({
+        "ot_default": True, "nickname": "pip", "instrument_name": model, "mount": "right",
+    })
+    ctl.get_location_absolute(100, 100, 100)
+    ctl.dispense("pip", 10)
+    assert client.commands[-1][1]["flowRate"] == pytest.approx(expected)
+    assert ctl.get_flow_rate("pip")["dispense"] == pytest.approx(expected)
+
+
+def test_adopted_http_pipette_uses_its_model_default():
+    class AdoptedClient(FakeClient):
+        def get_run(self):
+            return {"id": "run-1", "labware": [], "pipettes": [
+                {"id": "existing", "mount": "right", "pipetteName": "p300_single_gen2"}
+            ]}
+
+    ctl = OT2HttpControl(AdoptedClient())
+    assert ctl.get_flow_rate("existing")["dispense"] == pytest.approx(92.86)
+
+
 def test_location_precedence_center():
     ctl, client = _loaded_control()
     ctl.get_location_from_labware("plate", "B2", center=1)

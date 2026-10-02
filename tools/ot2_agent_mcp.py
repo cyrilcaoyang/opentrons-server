@@ -141,8 +141,8 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
         schema and whether it is idempotent.
 
         Read this before proposing. Actions not listed here cannot be planned —
-        notably startup, shutdown, pause, resume, stop and reconcile, which are
-        operator-only by design.
+        notably startup, shutdown, pause, resume, stop, and reconcile.
+        platebalance.tare/zero are included as non-idempotent reference writes.
         """
         return gateway.get("/plans/actions")
 
@@ -178,7 +178,8 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
     @mcp.tool()
     def get_plan(plan_id: str) -> dict:
         """One plan: its steps, status, per-step outcomes, and — when it cannot
-        run — the reason why, in `blocked_reason`."""
+        run — the reason why, in `blocked_reason`. A completed platebalance.read
+        step has its measured weight in `results[].reading`."""
         return gateway.get(f"/plans/{plan_id}")
 
     @mcp.tool()

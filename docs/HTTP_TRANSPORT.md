@@ -168,13 +168,16 @@ branches on transport only at control construction and snapshot refresh.
 - **Revert:** unset `OT2_TRANSPORT` (or set `ssh`) and restart. No code
   change — the SSH REPL path is unchanged.
 - Related env knobs: `OT2_HTTP_ASPIRATE_FLOW_UL_S` (default 90),
-  `OT2_HTTP_DISPENSE_FLOW_UL_S` (300), `OT2_HTTP_BLOWOUT_FLOW_UL_S` (100),
+  `OT2_HTTP_DISPENSE_FLOW_UL_S` (optional override; otherwise the
+  official OT-2 GEN2 rate for the loaded model), `OT2_HTTP_BLOWOUT_FLOW_UL_S` (100),
   `OT2_HTTP_COMMAND_TIMEOUT` (120 s per blocking command),
   `OT2_HTTP_TIMEOUT` (10 s control-plane calls), `OT2_OPENTRONS_VERSION`
   (`Opentrons-Version` header, default 3).
 - The run engine **requires** `flowRate` on every liquid command — there is
   no protocol-API default on this transport. Precedence per call: explicit
-  `flow_rate` > `set_flow_rate()` per-pipette override > env default.
+  `flow_rate` > `set_flow_rate()` per-pipette override > env override or model default.
+  The model default applies to ordinary OT-2 HTTP dispenses, including existing
+  non-balance workflows; review that change before deploying either gateway.
 
 **Production stance (2026-07-18):** SSH remains the default. The original
 migration surface is hardware-validated; the parity surface added on

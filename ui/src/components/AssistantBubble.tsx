@@ -9,7 +9,10 @@ import {
   executePlan,
   getAssistantHealth,
   getPlan,
+  listPlans,
 } from "../lib/api";
+import { moveWindow, resizeWindow } from "../lib/floating-window";
+import type { Corner, WindowRect } from "../lib/floating-window";
 import type { ClaimState } from "../lib/use-claim";
 import type {
   AssistantMessage,
@@ -23,11 +26,8 @@ import type {
 /**
  * Optional chat popup for simple operations on THIS OT-2.
  *
- * Renders nothing at all unless the gateway reports an assistant is
- * configured, so a deployment without an API key looks exactly as it did
- * before — the point being that installing this package alone still gives you
- * a complete operator surface, chat included, with no dashboard or agent
- * harness required.
+ * When chat is unconfigured, the popup still appears for externally proposed
+ * plans so the operator retains one place to review and run them.
  *
  * The assistant can only propose. What it drafts renders here as a plan card
  * the operator can approve and run **in the chat** — the same claim-gated
@@ -46,6 +46,12 @@ const STORAGE_KEY = "ot2-assistant-thread";
 // saved pick is only honoured if this gateway still offers it.
 const MODEL_STORAGE_KEY = "ot2-assistant-model";
 const MAX_KEPT = 20;
+const RESIZE_CORNERS = [
+  { corner: "nw", position: "left-0 top-0", cursor: "cursor-nwse-resize", glyph: "↖", name: "top left" },
+  { corner: "ne", position: "right-0 top-0", cursor: "cursor-nesw-resize", glyph: "↗", name: "top right" },
+  { corner: "sw", position: "bottom-0 left-0", cursor: "cursor-nesw-resize", glyph: "↙", name: "bottom left" },
+  { corner: "se", position: "bottom-0 right-0", cursor: "cursor-nwse-resize", glyph: "↘", name: "bottom right" },
+] as const;
 
 function loadThread(): AssistantMessage[] {
   try {
@@ -71,21 +77,22 @@ export function AssistantBubble({
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [panelSize, setPanelSize] = useState({ width: 460, height: 520 });
-  // Drag offset from the bottom-right anchor, in px (x/y ≤ 0 moves left/up).
+  // Drag offset from the bottom-right anchor, in px.
   // Component state only: a reload snaps back to the corner, which beats
   // restoring a position that an old window size may have made unreachable.
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(
+  const dragRef = useRef<{ startX: number; startY: number; rect: WindowRect } | null>(
     null,
   );
   const panelRef = useRef<HTMLElement | null>(null);
   const resizeRef = useRef<{
     startX: number;
     startY: number;
-    width: number;
-    height: number;
+    rect: WindowRect;
+    corner: Corner;
   } | null>(null);
   const [thread, setThread] = useState<AssistantMessage[]>(loadThread);
+  const [failedMessageIndex, setFailedMessageIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +104,7 @@ export function AssistantBubble({
   // persisted: statuses are re-fetched when the bubble opens, so a stale
   // sessionStorage copy can never be what gets approved.
   const [planStates, setPlanStates] = useState<Record<string, Plan | "gone">>({});
+  const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [planBusy, setPlanBusy] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -113,9 +121,26 @@ export function AssistantBubble({
   }, []);
 
   useEffect(() => {
+    // Keep externally proposed plans available in this popup too. Without
+    // this, removing the page panel would strand plans from MCP proposers.
+    let active = true;
+    const refresh = async () => {
+      try {
+        const plans = await listPlans();
+        if (active) setAllPlans(plans);
+      } catch {
+        // The status panel reports connectivity; preserve the last review.
+      }
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 3000);
+    return () => { active = false; clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     // Re-sync every card when the bubble opens: approvals expire, plans get
-    // revised or dismissed from the panel, and the gateway may have restarted.
+    // revised or dismissed elsewhere, and the gateway may have restarted.
     const ids = new Set(thread.map((m) => m.planId).filter(Boolean) as string[]);
     ids.forEach((id) => void refreshPlan(id));
     // Deliberately not keyed on `thread`: send() stores the fresh plan itself.
@@ -129,6 +154,7 @@ export function AssistantBubble({
       try {
         const updated = await fn();
         setPlanStates((s) => ({ ...s, [planId]: updated }));
+        setAllPlans((plans) => plans.map((p) => p.plan_id === planId ? updated : p));
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setError(`${err.message} — the plan changed; re-read it before approving.`);
@@ -150,6 +176,7 @@ export function AssistantBubble({
       try {
         await deletePlan(planId, claim.token);
         setPlanStates((s) => ({ ...s, [planId]: "gone" }));
+        setAllPlans((plans) => plans.filter((p) => p.plan_id !== planId));
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         void refreshPlan(planId);
@@ -172,8 +199,9 @@ export function AssistantBubble({
   const clearThread = useCallback(() => {
     // Forgets the conversation only. Plans the assistant drafted live on the
     // gateway — clearing a chat must never silently discard something awaiting
-    // review. It will no longer be rendered in a separate page panel.
+    // review. It remains in the popup's external-plan list.
     setThread([]);
+    setFailedMessageIndex(null);
     setPlanStates({});
     setError(null);
     toolProgressRef.current = [];
@@ -214,11 +242,14 @@ export function AssistantBubble({
     endRef.current?.scrollIntoView({ block: "end" });
   }, [thread]);
 
-  const send = useCallback(async () => {
-    const text = draft.trim();
+  const send = useCallback(async (resendText?: string, resendIndex?: number) => {
+    const text = (resendText ?? draft).trim();
     if (!text || pending) return;
-    const next = [...thread, { role: "user" as const, content: text }];
+    const retryFailed = resendIndex === failedMessageIndex && resendIndex === thread.length - 1;
+    const next = [...(retryFailed ? thread.slice(0, -1) : thread),
+      { role: "user" as const, content: text }];
     setThread(next);
+    setFailedMessageIndex(null);
     setDraft("");
     setPending(true);
     setError(null);
@@ -313,6 +344,7 @@ export function AssistantBubble({
             ? err.message
             : String(err);
       setError(message);
+      setFailedMessageIndex(next.length - 1);
       updateProgress((current) => [
         ...current.map((tool) =>
           tool.status === "running"
@@ -330,18 +362,18 @@ export function AssistantBubble({
     } finally {
       setPending(false);
     }
-  }, [draft, pending, thread, claim.token, model]);
+  }, [draft, pending, thread, failedMessageIndex, claim.token, model]);
 
-  // Drag the panel by its header. Pointer events (not HTML5 drag) so it works
-  // with touch; capture keeps the drag alive when the cursor outruns the
-  // header. Buttons in the header opt out, so they still just click.
+  // The header and bottom grip move the panel. Pointer capture keeps movement
+  // continuous when the pointer leaves either grip; controls stay clickable.
   function onDragStart(e: React.PointerEvent<HTMLElement>) {
-    if ((e.target as HTMLElement).closest("button")) return;
+    if ((e.target as HTMLElement).closest("button, input, textarea, select, a")) return;
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
     dragRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      baseX: dragOffset.x,
-      baseY: dragOffset.y,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
     e.currentTarget.setPointerCapture(e.pointerId);
   }
@@ -349,16 +381,11 @@ export function AssistantBubble({
   function onDragMove(e: React.PointerEvent<HTMLElement>) {
     const d = dragRef.current;
     if (!d) return;
-    const rect = panelRef.current?.getBoundingClientRect();
-    const w = rect?.width ?? 460;
-    const h = rect?.height ?? 520;
-    // Anchored bottom-right above the launcher (dashboard placement); clamp so
-    // the whole panel stays on screen (offsets are ≤ 0 by construction).
-    const minX = -(window.innerWidth - w - 40);
-    const minY = -(window.innerHeight - h - 100);
+    const next = moveWindow(d.rect, e.clientX - d.startX, e.clientY - d.startY,
+      window.innerWidth, window.innerHeight);
     setDragOffset({
-      x: Math.max(Math.min(minX, 0), Math.min(0, d.baseX + e.clientX - d.startX)),
-      y: Math.max(Math.min(minY, 0), Math.min(0, d.baseY + e.clientY - d.startY)),
+      x: next.right - (window.innerWidth - 20),
+      y: next.bottom - (window.innerHeight - 80),
     });
   }
 
@@ -366,26 +393,35 @@ export function AssistantBubble({
     dragRef.current = null;
   }
 
-  function onResizeStart(e: React.PointerEvent<HTMLElement>) {
+  function onResizeStart(e: React.PointerEvent<HTMLElement>, corner: Corner) {
     e.preventDefault();
     e.stopPropagation();
+    const rect = panelRef.current?.getBoundingClientRect();
+    if (!rect) return;
     resizeRef.current = {
       startX: e.clientX,
       startY: e.clientY,
-      width: panelSize.width,
-      height: panelSize.height,
+      rect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
+      corner,
     };
+    // Resizing an expanded panel begins from its visible dimensions.
+    setPanelSize({ width: rect.width, height: rect.height });
+    setExpanded(false);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
 
   function onResizeMove(e: React.PointerEvent<HTMLElement>) {
     const r = resizeRef.current;
     if (!r) return;
-    const maxWidth = Math.max(320, window.innerWidth - 32);
-    const maxHeight = Math.max(360, window.innerHeight - 100);
+    const next = resizeWindow(r.rect, r.corner, e.clientX - r.startX,
+      e.clientY - r.startY, window.innerWidth, window.innerHeight);
     setPanelSize({
-      width: Math.min(maxWidth, Math.max(320, r.width + r.startX - e.clientX)),
-      height: Math.min(maxHeight, Math.max(360, r.height + r.startY - e.clientY)),
+      width: next.right - next.left,
+      height: next.bottom - next.top,
+    });
+    setDragOffset({
+      x: next.right - (window.innerWidth - 20),
+      y: next.bottom - (window.innerHeight - 80),
     });
   }
 
@@ -393,7 +429,11 @@ export function AssistantBubble({
     resizeRef.current = null;
   }
 
-  if (!available) return null;
+  const threadPlanIds = new Set(thread.map((m) => m.planId).filter(Boolean));
+  const visiblePlans = allPlans.filter((p) => p.status !== "aborted" &&
+    (p.status !== "executed" || p.results.some((r) => r.reading)));
+  const externalPlans = visiblePlans.filter((p) => !threadPlanIds.has(p.plan_id));
+  if (!available && visiblePlans.length === 0) return null;
 
   return (
     <>
@@ -448,25 +488,20 @@ export function AssistantBubble({
         width: expanded ? 704 : panelSize.width,
         height: expanded ? 736 : panelSize.height,
       }}
-      className="fixed bottom-20 right-5 z-40 flex max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-purple-300 bg-surface-raised shadow-2xl dark:border-purple-800 dark:bg-slate-900"
+      className="fixed bottom-20 right-5 z-40 flex max-h-[calc(100vh-6rem)] max-w-[calc(100vw-2.25rem)] flex-col overflow-hidden rounded-xl border border-purple-300 bg-surface-raised shadow-2xl dark:border-purple-800 dark:bg-slate-900"
     >
-      <div
-        className="absolute left-0 top-0 z-10 h-5 w-5 cursor-nwse-resize"
-        onPointerDown={onResizeStart}
-        onPointerMove={onResizeMove}
-        onPointerUp={onResizeEnd}
-        onPointerCancel={onResizeEnd}
-        role="separator"
-        aria-label="Resize the assistant window"
-        title="Drag to resize"
-      >
-        <span
-          className="pointer-events-none absolute left-1 top-0.5 text-[11px] leading-none text-purple-400"
-          aria-hidden
-        >
-          ↖
-        </span>
-      </div>
+      {RESIZE_CORNERS.map(({ corner, position, cursor, glyph, name }) => (
+        <div key={corner}
+          className={`absolute z-10 flex h-5 w-5 items-center justify-center touch-none select-none text-[11px] text-purple-400 ${position} ${cursor}`}
+          onPointerDown={(event) => onResizeStart(event, corner)}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeEnd}
+          onPointerCancel={onResizeEnd}
+          role="separator"
+          aria-label={`Resize the assistant window from ${name}`}
+          title={`Drag ${name} corner to resize`}
+        >{glyph}</div>
+      ))}
       <header
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
@@ -477,7 +512,7 @@ export function AssistantBubble({
       >
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold text-ink dark:text-slate-100">
-            Assistant{snapshot?.name ? ` — ${snapshot.name}` : ""}
+            {available ? "Assistant" : "Plans"}{snapshot?.name ? ` — ${snapshot.name}` : ""}
           </span>
           {/* Which robot this chat drives, and through which machine/address —
               two panels open side by side must be tellable apart before a
@@ -490,7 +525,7 @@ export function AssistantBubble({
               .join(" · ")}
           </span>
           <span className="truncate text-[10px] text-ink-subtle dark:text-slate-500">
-            Control · proposes plans you approve and run
+            Review plans here, then approve and run
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -526,7 +561,23 @@ export function AssistantBubble({
       </header>
 
       <div className="flex-1 overflow-y-auto px-3 py-3 text-sm">
-        {thread.length === 0 && (
+        {externalPlans.length > 0 && (
+          <div className="mb-3 space-y-2">
+            <p className="text-xs font-semibold text-ink dark:text-slate-100">Other plans</p>
+            {externalPlans.map((plan) => (
+              <div key={plan.plan_id} className="rounded-lg bg-slate-100 p-2 dark:bg-slate-800">
+                <p className="text-[11px] text-ink-subtle dark:text-slate-400">From {plan.created_by}</p>
+                <ChatPlanCard planId={plan.plan_id} live={plan} busy={planBusy === plan.plan_id}
+                  claimHeld={claim.held}
+                  onApprove={(hash) => void runPlanAction(plan.plan_id, () => approvePlan(plan.plan_id, hash, claim.token))}
+                  onRun={() => void runPlanAction(plan.plan_id, () => executePlan(plan.plan_id, claim.token))}
+                  onDiscard={() => void runPlanAction(plan.plan_id, () => abortPlan(plan.plan_id, claim.token))}
+                  onDismiss={() => void dismissPlan(plan.plan_id)} />
+              </div>
+            ))}
+          </div>
+        )}
+        {available && thread.length === 0 && (
           <div className="text-xs text-ink-subtle dark:text-slate-500">
             Ask about this robot&apos;s state, or describe a simple operation and
             I&apos;ll propose it for your approval. For example:
@@ -550,6 +601,14 @@ export function AssistantBubble({
                 <ToolPills tools={m.tools} className="mb-1.5" />
               )}
               <span className="whitespace-pre-wrap break-words">{m.content}</span>
+              {m.role === "user" && (
+                <button type="button" disabled={pending || !claim.held}
+                  onClick={() => void send(m.content, i)}
+                  className="mt-1 block text-[10px] underline underline-offset-2 disabled:opacity-50"
+                  aria-label={`Resend message ${i + 1}`}>
+                  {failedMessageIndex === i ? "Retry" : "Resend"}
+                </button>
+              )}
               {m.planId && (
                 <ChatPlanCard
                   planId={m.planId}
@@ -595,7 +654,7 @@ export function AssistantBubble({
         <div ref={endRef} />
       </div>
 
-      <form
+      {available && <form
         className="border-t border-purple-200 px-3 py-2 dark:border-purple-800"
         onSubmit={(e) => {
           e.preventDefault();
@@ -654,7 +713,17 @@ export function AssistantBubble({
             </p>
           )
         )}
-      </form>
+      </form>}
+      <div
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        className="flex h-4 shrink-0 cursor-move touch-none select-none items-center justify-center border-t border-purple-200 bg-purple-50/60 dark:border-purple-800 dark:bg-purple-950/30"
+        title="Drag the bottom edge to move the window"
+      >
+        <span className="pointer-events-none h-1 w-10 rounded-full bg-purple-300 dark:bg-purple-700" aria-hidden />
+      </div>
     </section>
       )}
     </>
@@ -804,8 +873,20 @@ function ChatPlanCard({
             >
               {si + 1}. {stepLine(s)}
               {live.results[si]?.message && (
-                <span className="ml-1 font-sans text-rose-700 dark:text-rose-400">
+                <span className={`ml-1 font-sans ${outcome === "failed" ? "text-rose-700 dark:text-rose-400" : "text-ink-subtle dark:text-slate-400"}`}>
                   {live.results[si].message}
+                </span>
+              )}
+              {live.results[si]?.reading && (
+                <span className="ml-1 font-sans text-emerald-700 dark:text-emerald-400">
+                  {live.results[si].reading.value.toFixed(4)} {live.results[si].reading.unit} · {live.results[si].reading.stable ? "stable" : "unstable"} · {live.results[si].reading.observed_at}
+                </span>
+              )}
+              {live.results[si]?.balance_operation && (
+                <span className="ml-1 font-sans text-amber-700 dark:text-amber-400">
+                  {live.results[si].balance_operation.outcome === "sent_unconfirmed"
+                    ? "Command sent; balance reference unconfirmed"
+                    : "Simulation: reference command not sent"}
                 </span>
               )}
             </li>

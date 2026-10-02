@@ -47,6 +47,18 @@ function apiUrl(path: string): string {
   return `${apiBase.replace(/\/+$/, "")}${path}`;
 }
 
+export function formatApiDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map(item => {
+    if (item && typeof item === "object" && "msg" in item) {
+      const field = Array.isArray(item.loc) ? item.loc.filter((v: unknown) => v !== "body").join(".") : "Request";
+      return `${field}: ${item.msg}`;
+    }
+    return formatApiDetail(item);
+  }).join("; ");
+  return JSON.stringify(detail) ?? "Request failed";
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
@@ -62,7 +74,7 @@ export class ApiError extends Error {
   ) {
     const detail =
       body && typeof body === "object" && "detail" in body
-        ? String((body as { detail: unknown }).detail)
+        ? formatApiDetail((body as { detail: unknown }).detail)
         : undefined;
     super(detail ?? `${status} ${statusText} from ${path}`);
     this.name = "ApiError";
@@ -235,6 +247,8 @@ export const postPause = (token: string | null) => controlPost("pause", {}, toke
 
 export const postResume = (token: string | null) => controlPost("resume", {}, token);
 
+export const postHomePipetteZ = (token: string | null, pipette: string) => controlPost("home-pipette-z", { pipette }, token);
+
 export const postHome = (token: string | null) => controlPost("home", {}, token);
 
 /** Acknowledge a failed command (or an unknown outcome) after inspecting the
@@ -288,7 +302,22 @@ export const postTipsMark = (
  *  schema-2 definition is attached so the gateway derives real geometry
  *  instead of guessing from load_name alone (`DeckDeclareRequest` on the
  *  gateway side already supports this — see gateway/models.py). */
-export type DeckDeclareValue = string | { load_name: string; definition?: unknown } | { module_name: string; serial_number?: string | null } | null;
+export type DeckDeclareValue = string | { load_name: string; support_module?: "platebalanceV1" | null; definition?: unknown; assembly?: import("./types").PlateAssembly | null } | { assembly: import("./types").PlateAssembly } | { module_name: string; serial_number?: string | null } | null;
+
+export const previewAssembly = (assembly: import("./types").PlateAssembly): Promise<import("./types").AssemblyPreview> =>
+  fetchJson("/labware/assemblies/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(assembly) });
+
+export const readPipettePosition = (token: string | null, pipette: string): Promise<import("./types").PipettePosition> =>
+  controlPost("pipette-position", { pipette }, token);
+
+export const jogPipette = (token: string | null, pipette: string, axis: "x" | "y" | "z", distance_mm: number, speed: number): Promise<import("./types").PipettePosition> =>
+  controlPost("jog", { pipette, axis, distance_mm, speed }, token);
+
+export const movePipetteTo = (token: string | null, request: {
+  pipette: string; speed: number; force_direct: boolean;
+  coordinates?: { x: number; y: number; z: number };
+  location?: { labware_nickname: string; position: string; top: number };
+}): Promise<unknown> => controlPost("move-to", request, token);
 
 /** Full-layout declared-deck replace. Values are load_names, module keys,
  *  legacy kind strings, or a load_name+definition object for custom labware;
@@ -455,3 +484,7 @@ export async function getCameraSnapshot(id: string, signal: AbortSignal): Promis
   }
   return response.blob();
 }
+
+export const postPlateBalance = (token: string | null, action: "read" | "tare" | "zero", waitUntilStable = false) =>
+  controlPost(`platebalance/${action}`, action === "read"
+    ? { wait_until_stable: waitUntilStable, timeout_s: 10 } : {}, token);

@@ -68,7 +68,9 @@ def equipment_documentation() -> dict[str, Any]:
             "units": "Liquid volumes in microliters, coordinates in millimeters, temperature in Celsius.",
             "deck_declare": "Full-layout replacement, not a patch; omitted slots are cleared.",
             "temperature": "tempmod.set accepts a target without waiting for the block to reach it.",
+            "balance": "platebalance.zero, platebalance.tare, and platebalance.read are plannable. Zero/Tare are non-idempotent and return sent_unconfirmed after a serial write; a read returns observed weight, with wait_until_stable=true when required. Inspect plan status and step results after operator execution. Plan results are ephemeral, not scientific records.",
             "motion": "move_to defaults to an arced path. force_direct=true omits the Z-retract waypoint; constant-height XY travel requires destination Z equal to current Z. Flex absolute gripper moves default to direct; relative gripper dz=0 retains height.",
+            "manual_panel": "The operator Direct Drive panel offers one-step XYZ jogs, speed, explicit position reads and Copy XYZ. jog and pipette_position are claim-gated operator endpoints, not plan actions. Jog uses fresh controller coordinates and a straight path; transport loss is unknown_outcome and must not be retried. Position reads do not home, and /status never triggers them.",
         },
         "agent_boundary": [
             "Agents may read and propose drafts via POST /plans; a draft does not execute. "

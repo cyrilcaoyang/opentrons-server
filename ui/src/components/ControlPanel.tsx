@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  deleteDeckDeclare,
   getLabStoreDefinition,
   getLabStoreList,
   getLabwareList,
   postDeckDeclare,
   type DeckDeclareValue,
   postHome,
+  postPlateBalance,
   postPause,
   postStop,
   postResume,
@@ -22,7 +22,7 @@ import {
   postStartup,
 } from "../lib/api";
 import { useActionErrorState } from "../lib/use-action-error";
-import { declarationPayload, modulePlacementIssue, placeModule, unassignedModules } from "../lib/module-placement";
+import { declarationPayload, moduleDeclarationPayload, unassignedModules } from "../lib/module-placement";
 import type { useClaim } from "../lib/use-claim";
 import {
   buildSlotView,
@@ -32,7 +32,6 @@ import {
   mountedTipsFromStatus,
   nextDeclaration,
   pairModuleSlots,
-  pipetteLabel,
   moduleFamily,
   robotInfoFromStatus,
   robotModulesFromStatus,
@@ -40,9 +39,11 @@ import {
   type TipRackSummary,
 } from "../lib/ot2-deck";
 import { catalogEntryFromLabware, OT2_CATALOG, type CatalogEntry } from "../lib/ot2-catalog";
-import type { GatewaySnapshot, RobotModule } from "../lib/types";
+import type { GatewaySnapshot, RobotModule, PlateBalanceStatus } from "../lib/types";
 
 import { ActionErrorBadge } from "./ActionErrorBadge";
+import { AssemblyPicker } from "./AssemblyPicker";
+import { ManualPipettePanel } from "./ManualPipettePanel";
 import { DeckPanel, ModuleReadout } from "./DeckPanel";
 import { PlateInspector } from "./PlateInspector";
 import { DeclarePicker } from "./DeclarePicker";
@@ -51,7 +52,9 @@ import { LastErrorBadge } from "./LastErrorBadge";
 import { StalenessIndicator } from "./StalenessIndicator";
 import { StatusPill } from "./StatusPill";
 import { TileButton } from "./TileButton";
+import { PlateBalanceControls } from "./PlateBalanceControls";
 import { CameraControl } from "./CameraControl";
+import { PANEL_STYLE, PANEL_HEADING_STYLE } from "./panel-styles";
 
 // ---------------------------------------------------------------------------
 // Small presentational helpers
@@ -103,10 +106,10 @@ function Section({
   defaultOpen?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen);
-  const heading = "text-[11px] font-semibold uppercase tracking-wider text-ink-subtle dark:text-slate-400";
+  const heading = PANEL_HEADING_STYLE;
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-surface-raised p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <section className={PANEL_STYLE}>
       {collapsible ? (
         <h3 className={open ? `mb-2 ${heading}` : heading}>
           <button
@@ -149,17 +152,6 @@ function KV({ k, v, mono }: { k: string; v: React.ReactNode; mono?: boolean }) {
         {v}
       </span>
     </div>
-  );
-}
-
-function Dot({ ok }: { ok: boolean }) {
-  return (
-    <span
-      className={`inline-block h-2 w-2 rounded-full ${
-        ok ? "bg-emerald-400" : "bg-slate-400 dark:bg-slate-500"
-      }`}
-      aria-hidden
-    />
   );
 }
 
@@ -481,6 +473,7 @@ export function ControlPanel({
   const [stopping, setStopping] = useState(false);
   // Which rack is awaiting a refill confirmation (nickname), if any.
   const [refillConfirm, setRefillConfirm] = useState<string | null>(null);
+  useEffect(() => { setRefillConfirm(null); }, [selectedSlot]);
   // Whether "clear all declared intent" is awaiting its confirmation.
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
 
@@ -533,7 +526,7 @@ export function ControlPanel({
     () => (deviceDeck ? declaredMapFromDeck(deviceDeck) : {}),
     [deviceDeck],
   );
-  const declaredCount = Object.keys(declaredMap).length;
+  const declaredCount = Object.keys(declaredMap).filter(slot => !deviceDeck?.slots[slot]?.declared_module && !deviceDeck?.slots[slot]?.module).length;
   const tipRacks = tipRacksFromStatus(status);
   const mountedTips = mountedTipsFromStatus(status);
   const claimedBy = claimedByFromStatus(status);
@@ -543,8 +536,6 @@ export function ControlPanel({
   const components = status.components ?? {};
   const pipLeft = components["pipette_left"];
   const pipRight = components["pipette_right"];
-  const ssh = components["ssh"];
-  const control = components["control"];
   const protocol = components["protocol"];
 
   // Drive the transport buttons off the device's own `allowed_actions` rather
@@ -565,6 +556,9 @@ export function ControlPanel({
 
   const selectedView = selectedSlot != null ? buildSlotView(selectedSlot, deviceDeck, {}) : null;
   const selectedDeclare = selectedSlot != null ? (declaredMap[String(selectedSlot)] ?? null) : null;
+  const selectedModule = selectedSlot != null && !!(deviceDeck?.slots[String(selectedSlot)]?.module || deviceDeck?.slots[String(selectedSlot)]?.declared_module);
+
+  const selectedBalance = selectedSlot != null && deviceDeck?.slots[String(selectedSlot)]?.module?.module_name === "platebalanceV1";
 
   const mismatchSlots = deviceDeck
     ? Object.entries(deviceDeck.slots)
@@ -607,55 +601,15 @@ export function ControlPanel({
       if (deviceDeck) {
         for (const [slot, value] of Object.entries(declarationPayload(deviceDeck))) {
           if (next[slot] === declaredMap[slot] && value && typeof value === "object" &&
-            ("module_name" in value || value.definition)) resolved[slot] = value;
+            ("module_name" in value || "assembly" in value || ("definition" in value && value.definition))) resolved[slot] = value;
         }
       }
       return resolved;
     });
   }
 
-  function assignModule(from: string | null, to: string | null, name: string, serial?: string | null) {
-    if (locked || declaring || pending || !deviceDeck) return;
-    setActionError(null);
-    let next: Record<string, DeckDeclareValue>;
-    try {
-      next = placeModule(deviceDeck, from, to, { module_name: name, serial_number: serial });
-    } catch (error) {
-      reportError(error, "deck.declare");
-      return;
-    }
-    setDeclaring(true);
-    postDeckDeclare(token, next)
-      .then(() => refetch())
-      .catch((error: unknown) => reportError(error, "deck.declare"))
-      .finally(() => setDeclaring(false));
-  }
-
-  function moduleAssignment(from: string | null, name: string, serial?: string | null) {
-    const issue = deviceDeck ? modulePlacementIssue(deviceDeck, from, null, name) : "Deck state unavailable.";
-    return <div className="flex flex-wrap items-center gap-2 text-xs">
-      <label className="flex items-center gap-2">
-        Deck slot
-        <select aria-label={`Deck slot for ${serial || name}`} value={from ?? ""}
-          disabled={locked || declaring || pending || !!issue}
-          className="rounded border border-slate-300 bg-white px-2 py-1 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900"
-          onChange={event => assignModule(from, event.target.value || null, name, serial)}>
-          <option value="">Unassigned — off deck</option>
-          {deviceDeck && Object.keys(deviceDeck.slots).filter(slot => slot !== "12").map(slot => {
-            const reason = modulePlacementIssue(deviceDeck, from, slot, name);
-            return <option key={slot} value={slot} disabled={!!reason}>Slot {slot}{reason ? " — unavailable" : ""}</option>;
-          })}
-        </select>
-      </label>
-      {from && <button type="button" disabled={locked || declaring || pending || !!issue}
-        className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50 dark:border-slate-700"
-        onClick={() => assignModule(from, null, name, serial)}>Clear slot</button>}
-      {issue && <p className="w-full text-amber-700 dark:text-amber-400">{issue}</p>}
-    </div>;
-  }
-
   function declare(entry: CatalogEntry | null) {
-    if (locked || selectedSlot == null || declaring) return;
+    if (locked || selectedSlot == null || declaring || (selectedModule && !selectedBalance) || (entry?.category === "module" || OT2_CATALOG.some(e => e.category === "module" && e.declare === entry?.declare))) return;
     // Declaring over a slot that already holds a declaration is refused —
     // clearing it is the deliberate first half of a replacement. The gateway
     // auto-loads labware from the declaration, so a slot changed by a stray
@@ -676,7 +630,13 @@ export function ControlPanel({
     // replace, so an unrelated edit would otherwise re-send every other
     // custom slot as a bare, now-degraded name).
     withLabwareDefinitions(next, labwareEntries)
-      .then((resolved) => postDeckDeclare(token, resolved))
+      .then(async (resolved) => {
+        if (selectedBalance && entry) {
+          const definition = entry.category === "labstore" ? await getLabStoreDefinition(entry.declare) : undefined;
+          resolved[String(selectedSlot)] = { load_name: entry.declare, definition, support_module: "platebalanceV1" };
+        }
+        return postDeckDeclare(token, resolved);
+      })
       .then(() => refetch())
       .catch((e: unknown) => reportError(e, "deck.declare"))
       .finally(() => setDeclaring(false));
@@ -718,11 +678,11 @@ export function ControlPanel({
   }
 
   function clearAll() {
-    if (locked || declaring) return;
+    if (locked || declaring || !deviceDeck) return;
     setClearAllConfirm(false);
     setActionError(null);
     setDeclaring(true);
-    deleteDeckDeclare(token)
+    postDeckDeclare(token, moduleDeclarationPayload(deviceDeck))
       .then(() => refetch())
       .catch((e: unknown) => reportError(e, "deck.declare"))
       .finally(() => setDeclaring(false));
@@ -855,7 +815,7 @@ export function ControlPanel({
 
       {snapshot.fetch_error && <FetchErrorBand error={snapshot.fetch_error} />}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
         {/* Left column: deck + declare.
 
             Capped below `lg`, on the COLUMN rather than on the deck inside it.
@@ -868,7 +828,7 @@ export function ControlPanel({
             max-w-xl is about what the 3fr column gives it at `lg`, so the
             column looks the same at every breakpoint rather than inflating at
             the narrow one. */}
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-4 lg:mx-0 lg:max-w-none">
+        <div className="flex w-full max-w-xl flex-col gap-4 lg:max-w-none">
           <Section title="Deck — declared intent vs observed hardware">
             <DeckPanel
               deviceDeck={deviceDeck}
@@ -890,9 +850,24 @@ export function ControlPanel({
             <DeclarePicker
               selectedSlot={selectedSlot}
               currentDeclare={selectedDeclare}
-              locked={locked}
+              locked={locked || (selectedModule && !selectedBalance)}
+              balanceOnly={selectedBalance}
               onDeclare={declare}
               customEntries={labwareEntries}
+            />
+            <AssemblyPicker
+              key={String(selectedSlot)}
+              entries={labwareEntries}
+              disabled={locked || declaring || selectedSlot == null || selectedDeclare != null || selectedModule}
+              current={selectedSlot == null ? null : deviceDeck?.slots[String(selectedSlot)]?.declared?.assembly}
+              onDeclare={async assembly => {
+                if (locked || declaring || selectedSlot == null || selectedDeclare != null || selectedModule || !deviceDeck) return;
+                setDeclaring(true);
+                try {
+                  await postDeckDeclare(token, { ...declarationPayload(deviceDeck), [String(selectedSlot)]: { assembly } });
+                  await refetch();
+                } finally { setDeclaring(false); }
+              }}
             />
             {/* Clearing every slot at once is the one declare action with no
                 per-slot undo, so it confirms first — same shape as the tip
@@ -901,7 +876,7 @@ export function ControlPanel({
               {clearAllConfirm && declaredCount > 0 ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[11px] text-ink-subtle dark:text-slate-400">
-                    Clear the declaration on all {declaredCount} declared slots?
+                    Clear all {declaredCount} labware declarations?
                   </span>
                   <button
                     type="button"
@@ -925,9 +900,9 @@ export function ControlPanel({
                   disabled={locked || declaring || declaredCount === 0}
                   onClick={() => setClearAllConfirm(true)}
                   className="rounded-md border border-rose-300 px-2 py-1 text-xs text-rose-700 hover:border-rose-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-rose-900 dark:text-rose-300"
-                  title="Clears every operator-declared slot (observed hardware is unaffected)"
+                  title="Clears labware declarations; module placements are retained"
                 >
-                  Clear all declared intent
+                  Clear labware declarations
                 </button>
               )}
             </div>
@@ -938,7 +913,7 @@ export function ControlPanel({
             Capped to match the left column — stacked, the two columns render as
             one sequence, so capping only one would step the page width
             mid-scroll. */}
-        <div className="mx-auto flex w-full max-w-xl flex-col gap-4 lg:mx-0 lg:max-w-none">
+        <div className="flex w-full max-w-xl flex-col gap-4 lg:max-w-none">
           {/* Session controls. PAUSE applies between commands. STOP requests
               a software stop of the owned HTTP run. The gateway-session toggle
               sits next to the claim control above, away from this action strip.
@@ -1031,128 +1006,19 @@ export function ControlPanel({
               />
               Light
             </TileButton>
-            <CameraControl />
+            <CameraControl stream={status.equipment_id === "ot2_complexation" ? "cam_echem_tapo_c100_main" : undefined} />
           </div>
+
 
           {/* Directly under the control strip it belongs to: the strip acts on
               the robot, and the answers to "did that work" — control state,
               protocol state, what is on the heads — are right here rather than
               below a slot card that answers a different question. */}
-          <Section title="Robot" collapsible>
-            <div className="flex flex-col gap-1">
-              <KV k="Robot" v={robot?.robot_name ?? "—"} mono />
-              <KV k="API version" v={robot?.api_version ?? "—"} mono />
-              <KV
-                k="Run active"
-                v={robot?.run_active == null ? "—" : robot.run_active ? "yes" : "no"}
-              />
-              <div className="mt-1 flex items-center gap-3">
-                {/* Show the transport actually in use, not a protocol name. The
-                    old pill read "SSH connected" on a gateway running
-                    OT2_TRANSPORT=http, where no SSH socket exists — it was
-                    reporting that a control object had been constructed. Reads
-                    `control` (ssh | http | dry_run | disconnected) and takes
-                    `connected` from the device rather than string-matching a
-                    state value, so it stays right as states are added. Falls
-                    back to the legacy `ssh` key for a gateway too old to
-                    publish `control`. */}
-                <span
-                  className="flex items-center gap-1.5 text-xs text-ink-subtle dark:text-slate-400"
-                  title={control?.message ?? ssh?.message ?? undefined}
-                >
-                  <Dot ok={(control ?? ssh)?.connected === true} /> Control{" "}
-                  <span className="font-mono">{(control ?? ssh)?.state ?? "—"}</span>
-                </span>
-                <span className="flex items-center gap-1.5 text-xs text-ink-subtle dark:text-slate-400">
-                  <Dot ok={protocol?.state === "connected" || protocol?.state === "ready"} />{" "}
-                  Protocol <span className="font-mono">{protocol?.state ?? "—"}</span>
-                </span>
-              </div>
+          <ManualPipettePanel equipmentState={status.equipment_status} pipetteComponents={{ left: pipLeft, right: pipRight }} mountedTips={mountedTips} token={token} locked={locked} allowedActions={allowedActions}
+            offline={snapshot.fetch_error != null} busyElsewhere={pending}
+            refetch={refetch} onBusy={setPending} onError={reportError}
+            onStop={stopRun} stopping={stopping} />
 
-              {/* What is attached, and what is on it. Both used to be their own
-                  cards, which put three questions about one machine in three
-                  places and pushed the answer to "is a tip up right now" below
-                  the fold. Reads top-down: what the robot is, what is mounted
-                  on it, what those heads are holding. */}
-              <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-800">
-                <p className="mb-1 text-[10px] uppercase tracking-wider text-ink-subtle dark:text-slate-500">
-                  Pipettes
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {([
-                    ["Left", pipLeft?.state],
-                    ["Right", pipRight?.state],
-                  ] as const).map(([mount, state]) => (
-                    <span key={mount} className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-xs text-ink dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                      <span className="font-semibold">{mount}</span>
-                      <span aria-hidden>·</span>
-                      <span>{pipetteLabel(state)}</span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-800">
-                <p className="mb-1 text-[10px] uppercase tracking-wider text-ink-subtle dark:text-slate-500">
-                  Mounted tips
-                </p>
-                {mountedTips.length === 0 ? (
-                  <p className="text-xs text-ink-subtle dark:text-slate-500">No tip currently mounted.</p>
-                ) : (
-                  <ul className="flex flex-col gap-1">
-                    {mountedTips.map((t) => (
-                      <li key={t.pipette} className="text-xs text-ink dark:text-slate-200">
-                        <span className="font-semibold">{t.pipette}</span>:{" "}
-                        <span className="font-mono">
-                          {t.rack ? `${t.rack} ${t.well ?? ""}`.trim() : "unknown origin"}
-                        </span>
-                        {t.channels != null && t.channels > 1 && (
-                          <span className="text-ink-subtle dark:text-slate-400">
-                            {" "}
-                            · {t.channels} tips
-                          </span>
-                        )}
-                        {/* The question asked before re-seating a tip in a rack:
-                            has it been in liquid, or is it still clean? */}
-                        {t.contacted_liquid != null && (
-                          <span
-                            className={
-                              t.contacted_liquid
-                                ? "text-amber-600 dark:text-amber-400"
-                                : "text-emerald-600 dark:text-emerald-400"
-                            }
-                          >
-                            {" "}
-                            · {t.contacted_liquid ? "used" : "clean"}
-                          </span>
-                        )}
-                        {t.last_sample && (
-                          <span className="text-ink-subtle dark:text-slate-400">
-                            {" "}
-                            · last sample <span className="font-mono">{t.last_sample}</span>
-                          </span>
-                        )}
-                        {t.picked_at && (
-                          <span className="text-ink-subtle dark:text-slate-400">
-                            {" "}
-                            · since {t.picked_at.slice(11, 19)}Z
-                          </span>
-                        )}
-                        {/* A pick or drop whose outcome was never confirmed. The
-                            gateway assumes the tip is up; an operator should look. */}
-                        {t.uncertain && (
-                          <span className="text-rose-600 dark:text-rose-400">
-                            {" "}
-                            · unconfirmed — check the head
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </Section>
 
 
           {/* Slot metadata and the plate view are one thing: both answer "what
@@ -1160,7 +1026,7 @@ export function ControlPanel({
               so reading a mismatch meant looking left for the declared-vs-
               observed line and right for the wells it applied to. */}
           <Section
-            title={selectedSlot != null ? `Slot ${selectedSlot}` : "Selected slot"}
+            title="SLOT"
             collapsible
           >
             {selectedView && selectedSlot != null && (
@@ -1201,9 +1067,102 @@ export function ControlPanel({
                 mountedTips={mountedTips}
               />
             </div>
+          {selectedView?.isTiprack && selectedSlot != null && <div className="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+            <h3 className="mb-2 text-xs font-semibold">Update tips</h3>
+            {!tipRacks.some(r => r.slot === String(selectedSlot)) ? (
+              <p className="text-xs text-ink-subtle dark:text-slate-500">
+                This rack is not tracked yet. Declare it or load it in a session to enable updates.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {tipRacks.filter(r => r.slot === String(selectedSlot)).map((r) => (
+                  <li
+                    key={r.slot}
+                    className="rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-800"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="min-w-0 truncate text-xs text-ink dark:text-slate-200">
+                        Slot {r.slot}
+                        {rackLabel(r.slot) && (
+                          <span className="ml-1 font-mono text-[11px] text-ink-subtle dark:text-slate-400">
+                            {rackLabel(r.slot)}
+                          </span>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-xs tabular-nums text-ink-subtle dark:text-slate-400">
+                        {r.available}/{r.total} available
+                      </span>
+                    </div>
+                    {(r.empty > 0 || r.touched > 0 || (r.on_pipette ?? 0) > 0) && (
+                      <p className="mt-0.5 text-[10px] text-ink-subtle dark:text-slate-500">
+                        {r.empty} empty · {r.touched} used
+                        {/* Neither used nor available: on the head right now.
+                            Named separately so the arithmetic adds up on screen
+                            instead of looking like a missing tip. */}
+                        {(r.on_pipette ?? 0) > 0 && ` · ${r.on_pipette} on a pipette`}
+                      </p>
+                    )}
+                    {/* Refill is always an explicit operator act: the gateway
+                        cannot see new tips going in, and a wrong "full" sends
+                        the head onto bare holes. Hence the confirm step. */}
+                    {r.available < r.total && (
+                      <div className="mt-1.5">
+                        {refillConfirm === r.slot ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-ink-subtle dark:text-slate-400">
+                              All {r.total} tips present in slot {r.slot}?
+                            </span>
+                            <button
+                              type="button"
+                              disabled={locked || pending || selectedView.state === "mismatch" || !allowedActions.includes("tips.reset")}
+                              onClick={() => refillRack(r.slot)}
+                              className="rounded border border-sky-500 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-500 dark:text-sky-300 dark:hover:bg-sky-950/40"
+                            >
+                              Yes, refilled
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRefillConfirm(null)}
+                              className="text-[10px] text-ink-subtle underline dark:text-slate-400"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={locked || pending || selectedView.state === "mismatch" || !allowedActions.includes("tips.reset")}
+                            onClick={() => setRefillConfirm(r.slot)}
+                            title={controlHint ?? "Mark every tip in this rack fresh again"}
+                            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-ink-subtle hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-400"
+                          >
+                            Refill rack
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {/* The partial counterpart to a refill, for the common case
+                        the all-or-nothing reset cannot express: a rack that is
+                        genuinely used in some columns and full in others. */}
+                    <TipEditor
+                      rack={r}
+                      disabled={locked || pending || selectedView.state === "mismatch" || !allowedActions.includes("tips.mark")}
+                      hint={controlHint}
+                      onMark={(selection, status) => markTips(r.slot, selection, status)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>}
           </Section>
 
-          <Section title="Modules (live telemetry)">
+          <Section title="MODULES">
+            {!!(status.details?.platebalance as PlateBalanceStatus | undefined)?.placement_error &&
+              <p role="alert" className="mb-2 text-xs text-amber-700 dark:text-amber-400">
+                platebalanceV1 · {(status.details!.platebalance as PlateBalanceStatus).placement_error}
+              </p>}
+
             <p className="mb-2 text-xs text-ink-subtle dark:text-slate-400">
               Connected modules without an assigned slot are off deck.
             </p>
@@ -1224,9 +1183,13 @@ export function ControlPanel({
                         <span className="min-w-0 truncate text-xs text-ink dark:text-slate-200">
                           <span className="font-semibold">Slot {slot}</span> · {m.name}
                         </span>
-                        <ModuleReadout live={m.live} compact />
+                        {m.name !== "platebalanceV1" && <ModuleReadout live={m.live} compact />}
                       </div>
-                      {moduleAssignment(String(slot), m.name, deviceDeck?.slots[String(slot)]?.module?.serial_number ?? m.live?.serial)}
+                      {m.name === "platebalanceV1" && status.details?.platebalance ? (
+                        <PlateBalanceControls balance={status.details.platebalance as PlateBalanceStatus}
+                          disabled={locked || pending} allowedActions={allowedActions}
+                          onAction={(action, waitUntilStable) => { void runControl(`platebalance.${action}`, () => postPlateBalance(token, action, waitUntilStable)); }} />
+                      ) : null}
                       {moduleFamily(m.name) === "temperature" && (
                         <TempModuleControls
                           slot={slot}
@@ -1259,101 +1222,13 @@ export function ControlPanel({
                         {module.serial && <span className="ml-1 font-mono">{module.serial}</span>}</span>
                       <ModuleReadout live={module} compact />
                     </div>
-                    {moduleAssignment(null, module.model || module.type, module.serial)}
+
                   </li>
                 ))}
               </ul>
             )}
           </Section>
 
-          <Section title="Tip racks" collapsible>
-            {tipRacks.length === 0 ? (
-              <p className="text-xs text-ink-subtle dark:text-slate-500">
-                No tracked tip racks — declare one on a deck slot, or run a protocol
-                setup, and it starts tracking automatically.
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {tipRacks.map((r) => (
-                  <li
-                    key={r.slot}
-                    className="rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-800"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="min-w-0 truncate text-xs text-ink dark:text-slate-200">
-                        Slot {r.slot}
-                        {rackLabel(r.slot) && (
-                          <span className="ml-1 font-mono text-[11px] text-ink-subtle dark:text-slate-400">
-                            {rackLabel(r.slot)}
-                          </span>
-                        )}
-                      </span>
-                      <span className="shrink-0 text-xs tabular-nums text-ink-subtle dark:text-slate-400">
-                        {r.available}/{r.total} available
-                      </span>
-                    </div>
-                    {(r.empty > 0 || r.touched > 0 || (r.on_pipette ?? 0) > 0) && (
-                      <p className="mt-0.5 text-[10px] text-ink-subtle dark:text-slate-500">
-                        {r.empty} used · {r.touched} touched
-                        {/* Neither used nor available: on the head right now.
-                            Named separately so the arithmetic adds up on screen
-                            instead of looking like a missing tip. */}
-                        {(r.on_pipette ?? 0) > 0 && ` · ${r.on_pipette} on a pipette`}
-                      </p>
-                    )}
-                    {/* Refill is always an explicit operator act: the gateway
-                        cannot see new tips going in, and a wrong "full" sends
-                        the head onto bare holes. Hence the confirm step. */}
-                    {r.available < r.total && (
-                      <div className="mt-1.5">
-                        {refillConfirm === r.slot ? (
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-ink-subtle dark:text-slate-400">
-                              All {r.total} tips present in slot {r.slot}?
-                            </span>
-                            <button
-                              type="button"
-                              disabled={locked || pending}
-                              onClick={() => refillRack(r.slot)}
-                              className="rounded border border-sky-500 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-500 dark:text-sky-300 dark:hover:bg-sky-950/40"
-                            >
-                              Yes, refilled
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setRefillConfirm(null)}
-                              className="text-[10px] text-ink-subtle underline dark:text-slate-400"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            disabled={locked || pending}
-                            onClick={() => setRefillConfirm(r.slot)}
-                            title={controlHint ?? "Mark every tip in this rack fresh again"}
-                            className="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] text-ink-subtle hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-400"
-                          >
-                            Mark refilled
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    {/* The partial counterpart to a refill, for the common case
-                        the all-or-nothing reset cannot express: a rack that is
-                        genuinely used in some columns and full in others. */}
-                    <TipEditor
-                      rack={r}
-                      disabled={locked || pending || !allowedActions.includes("tips.mark")}
-                      hint={controlHint}
-                      onMark={(selection, status) => markTips(r.slot, selection, status)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Section>
 
           <Section title="Claim">
             {claimedBy ? (

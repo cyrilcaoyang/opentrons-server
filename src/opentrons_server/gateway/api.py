@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +22,7 @@ from .deck import DeckDeclarationStore
 from .documentation import action_catalog, equipment_documentation
 from .documentation import router as documentation_router
 from .labware import standard_definition, standard_summaries
+from .assemblies import PlateAssembly
 from .models import (
     ClaimRejection,
     ClaimResponse,
@@ -37,6 +38,9 @@ from .models import (
     LoadedPlate,
     MoveLabwareRequest,
     MoveToRequest,
+    PipetteJogRequest,
+    PipettePositionRequest,
+    PipettePositionResponse,
     PlateLoadRequest,
     ProbeResponse,
     PROTOCOL_VERSION,
@@ -72,6 +76,8 @@ from .plans import (
     PlanStore,
     StepValidationError,
 )
+from .platebalance import PlateBalanceRequest
+from .module_access import ModulePlacementForbidden, module_admin
 from .plate_state import PlateStateStore
 from .limits import OutOfEnvelope
 from .service import OT2Service, UnknownOutcomeError
@@ -409,6 +415,23 @@ def create_app(
                 return True
         return False
 
+    def _is_module_admin(request: Request) -> bool:
+        # A bare role header, a claim token, or a workflow key is not admin proof.
+        return bool(_from_edge(request) and request.headers.get("X-Auth-User", "").strip()
+                    and request.headers.get("X-Auth-Role") == "admin")
+
+    @app.middleware("http")
+    async def module_authorization(request: Request, call_next: Any) -> Any:
+        token = module_admin.set(_is_module_admin(request))
+        try:
+            return await call_next(request)
+        finally:
+            module_admin.reset(token)
+
+    @app.exception_handler(ModulePlacementForbidden)
+    async def module_permission_error(_request: Request, exc: ModulePlacementForbidden) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": str(exc)})
+
     if ui and not trust_local_ui:
 
         @app.middleware("http")
@@ -473,10 +496,11 @@ def create_app(
         return HealthResponse()
 
     @app.get("/status", response_model=EquipmentStatus, tags=["spec"])
-    def status() -> EquipmentStatus:
+    def status(request: Request) -> EquipmentStatus:
         snapshot = service.get_status()
         snapshot.details["ui_mode"] = ui_mode
         snapshot.details["control_auth"] = control_auth
+        snapshot.details["permissions"] = {"manage_modules": _is_module_admin(request)}
         return snapshot
 
     # The lab-standard Markdown documentation surface: GET /agent-docs,
@@ -500,6 +524,14 @@ def create_app(
         (grid summaries), for the UI's deck-declare picker. Empty when
         ``opentrons-shared-data`` is not installed."""
         return {"definitions": list(standard_summaries())}
+
+    @app.post("/labware/assemblies/preview", tags=["ui"])
+    def preview_assembly(request: PlateAssembly) -> dict[str, Any]:
+        """Validate a fixed plate assembly and return geometry; no state changes or robot I/O."""
+        return {"assembly": request.model_dump(mode="json"),
+                "definition": request.compile_definition(),
+                "top_origin_z_mm": request.top_origin_z_mm,
+                "total_height_mm": request.total_height_mm}
 
     @app.get("/labware/{load_name}", tags=["ui"])
     def labware_definition(load_name: str) -> dict[str, Any]:
@@ -604,6 +636,8 @@ def create_app(
         try:
             service.setup_protocol(request.model_dump())
             return CommandResponse(message="Protocol setup complete", state=service.state.value)
+        except ModulePlacementForbidden:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
@@ -633,6 +667,37 @@ def create_app(
     def resume(_claim: None = Depends(require_claim)) -> CommandResponse:
         service.resume()
         return CommandResponse(message="OT-2 resumed", state=service.state.value)
+
+    @app.post("/control/platebalance/{action}", tags=["control"])
+    def platebalance_action(action: Literal["read", "tare", "zero"], request: PlateBalanceRequest | None = None,
+                            _claim: None = Depends(require_claim)) -> dict[str, Any]:
+        """Explicit balance operation; reads may wait for stability within a deadline."""
+        try:
+            return service.platebalance_action(action, request)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    @app.post("/control/pipette-position", response_model=PipettePositionResponse, tags=["control"])
+    def pipette_position(request: PipettePositionRequest, _claim: None = Depends(require_claim)) -> PipettePositionResponse:
+        """Explicit no-motion position read. May register the attached pipette; never homes."""
+        try:
+            return service.pipette_position(request)
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+    @app.post("/control/jog", response_model=PipettePositionResponse, tags=["control"])
+    def jog(request: PipetteJogRequest, _claim: None = Depends(require_claim)) -> PipettePositionResponse:
+        """One straight increment from a fresh controller position, never retried."""
+        try:
+            return service.jog(request)
+        except OutOfEnvelope as exc:
+            raise ClaimHTTPError(status_code=412, payload=exc.body)
+        except UnknownOutcomeError as exc:
+            raise HTTPException(status_code=409, detail=f"unknown outcome: {exc}")
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
 
     @app.post("/control/move-to", response_model=CommandResponse, tags=["control"])
     def move_to(request: MoveToRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
@@ -736,7 +801,10 @@ def create_app(
 
     @app.delete("/control/deck/declare", response_model=DeckState, tags=["control"])
     def deck_declare_clear(_claim: None = Depends(require_claim)) -> DeckState:
-        service.clear_deck()
+        try:
+            service.clear_deck()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         return service._build_deck_state()
 
     @app.post("/control/tips/reset", response_model=TipRackState, tags=["control"])
@@ -868,6 +936,7 @@ def create_app(
         body = plan.model_dump(mode="json")
         body["non_idempotent_actions"] = plan.non_idempotent_actions
         try:
+            _check_plan_module_access(plan)
             plans.check_executable(plan.plan_id, claimed_by=service.claims.current())
             body["executable"] = True
             body["blocked_reason"] = None
@@ -1051,6 +1120,13 @@ def create_app(
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
 
+    def _check_plan_module_access(plan: Plan) -> None:
+        for step in plan.steps:
+            if step.action == "deck.declare":
+                service.check_module_declaration_access(step.args.get("slots", {}))
+            elif step.action == "setup":
+                service.check_setup_module_access(step.args)
+
     @app.post("/plans/{plan_id}/approve", tags=["plans"])
     def approve_plan(
         plan_id: str,
@@ -1065,6 +1141,7 @@ def create_app(
         """
         try:
             with plans._lock:
+                _check_plan_module_access(plans.get(plan_id))
                 plan = plans.approve(
                     plan_id,
                     step_hash=request.step_hash,
@@ -1108,6 +1185,7 @@ def create_app(
         # authorised the run would be missing from its own completion record.
         try:
             pending = plans.get(plan_id)
+            _check_plan_module_access(pending)
             approver = pending.approval.owner if pending.approval else None
             plan = executor.execute(plan_id, claimed_by=service.claims.current())
         except PlanError as exc:

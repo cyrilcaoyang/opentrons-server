@@ -1,5 +1,9 @@
 # OT-2 Deck / Labware State — feature documentation
 
+Fixed 5 mm risers and filter/collector stacks are described in
+[PLATE_ASSEMBLIES.md](PLATE_ASSEMBLIES.md). Their components remain operator
+declarations; matching run readback confirms the compiled geometry only.
+
 **Status:** shipped and deployed. Phases 0–2 landed in this repo (commit
 `ede0a85`); the dashboard side (tile reading the device deck, `deck.declare`
 SkillDef) shipped in `ac-organic-lab`. Both gateways (`ot2_hte` :8020,

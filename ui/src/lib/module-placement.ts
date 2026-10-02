@@ -13,16 +13,24 @@ export function declarationPayload(deck: DeviceDeck): Record<string, DeckDeclare
   for (const [slot, entry] of Object.entries(deck.slots)) {
     const module = entry.declared_module ?? (entry.source === "declared" ? entry.module : null);
     const labware = entry.declared ?? (entry.source === "declared" ? entry.labware : null);
-    if (module) result[slot] = { ...module };
+    if (module && !entry.module?.local_peripheral) result[slot] = { ...module };
     else if (labware) result[slot] = labware.load_name ? { ...labware } : labware.kind;
   }
   return result;
+}
+
+/** Clearing labware in the panel must never remove a module, even for admins. */
+export function moduleDeclarationPayload(deck: DeviceDeck): Record<string, DeckDeclareValue> {
+  return Object.fromEntries(Object.entries(declarationPayload(deck)).filter(
+    ([, value]) => value != null && typeof value === "object" && "module_name" in value,
+  ));
 }
 
 export function modulePlacementIssue(deck: DeviceDeck, from: string | null, to: string | null, name: string): string | null {
   if (from) {
     const source = deck.slots[from];
     if (!source?.module) return "The module assignment changed. Refresh before editing it.";
+    if (source.module.local_peripheral) return "This peripheral has a fixed slot in gateway configuration.";
     if (source.source !== "declared") return "This module is loaded in the robot session. End or update that session before changing its slot.";
     if (source.labware || source.declared) return "Clear the labware on this module before changing its slot.";
   }

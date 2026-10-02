@@ -158,6 +158,11 @@ class RunEngineCommands:
     """
 
     @staticmethod
+    def save_position(pipette_id: str) -> Command:
+        """Query the pipette critical point without motion; refuse unhomed axes."""
+        return "savePosition", {"pipetteId": pipette_id, "failOnNotHomed": True}
+
+    @staticmethod
     def load_pipette(
         pipette_name: str,
         mount: str,

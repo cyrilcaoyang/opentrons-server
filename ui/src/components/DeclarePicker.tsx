@@ -22,6 +22,7 @@ export function DeclarePicker({
   locked,
   onDeclare,
   customEntries = [],
+  balanceOnly = false,
 }: {
   selectedSlot: number | string | null;
   /** The declare string currently held by the selected slot (or null). */
@@ -30,10 +31,15 @@ export function DeclarePicker({
   onDeclare: (entry: CatalogEntry | null) => void;
   /** Runtime entries (GET /labware standard summaries), merged as a group. */
   customEntries?: CatalogEntry[];
+  balanceOnly?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [freeText, setFreeText] = useState("");
-  const groups = useMemo(() => groupedCatalog(query, customEntries), [query, customEntries]);
+  const groups = useMemo(() => groupedCatalog(query, customEntries).filter(g => g.category !== "module")
+    .map(g => ({ ...g, entries: g.entries.filter(e => !balanceOnly ||
+      (!e.isTiprack && (e.heightMm == null || (e.heightMm > 0 && e.heightMm < 25)) &&
+        (e.displayCategory ? e.displayCategory === "wellPlate" : e.category === "plate" || e.category === "labstore" || (e.category === "custom" && e.declare.includes("wellplate"))))) }))
+    .filter(g => g.entries.length > 0), [query, customEntries, balanceOnly]);
   const disabled = locked || selectedSlot == null;
   const currentEntry = catalogEntryForDeclare(currentDeclare, customEntries);
   // A slot that already declares something is not re-declared in place:
@@ -64,7 +70,7 @@ export function DeclarePicker({
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search plates, tip racks, modules…"
+          placeholder={balanceOnly ? "Well plates <25 mm" : "Search plates, tip racks…"}
           aria-label="Search the labware catalog"
           className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-ink placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
@@ -82,6 +88,8 @@ export function DeclarePicker({
           <span className="text-xs text-ink-subtle dark:text-slate-500">Select a deck slot first</span>
         )}
       </div>
+
+      {balanceOnly && <p className="text-xs text-ink-subtle">Well plates below 25 mm. Height is checked on loading.</p>}
 
       {locked && (
         <p className="text-xs text-amber-700 dark:text-amber-400">

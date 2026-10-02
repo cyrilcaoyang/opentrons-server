@@ -5,8 +5,8 @@ the proposal in the gateway UI, approves it, and runs it. This document
 covers the shape of that boundary and how to wire an agent harness to it.
 
 Implementation: `gateway/plans.py` (the gate), `tools/ot2_agent_mcp.py` (the
-agent-facing MCP surface), `ui/src/components/PlanReviewPanel.tsx` (the human
-half).
+agent-facing MCP surface), `ui/src/components/AssistantBubble.tsx` (the human
+approval popup).
 
 ## The boundary
 
@@ -83,10 +83,13 @@ completion record with no one's name on it.
 ## What can be planned
 
 `GET /plans/actions` returns the catalog with each action's JSON schema — the
-authoritative list. Sixteen actions: `home`, `setup`, `move_to`,
-`pick_up_tip`, `aspirate`, `dispense`, `drop_tip`, `move_labware`,
-`plate.load`, `plate.unload`, `well.update`, `tips.reset`, `lights.set`,
-`deck.declare`, `tempmod.set`, `tempmod.deactivate`.
+authoritative list. It includes `platebalance.zero`, `platebalance.tare`, and
+`platebalance.read`, so one approved plan can set a reference, dispense, wait,
+and measure weight in order. Zero and Tare are non-idempotent; their step result
+reports `sent_unconfirmed` after a serial write, not a verified reference
+change. The read-step result carries the measured value, unit, stability and
+observation time. Plan results are held in the gateway's ephemeral plan store;
+they are not scientific records in BitacoraDB.
 
 `tempmod.set` sets the temperature-module *target* and returns; it does not
 wait for the ramp (a cool-down to 4 °C is minutes, and would blow the HTTP

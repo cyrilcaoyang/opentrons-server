@@ -29,9 +29,9 @@ Semantic differences vs. the SSH REPL that remain by design:
 
 - **Flow rates.** The run engine *requires* ``flowRate``; the SSH path inherits
   protocol-API defaults. Precedence per call: explicit ``flow_rate`` >
-  ``set_flow_rate(pip, ...)`` override > constructor/env default
-  (``OT2_HTTP_*_FLOW_UL_S``). The protocol-API ``rate`` multiplier is applied
-  on top of whichever base wins.
+  ``set_flow_rate(pip, ...)`` override > constructor/env override or model
+  default. The OT-2 dispense model default is the documented GEN2 rate;
+  the protocol-API ``rate`` multiplier is applied on top of whichever base wins.
 - **Pending locations are consumed.** ``get_location_from_labware`` /
   ``get_location_absolute`` stash one pending location; the next consuming call
   (aspirate/dispense/blow_out/pick_up/drop/mix) takes it. The SSH REPL's
@@ -60,13 +60,24 @@ from .http_run import (
 )
 
 # Default flow rates (µL/s) used when a call omits `flow_rate`. Aspirate lowered
-# 150 -> 90 after the 2026-07-14 ot2cytation validation judged 150 slightly fast
-# (~90 also aligns with the p300 gen2 factory default). Override per-deployment
-# via the env vars, per-pipette via set_flow_rate(), or per-call via
-# LiquidMoveRequest.flow_rate.
+# 150 -> 90 after the 2026-07-14 ot2cytation validation judged 150 slightly fast.
+# OT-2 dispense defaults are the model-specific Opentrons GEN2 defaults
+# (API >= 2.6); an explicit deployment, pipette, or call override still wins.
 _DEFAULT_ASPIRATE_FLOW = float(os.getenv("OT2_HTTP_ASPIRATE_FLOW_UL_S", "90"))
-_DEFAULT_DISPENSE_FLOW = float(os.getenv("OT2_HTTP_DISPENSE_FLOW_UL_S", "300"))
+_DEFAULT_DISPENSE_FLOW = (
+    float(os.environ["OT2_HTTP_DISPENSE_FLOW_UL_S"])
+    if "OT2_HTTP_DISPENSE_FLOW_UL_S" in os.environ else None
+)
 _DEFAULT_BLOWOUT_FLOW = float(os.getenv("OT2_HTTP_BLOWOUT_FLOW_UL_S", "100"))
+
+# https://docs.opentrons.com/python-api/pipettes/characteristics/#ot-2-pipette-flow-rates
+_OT2_GEN2_DISPENSE_FLOW_UL_S = {
+    "p20_single_gen2": 7.56,
+    "p300_single_gen2": 92.86,
+    "p1000_single_gen2": 274.7,
+    "p20_multi_gen2": 7.6,
+    "p300_multi_gen2": 94.0,
+}
 
 _OFF_DECK_ALIASES = {"OFF_DECK", "offDeck", "off_deck", OFF_DECK}
 
@@ -94,7 +105,7 @@ class OT2HttpControl:
         client: RunEngineClient,
         *,
         aspirate_flow_rate: float = _DEFAULT_ASPIRATE_FLOW,
-        dispense_flow_rate: float = _DEFAULT_DISPENSE_FLOW,
+        dispense_flow_rate: Optional[float] = _DEFAULT_DISPENSE_FLOW,
         blow_out_flow_rate: float = _DEFAULT_BLOWOUT_FLOW,
     ) -> None:
         self.client = client
@@ -106,6 +117,7 @@ class OT2HttpControl:
         self._labware_ids: Dict[str, str] = {}
         self._pipette_ids: Dict[str, str] = {}
         self._pipette_mounts: Dict[str, str] = {}
+        self._pipette_models: Dict[str, str] = {}
         self._module_ids: Dict[str, str] = {}
         # nickname -> hardware serial, captured from the loadModule result when
         # present; backs the live get_rpm/get_temp readbacks via GET /modules.
@@ -257,6 +269,7 @@ class OT2HttpControl:
         )
         self._pipette_ids[nickname] = nickname
         self._pipette_mounts[nickname] = mount
+        self._pipette_models[nickname] = instrument["instrument_name"]
         return nickname
 
     def load_module(self, module: Dict[str, Any]) -> str:
@@ -430,6 +443,28 @@ class OT2HttpControl:
             "kind": "coordinates",
             "coordinates": {"x": float(x), "y": float(y), "z": float(z)},
         }
+
+    def get_pipette_position(self, pip_name: str) -> Dict[str, float]:
+        result = self.client.execute(RunEngineCommands.save_position(self._pipette_id(pip_name)))
+        position = (result.get("result") or {}).get("position")
+        if not isinstance(position, dict) or set(position) != {"x", "y", "z"}:
+            raise ValueError("savePosition returned no complete XYZ position")
+        return position
+
+    def pipette_for_mount(self, mount: str) -> Optional[str]:
+        """Resolve an already loaded mount from the run, including setup nicknames."""
+        run = self.client.get_run()
+        matches = [p for p in run.get("pipettes", []) if p.get("mount") == mount]
+        if len(matches) > 1:
+            raise ValueError(f"multiple pipettes reported on mount {mount}")
+        if not matches:
+            return None
+        pipette_id = matches[0]["id"]
+        self._pipette_ids[pipette_id] = pipette_id
+        self._pipette_mounts[pipette_id] = mount
+        if matches[0].get("pipetteName"):
+            self._pipette_models[pipette_id] = matches[0]["pipetteName"]
+        return pipette_id
 
     def move_to_pip(
         self,
@@ -845,9 +880,10 @@ class OT2HttpControl:
     def get_flow_rate(self, pip_name: str) -> Dict[str, float]:
         self._pipette_id(pip_name)
         rates = self._flow_rates.get(pip_name, {})
+        dispense = rates["dispense"] if "dispense" in rates else self._default_dispense_flow(pip_name)
         return {
             "aspirate": rates.get("aspirate", self.aspirate_flow_rate),
-            "dispense": rates.get("dispense", self.dispense_flow_rate),
+            "dispense": dispense,
             "blow_out": rates.get("blow_out", self.blow_out_flow_rate),
         }
 
@@ -887,6 +923,10 @@ class OT2HttpControl:
                 axes=[_MOUNT_Z_AXIS[mount], _MOUNT_PLUNGER_AXIS[mount]]
             )
         )
+
+    def home_pipette_z(self, pip_name: str) -> None:
+        mount = self._pipette_mount(pip_name)
+        self.client.execute(RunEngineCommands.home(axes=[_MOUNT_Z_AXIS[mount]]))
 
     def home_plunger(self, pip_name: str) -> None:
         mount = self._pipette_mount(pip_name)
@@ -1148,6 +1188,9 @@ class OT2HttpControl:
                 mount = pip.get("mount")
                 if mount:
                     self._pipette_mounts.setdefault(rid, mount)
+                model = pip.get("pipetteName")
+                if model:
+                    self._pipette_models.setdefault(rid, model)
         for mod in run.get("modules") or []:
             rid = mod.get("id")
             if rid:
@@ -1233,13 +1276,31 @@ class OT2HttpControl:
         if override is not None:
             base = float(override)
         else:
-            defaults = {
-                "aspirate": self.aspirate_flow_rate,
-                "dispense": self.dispense_flow_rate,
-                "blow_out": self.blow_out_flow_rate,
-            }
-            base = self._flow_rates.get(pip_name, {}).get(kind, defaults[kind])
+            rates = self._flow_rates.get(pip_name, {})
+            if kind in rates:
+                base = rates[kind]
+            elif kind == "dispense":
+                base = self._default_dispense_flow(pip_name)
+            else:
+                base = {
+                    "aspirate": self.aspirate_flow_rate,
+                    "blow_out": self.blow_out_flow_rate,
+                }[kind]
         return base * (float(rate) if rate is not None else 1.0)
+
+    def _default_dispense_flow(self, pip_name: str) -> float:
+        if self.dispense_flow_rate is not None:
+            return self.dispense_flow_rate
+        model = self._pipette_models.get(pip_name)
+        if model is None:
+            self.adopt_run_state()
+            model = self._pipette_models.get(pip_name)
+        if model not in _OT2_GEN2_DISPENSE_FLOW_UL_S:
+            raise ValueError(
+                f"no documented OT-2 GEN2 dispense default for {model or pip_name!r}; "
+                "set an explicit flow_rate"
+            )
+        return _OT2_GEN2_DISPENSE_FLOW_UL_S[model]
 
     def _take_pending(self, action: str) -> Dict[str, Any]:
         if self._pending is None:

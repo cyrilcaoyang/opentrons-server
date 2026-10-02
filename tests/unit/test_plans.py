@@ -123,6 +123,23 @@ def test_lifecycle_and_recovery_actions_are_not_plannable():
         assert excluded not in PLAN_ACTIONS
 
 
+def test_balance_read_and_reference_changes_are_plannable():
+    assert PLAN_ACTIONS["platebalance.read"].idempotent is True
+    for action in ("platebalance.tare", "platebalance.zero"):
+        assert PLAN_ACTIONS[action].idempotent is False
+    store = PlanStore()
+    plan = store.create([
+        PlanStep(action="platebalance.zero", args={}),
+        PlanStep(action="platebalance.read", args={"wait_until_stable": True, "timeout_s": 10}),
+        PlanStep(action="platebalance.tare", args={}),
+    ], created_by="agent")
+    assert plan.non_idempotent_actions == ["platebalance.zero", "platebalance.tare"]
+    with pytest.raises(StepValidationError):
+        store.create([PlanStep(action="platebalance.read", args={"seconds": 5})], created_by="agent")
+    with pytest.raises(StepValidationError):
+        store.create([PlanStep(action="platebalance.zero", args={"wait_until_stable": True})], created_by="agent")
+
+
 def test_step_hash_is_canonical_but_sensitive():
     """Key order must not change the hash; an argument value must."""
     a = [PlanStep(action="lights.set", args={"on": True})]
@@ -256,6 +273,86 @@ def test_executes_every_step_in_order_then_spends_the_approval():
     assert done.approval is None
     with pytest.raises(PlanStateError):
         store.check_executable(plan.plan_id, claimed_by=_claimed_by())
+
+
+def test_balance_read_result_is_attached_to_its_plan_step():
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["platebalance.read"]
+    reading = {"value": 1.2345, "unit": "g", "stable": True,
+               "observed_at": "2026-10-02T00:00:00+00:00"}
+    service.platebalance_action.return_value = {"reading": reading, "simulation": False}
+    plan = store.create([PlanStep(action="platebalance.read", args={
+        "wait_until_stable": True, "timeout_s": 10,
+    })], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=_claimed_by())
+
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+
+    assert done.status == "executed"
+    assert done.results[0].outcome == "ok"
+    assert done.results[0].reading == reading
+    assert store.get(plan.plan_id).model_dump(mode="json")["results"][0]["reading"] == reading
+    request = service.platebalance_action.call_args.args
+    assert request[0] == "read"
+    assert request[1].wait_until_stable is True
+
+
+@pytest.mark.parametrize("action", ["tare", "zero"])
+def test_balance_reference_plan_reports_sent_unconfirmed(action):
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = [f"platebalance.{action}"]
+    operation = {"action": action, "outcome": "sent_unconfirmed",
+                 "at": "2026-10-02T00:00:00+00:00"}
+    service.platebalance_action.return_value = {"last_operation": operation,
+                                                "simulation": False}
+    plan = store.create([PlanStep(action=f"platebalance.{action}", args={})], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=_claimed_by())
+
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+
+    assert done.status == "executed"
+    assert done.results[0].balance_operation == operation
+    assert "unconfirmed" in done.results[0].message
+    service.platebalance_action.assert_called_once_with(action)
+
+
+def test_balance_reference_failure_skips_later_steps_without_retry():
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["platebalance.zero", "platebalance.read"]
+    service.platebalance_action.side_effect = OSError("outcome unknown")
+    plan = store.create([PlanStep(action="platebalance.zero", args={}),
+                         PlanStep(action="platebalance.read", args={})], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=_claimed_by())
+
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+
+    assert done.status == "failed"
+    assert [result.outcome for result in done.results] == ["failed", "skipped"]
+    service.platebalance_action.assert_called_once_with("zero")
+
+
+def test_balance_read_without_a_live_measurement_fails_the_plan():
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["platebalance.read", "plate.unload"]
+    service.platebalance_action.return_value = {"reading": None, "simulation": False}
+    plan = store.create([PlanStep(action="platebalance.read", args={}),
+                         PlanStep(action="plate.unload", args={})], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=_claimed_by())
+
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+
+    assert done.status == "failed"
+    assert [r.outcome for r in done.results] == ["failed", "skipped"]
+    assert "no measurement" in done.results[0].message
+    service.unload_plate.assert_not_called()
 
 
 def test_a_step_the_device_now_refuses_halts_the_plan():

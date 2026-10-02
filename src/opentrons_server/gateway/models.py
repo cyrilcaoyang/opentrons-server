@@ -29,6 +29,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional, Union, get_arg
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .robot_profile import IS_FLEX
+from .assemblies import PlateAssembly
 from .limits import (
     MAX_PIPETTE_VOLUME_UL,
     MAX_WELL_OFFSET_MM,
@@ -263,6 +264,43 @@ class MoveToRequest(StrictRequest):
         if (self.location is None) == (self.coordinates is None):
             raise ValueError("provide exactly one of 'location' or 'coordinates'")
         return self
+
+
+class PipettePositionRequest(StrictRequest):
+    pipette: RobotReference
+
+
+class PipetteJogRequest(PipettePositionRequest):
+    """One straight step, resolved against fresh controller position server-side."""
+
+    axis: Literal["x", "y", "z"]
+    distance_mm: float = Field(ge=-10, le=10, description="Signed step in mm; nonzero, at most 10 mm.")
+    speed: float = Field(default=10, gt=0, le=100, description="Jog speed in mm/s.")
+
+    @model_validator(mode="after")
+    def nonzero_step(self):
+        if self.distance_mm == 0:
+            raise ValueError("jog distance must be nonzero")
+        return self
+
+
+class PipetteCoordinates(StrictRequest):
+    """Finite controller readback; may lie outside conservative command bounds."""
+
+    x: float = Field(strict=True)
+    y: float = Field(strict=True)
+    z: float = Field(strict=True)
+
+
+class PipettePositionResponse(StrictRequest):
+    pipette: str
+    coordinates: Optional[PipetteCoordinates] = None
+    source: Literal["robot", "simulation", "dry_run"]
+    observed_at: datetime
+    reference: Literal["pipette_critical_point"] = "pipette_critical_point"
+    coordinate_limits: Dict[str, List[float]] = Field(default_factory=lambda: {
+        "x": [0.0, MAX_X_MM], "y": [0.0, MAX_Y_MM], "z": [0.0, MAX_Z_MM],
+    })
 
 
 class LiquidMoveRequest(StrictRequest):
@@ -605,12 +643,15 @@ class SlotLabware(BaseModel):
     # slot must send this to `load_labware` as `ot_default: False` — the
     # default path looks it up in the opentrons namespace and 404s.
     definition: Optional[Dict[str, Any]] = None
+    assembly: Optional[PlateAssembly] = None
+    support_module: Optional[Literal["platebalanceV1"]] = None
 
 
 class SlotModule(BaseModel):
     """A hardware module occupying a slot (temperature, magnetic, heater-shaker)."""
 
     module_name: str
+    local_peripheral: bool = False
     status: Optional[str] = None
     serial_number: Optional[str] = None
 

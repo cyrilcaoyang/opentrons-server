@@ -166,7 +166,7 @@ export function declaredMapFromDeck(deck: DeviceDeck): Record<string, string> {
   const declared: Record<string, string> = {};
   for (const [slot, s] of Object.entries(deck.slots)) {
     const declaredModule = s.declared_module ?? (s.slot_state === "declared" ? s.module : null);
-    if (declaredModule) {
+    if (declaredModule && !declaredModule.local_peripheral) {
       // A declared (sticky) module → round-trip via its picker key.
       const key = MODULE_NAME_TO_KEY[declaredModule.module_name];
       declared[slot] = key ?? declaredModule.module_name;

@@ -42,6 +42,8 @@ export interface CatalogEntry {
   columns?: number;
   /** True for tip racks (styled distinctly on the deck). */
   isTiprack?: boolean;
+  displayCategory?: string;
+  heightMm?: number | null;
   /** Optional compatibility notes surfaced in the picker/tooltip. */
   compat?: string;
 }
@@ -191,6 +193,8 @@ export function catalogEntryFromLabware(summary: {
   vendor?: string | null;
   product_numbers?: string[];
   source?: string;
+  display_category?: string;
+  height_mm?: number | null;
 }): CatalogEntry {
   const labCustom = summary.source === "uploaded" || summary.source === "repo";
   // Vendor + part numbers ride in the tooltip so an operator can match the
@@ -210,6 +214,8 @@ export function catalogEntryFromLabware(summary: {
     rows: summary.rows || undefined,
     columns: summary.columns || undefined,
     isTiprack: summary.is_tiprack || undefined,
+    displayCategory: summary.display_category,
+    heightMm: summary.height_mm,
     compat,
   };
 }

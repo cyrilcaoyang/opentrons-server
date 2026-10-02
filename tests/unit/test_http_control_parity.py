@@ -450,6 +450,8 @@ def test_home_pipette_and_plunger_axes():
     ctl, client = _loaded_control()
     ctl.home_pipette("p300")
     assert _last(client) == ("home", {"axes": ["rightZ", "rightPlunger"]})
+    ctl.home_pipette_z("p300")
+    assert _last(client) == ("home", {"axes": ["rightZ"]})
     ctl.home_plunger("p300")
     assert _last(client) == ("home", {"axes": ["rightPlunger"]})
 

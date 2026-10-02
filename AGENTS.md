@@ -119,6 +119,31 @@ lab-skills / dashboard / agents          this repo                        robot
 - **Fail-fast style.** Do not add defensive code that swallows exceptions and
   hides failures — on this device a swallowed error becomes a robot whose state
   nobody can trust. Report truthfully.
+- **Plate assemblies:** `gateway/assemblies.py` compiles fixed 5 mm risers and
+  aligned 96-well filter/collector stacks into one custom definition for both
+  transports. Preserve `declared.assembly` on full-layout edits. Only the top
+  plate is accessible; collector identities and contents must never be folded
+  onto it. Loaded assemblies require session shutdown before redeclaration.
+  See `docs/PLATE_ASSEMBLIES.md`; no tip racks or module layouts are supported.
+- **Local plate balance:** optional `platebalanceV1` defaults to OT-2 slot 9 (configurable) via
+  `OT2_PLATEBALANCE_CONFIG`. It is a local serial peripheral, never an Opentrons
+  `loadModule` model. Status is cache-only; Read/Tare/Zero use the command lock
+  and claim/state gates. Preserve conflicting slot records for reconciliation.
+  Single well plates strictly below 25 mm may use `support_module: "platebalanceV1"`
+  in their slot declaration; preserve this marker and full definition. This is
+  weighing-only placement by default. Optional exact-definition geometry can
+  qualify arced moves and slow, rim-cleared dispenses for single-channel GEN2
+  pipettes; all other balance well actions stay blocked. Do not configure it
+  until the holder datum and travel path are qualified on Complexation.
+  `platebalance.read`, `platebalance.tare`, and `platebalance.zero` can be
+  proposed as plan steps. Read returns a timestamped measurement; tare/zero
+  are non-idempotent and report `sent_unconfirmed` after the serial write. See
+  `docs/PLATEBALANCE_V1.md`.
+- **Module placement:** the panel has no module assignment controls. Assign, move,
+  or remove modules through admin-authenticated API calls or approved chat plans.
+  Only a trusted edge identity with `X-Auth-Role: admin` authorizes changes; a
+  device claim or workflow API key alone does not. Preserve the request-scoped
+  check in direct declarations, setup, and every executed plan step.
 - **Agent API discovery:** `/docs/agent` serves a read-only equipment guide;
   `/openapi.json` describes HTTP routes and `/plans/actions` supplies proposal
   schemas. The built-in assistant and agent MCP expose `get_equipment_docs`.
@@ -131,6 +156,12 @@ lab-skills / dashboard / agents          this repo                        robot
 - **Direct motion:** preserve `force_direct` on pipette moves. Flex
   `robot/moveTo` plans an arc; direct gripper motion uses `robot/moveAxesTo`
   or `robot/moveAxesRelative`. Substituting these changes the physical path.
+- **Manual pipette panel:** `jog` resolves one signed XYZ step from a fresh
+  controller position under the command lock; it is non-idempotent. HTTP
+  reads use `savePosition` with `failOnNotHomed`, SSH reads use the protocol
+  core's synchronous `gantry_position`. Never use a browser target or the
+  last requested coordinates as position readback. `/status` never queries
+  position. See `docs/MANUAL_PIPETTE.md` for frame, limits and UI behavior.
 - **Stop recovery:** `ot2_stop_state.json` beside the tip-state file (override
   `OT2_STOP_STATE_PATH`) blocks automatic reconnect after a software stop.
   Give each gateway its own state paths; do not delete this latch to recover.
@@ -142,10 +173,14 @@ lab-skills / dashboard / agents          this repo                        robot
 - **This tree does not serve any robot.** Since 2026-08-08 each gateway runs
   from its own deploy checkout, with its own venv:
 
-  | service | port | runs from |
-  |---|---|---|
-  | `ot2-gateway-hte` | 8020 | `C:\SDL_Deploy\ot2-hte` |
-  | `ot2-gateway-complexation` | 8021 | `C:\SDL_Deploy\ot2-complexation` |
+  | service | host | port | runs from |
+  |---|---|---|---|
+  | `ot2-gateway-hte` | Cytation PC | 8020 | `C:\SDL_Deploy\ot2-hte` |
+  | `ot2-gateway-complexation` | UPLC PC | 8021 | `C:\SDL_Deploy\ot2-complexation` |
+
+  Complexation runs as LocalService using the venv Python directly. Include
+  `--extra platebalance` as well as `--extra labware` when syncing its environment.
+  Its former Cytation service is disabled; never start both instances.
 
   Editing `Projects\opentrons-server` is therefore safe — it changes nothing a
   robot runs. **Deploying is an explicit act**, in the deploy checkout:
@@ -186,15 +221,13 @@ lab-skills / dashboard / agents          this repo                        robot
 - **Python version is pinned by the labware extra.** `opentrons-shared-data`
   pulls `numpy~=1.26.4`, which has no wheels past cp312. Do not bulk-upgrade
   this venv's Python.
-- **Single-PC concentration.** xArm (8000), PlateLoc (8010), both OT-2 gateways
-  (8020/8021), and Cytation 5 (8040) all live on `sdl2-pc-03-cytation`. One
-  reboot takes out five workflow-critical services, and the USB-enumeration
-  race on boot is a known failure mode for the serial devices.
-- **Complexation's robot is reached through the UPLC PC, not its tailnet IP.**
-  `ot2training` has no lab Ethernet; its Wi-Fi radio drops on its own after a
-  reboot (`wlan0` disconnected, empty scan) and only a hard reboot brings it
-  back. Since 2026-09-05 the gateway points at the `netsh` USB bridge
-  `http://100.64.254.19:31951` (DEVICE_BRINGUP.md *Network paths*). Since
+- **Gateway hosts are separate.** HTE remains on Cytation; Complexation runs
+  on UPLC. Bench tools that assume both services are local must be reviewed
+  for the correct host before use. Preserve each instance's independent state.
+- **Complexation uses the UPLC PC's direct USB network.** Since the 2026-09-30
+  host migration, `OT2_HTTP_BASE_URL` is `http://169.254.40.81:31950` on UPLC.
+  The gateway no longer depends on the cross-PC portproxy or robot Wi-Fi.
+  Verify `ot2training` / `weathered-dream` when changing the connection. Since
   2026-09-06 the gateway watches the path itself: three failed probes (~15 s)
   flip `/status` to `unknown` with `components.robot: unreachable` and
   `details.robot.readback_age_s`, robot-touching actions are refused up front,

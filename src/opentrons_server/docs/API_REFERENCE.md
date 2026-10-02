@@ -63,6 +63,7 @@ Top level: `protocol_version`, `equipment_id`, `equipment_name`,
 |---|---|---|
 | `GET /labware` | — | `{definitions: [...]}` grid summaries for the deck-declare picker. Empty when `opentrons-shared-data` is not installed. |
 | `GET /labware/{load_name}` | — | one full Opentrons definition; **404** for an unknown name *or* a missing `opentrons-shared-data` |
+| `POST /labware/assemblies/preview` | `{schema_version: 1, kind: "plate_on_riser" \| "filter_stack", riser_height_mm: 0 \| 5, top: {plate_id, definition}, collector?: {plate_id, definition}, nesting_overlap_mm: number}` | Validated assembly, compiled `definition`, `top_origin_z_mm`, `total_height_mm`; **422** on unsupported geometry. Pure computation: no robot I/O, persistence or claim required. |
 
 With `OT2_TRUST_LOCAL_UI=false`, any request to `/labware`, `/labware/*`,
 `/ui` or `/ui/*` that did not come through the auth edge is **404** — the UI
@@ -101,11 +102,22 @@ All return `CommandResponse` `{ok, message, state}` on 200 unless noted.
 | method + path | body | responses / notes |
 |---|---|---|
 | `POST /control/move-to` | `{pipette, location \| coordinates, speed?, force_direct?, minimum_z_height?}` — exactly one of `location` (`{labware_nickname, position, top?/bottom?/center?}`) or `coordinates` (`{x, y, z}` in deck mm) | **422** if both or neither target, or a bound is exceeded; **409** on failure |
+| `POST /control/pipette-position` | `{pipette}` — mount (`left`/`right`) or loaded nickname | Controller `{pipette, coordinates: {x,y,z}, source, observed_at, reference}`. Requires a claim and ready session. Never homes/moves; unhomed/unknown position → **409**. Dry run returns null coordinates. |
+| `POST /control/jog` | `{pipette, axis: "x"\|"y"\|"z", distance_mm: -10..10 (nonzero), speed: >0..100}` | One straight step in deck mm, with fresh before/after controller reads under the command lock. **422** invalid arguments; **412** destination outside coordinate bounds; **409** state/command failure or unknown outcome. Never automatically retry. |
 | `POST /control/pick-up-tip` | `{pipette, labware_nickname?, position?, sample_id?, force?}` — omitting `position` on a tracked rack auto-picks; omitting `labware_nickname` too auto-selects a compatible tracked rack | **412** `TipUnavailable` body; **409** otherwise |
 | `POST /control/drop-tip` | same `TipRequest` shape | **409** on failure |
 | `POST /control/aspirate` | `{pipette, volume_ul, location, flow_rate?}` | **412** out-of-envelope body when the volume is outside the attached pipette's min/max; **422** above 1000 µL or ≤ 0; **409** otherwise |
 | `POST /control/dispense` | as aspirate, plus `push_out?` (extra plunger air in µL, separate from blow-out) | as aspirate |
 | `POST /control/move-labware` | `{labware_nickname, new_location, use_gripper?, pick_up_offset?, drop_offset?}` | **422** when `use_gripper` is set on a non-Flex profile, or offsets are given without it; **409** otherwise |
+
+For a plate declared on `platebalanceV1`, well-addressed `move-to` and
+`dispense` remain blocked unless exact-definition geometry is configured.
+Qualified moves require a single-channel GEN2 pipette, an explicit `top`
+offset that puts the tip at least 2 mm above the measured rim, and an arced
+path. Qualified dispenses default to that clearance and cap flow at half the
+documented GEN2 model default. Other well actions at the balance remain
+blocked. Absolute-coordinate moves and manual jogs do not infer balance
+clearance; they remain operator-directed motions.
 
 ## Control — bookkeeping (claim, no robot motion)
 
@@ -118,9 +130,23 @@ is unreachable.
 | `POST /control/plate/unload` | — | **200** the removed `LoadedPlate`, or `null` |
 | `POST /control/well/update` | `{well, sample_id?, volume_ul?, notes?, clear_sample_id?, clear_notes?}` | **200** `WellSample`; **409** no plate loaded or well not on it; **422** invalid value |
 | `POST /control/deck/declare` | `{slots: {"2": "<load_name>" \| {load_name\|kind\|module_name, definition?} \| null}}` | **200** the merged `DeckState`. **Full-layout replacement, not a patch** — omitted slots are cleared, an empty map clears the declaration. **422** on an invalid slot value. |
-| `DELETE /control/deck/declare` | — | **200** the merged `DeckState` after clearing the declaration |
+| `DELETE /control/deck/declare` | — | **200** the merged `DeckState` after clearing the declaration; **422** if a loaded assembly would be removed or a command is in flight |
 | `POST /control/tips/reset` | `{slot \| nickname, wells?}` | **200** `TipRackState` — (re)registers a rack with every tip fresh (a physical swap). **422** on an unknown target or well list |
 | `POST /control/tips/mark` | `{slot \| nickname, status: "new"\|"empty", wells \| columns}` — exactly one of `wells`/`columns`; columns 1–12 | **200** `TipRackState` — the partial repair tool. **409** when the slot holds no tracked rack; **422** for a well the rack does not have |
+
+Deck slot values may also be `{assembly: <preview envelope>}`. This preserves
+component definitions and IDs and derives the top plate's accessible geometry.
+`plate_on_riser` requires 5 mm, no collector and zero overlap. `filter_stack`
+requires aligned standard 96-well filter/collector definitions. Tip racks,
+nonzero definition corner offsets, and module layouts are unsupported.
+Assembly geometry is fixed within a session: changing/clearing a loaded assembly
+returns **422**, and moving it or targeting its covered collector is refused.
+Shut down successfully, reconcile the physical layout, and redeclare before a
+new session. `/control/setup` labware entries accept the same `assembly` alongside
+`nickname` and a deck-slot `location`; the gateway generates the custom config.
+Matching run readback confirms the compiled definition, while components remain
+operator-declared in `declared.assembly`. Filter dispense never implies collected
+filtrate volume.
 
 ## Control — convenience and modules (claim)
 
@@ -148,6 +174,7 @@ while the device is `ready` and no command is in flight.
 | `POST /control/air-gap` | `{pipette, location, volume_ul, height?}` — `height` is above the well **top**; location offsets are rejected | no |
 | `POST /control/prepare-aspirate` | `{pipette}` | no |
 | `POST /control/home-pipette` | `{pipette}` | yes |
+| `POST /control/home-pipette-z` | `{pipette}` — selected mount Z only | yes |
 | `POST /control/home-plunger` | `{pipette}` | yes |
 | `POST /control/set-flow-rate` | `{pipette, aspirate?, dispense?, blow_out?}` in µL/s — at least one | yes |
 | `POST /control/set-speed` | `{pipette, speed}` mm/s, ≤ 400 — applies to **explicit** gantry moves only | yes |
@@ -260,3 +287,45 @@ headers have been sent. Discard stale previews and report failure.
 The USB alias is color-only; this gateway does not expose camera depth, capture
 archive writes, or global start/stop controls. Closing a preview does not stop
 other consumers. Hardware idle shutdown belongs to the camera service.
+
+### Local plate balance
+
+`POST /control/platebalance/{action}` — `action` is `read`, `tare`, or `zero`.
+Optional JSON body: `{"wait_until_stable": false, "timeout_s": 10}`.
+`read` may wait for stable weight; `timeout_s` is 1–30 seconds. Tare/Zero reject
+`wait_until_stable: true`. A missing body preserves a single read.
+Requires claim and the corresponding `platebalance.*` action
+in `allowed_actions`. Available only with local WZB254-N configuration, valid
+placement in its configured slot (default 9), and a ready gateway. This peripheral is not an Opentrons module
+and is not yet available in the workflow proposal catalog.
+
+Response includes `module_name: platebalanceV1`, slot, model, `reading` (value,
+unit, stable, observed_at), `last_operation` (action, outcome, at), and last_error.
+Read is explicit and timestamped. Tare/Zero invalidate the previous reading and
+return `sent_unconfirmed`; read again to inspect the weight. Reference-command
+transport failure is an unknown outcome and must not be retried automatically.
+`details.platebalance` contains the cached snapshot; status polling performs no
+serial I/O. Simulation returns `simulation: true` and `not_executed`.
+
+Stable-read timeout returns HTTP 409 with a clear message and records
+`last_operation.outcome: stability_timeout`; the gateway stays ready. Serial
+errors are not retried. Use an HTTP timeout exceeding the stability wait budget
+plus serial I/O overhead. The fixed adapter and plate height limit are unconfirmed;
+`geometry.pipetting_enabled` remains false.
+
+
+### Module placement authorization
+
+Module assignment, reassignment, replacement and removal require a trusted
+edge-authenticated admin identity (`X-Auth-User` and `X-Auth-Role: admin`) in
+addition to the device claim. Direct/spoofed role headers and ordinary machine
+API keys do not grant this permission. Use the authenticated edge API or chat
+proposal → admin approval → admin execution. The module tile exposes operation
+controls only; it does not expose placement controls, even for admins.
+
+The restriction covers full-layout POST/DELETE `/control/deck/declare`, changes
+to module placement through `/control/setup`, and plan approval/execution.
+Non-admins can edit plate declarations while preserving all module placements.
+Existing module operations (temperature, shaking, balance) retain their normal
+claim/state gates. `details.permissions.manage_modules` is request-specific;
+aggregator status without an admin identity correctly reports false.

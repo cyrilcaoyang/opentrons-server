@@ -72,6 +72,7 @@ def _summary(load_name: str, defn: dict[str, Any]) -> dict[str, Any]:
         "columns": columns,
         "well_count": len(wells) if isinstance(wells, dict) else 0,
         "well_volume_ul": first_well.get("totalLiquidVolume"),
+        "height_mm": (defn.get("dimensions") or {}).get("zDimension"),
         "version": defn.get("version"),
         "namespace": defn.get("namespace"),
         # Schema-2 manufacturer metadata (brand.brand / brandId[] / links[]),
