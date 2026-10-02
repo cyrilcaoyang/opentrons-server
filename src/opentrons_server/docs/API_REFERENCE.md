@@ -88,7 +88,7 @@ All return `CommandResponse` `{ok, message, state}` on 200 unless noted.
 | `POST /control/shutdown` | — | always succeeds; device then reports `requires_init` |
 | `POST /control/setup` | `{labware: [], instruments: [], modules: []}` | the session recipe. Each item's `nickname` must be a non-reserved Python identifier → **422** otherwise. **409** on setup failure. Tip racks here auto-register with the tip tracker. |
 | `POST /control/home` | — | **409** on failure |
-| `POST /control/pause` | — | → `PAUSED` / `degraded` |
+| `POST /control/pause` | — | → `PAUSED` / `degraded`; during a command it is honoured when that command ends (`details.pause_requested: true` until then) and an executing plan waits at its next step |
 | `POST /control/resume` | — | leaves `PAUSED` |
 | `POST /control/stop` | — | **software** stop of this gateway's HTTP run — not a hardware e-stop. Stays reachable while a command is in flight. Success only after stopped readback; latches until `shutdown` + `startup`. **409** when the transport is SSH, there is no session, the robot is under external control, or a stop is already in progress. |
 | `POST /control/reconcile` | optional raw snapshot object, or no body | acknowledges `unknown_outcome`, or an `error` that still has a live session, and returns to `ready`. **409** while a stop is latched. |

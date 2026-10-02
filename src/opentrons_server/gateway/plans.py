@@ -62,6 +62,7 @@ import hashlib
 import json
 import secrets
 import threading
+import time
 from functools import wraps
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -571,6 +572,8 @@ class PlanExecutor:
             plan.halt_reason = None
 
         for index, step in enumerate(plan.steps):
+            if not self._wait_while_paused(plan):
+                return plan
             with self._store._lock:
                 if plan.status != "executing":
                     return plan
@@ -644,6 +647,23 @@ class PlanExecutor:
             plan.status = "executed"
             plan.approval = None
             return plan
+
+    def _wait_while_paused(self, plan: Plan) -> bool:
+        """Hold at a step boundary while the operator has the gateway paused.
+
+        The operator's pause lands between commands (the running one always
+        completes), so a paused plan is simply one that has not started its
+        next step. Polled without the registry lock, so abort stays available
+        and ends the wait. Returns False when the plan is no longer executing.
+        """
+        while True:
+            state = getattr(getattr(self._service, "state", None), "value", None)
+            if state != "paused":
+                return True
+            with self._store._lock:
+                if plan.status != "executing":
+                    return False
+            time.sleep(0.2)
 
     def _assert_live_approval(self, plan: Plan) -> None:
         auth = plan.approval
