@@ -100,6 +100,16 @@ class PlateBalanceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     wait_until_stable: bool = False
     timeout_s: float = Field(default=10.0, ge=1, le=30, allow_inf_nan=False)
+    # Tare only: how many times the tare command may be sent before the step
+    # gives up, each followed by its own `timeout_s` baseline wait. A tare the
+    # balance applied before the pan settled leaves a stable non-zero
+    # baseline; sending tare again re-zeroes on the settled pan. Safe here
+    # because nothing is dosed between attempts — the step holds the command
+    # lock throughout. Never resent after silence or a stop.
+    attempts: int | None = Field(default=None, ge=1, le=3)
+
+
+_TARE_ATTEMPTS_DEFAULT = 3
 
 
 class PlateBalanceReferenceRequest(BaseModel):
@@ -257,6 +267,10 @@ class PlateBalanceV1:
             raise ValueError("Balance is unconfigured or this operation is unsupported")
         if action == "zero" and request.wait_until_stable:
             raise ValueError("wait_until_stable applies only to read or tare")
+        if action != "tare" and request.attempts is not None:
+            raise ValueError("attempts applies only to tare")
+        attempts_allowed = request.attempts or _TARE_ATTEMPTS_DEFAULT
+        attempts_made = 0
         if action != "read":
             self._reading = None  # A pre-tare net weight no longer describes this reference.
         try:
@@ -303,67 +317,87 @@ class PlateBalanceV1:
                         break
                     time.sleep(min(0.25, max(0, deadline - time.monotonic())))
                 outcome = "observed"
-            else:
+            elif action == "zero":
                 self._driver.set_reference(action)  # one write, never repeat automatically
+                attempts_made = 1
                 outcome = "sent_unconfirmed"  # zero has no acknowledgment
-                if action == "tare":
-                    # The serial write is not an acknowledgment. Observe two
-                    # fresh, stable near-zero values before the next plan step.
+            else:
+                # Tare: the serial write is not an acknowledgment. Observe two
+                # fresh, stable near-zero values before the next plan step. A
+                # baseline that settles off zero (the balance tared before the
+                # pan was still) earns another attempt, up to `attempts`;
+                # silence through a whole wait, or a stop, never does.
+                while True:
+                    self._driver.set_reference(action)
+                    attempts_made += 1
                     deadline = time.monotonic() + request.timeout_s
                     consecutive = 0
                     no_frame_seen = False
                     unreadable = None
-                    while True:
-                        if time.monotonic() >= deadline:
-                            if no_frame_seen:
-                                raise TimeoutError(
-                                    f"Tare sent, but no frame was available at the {request.timeout_s:g} s deadline"
+                    try:
+                        while True:
+                            if time.monotonic() >= deadline:
+                                if no_frame_seen:
+                                    raise TimeoutError(
+                                        f"Tare sent, but no frame was available at the {request.timeout_s:g} s deadline"
+                                    )
+                                raise BalanceReferenceTimeout(
+                                    f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
+                                    + (f"; last frame was unreadable: {unreadable}" if unreadable else "")
                                 )
-                            raise BalanceReferenceTimeout(
-                                f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
-                                + (f"; last frame was unreadable: {unreadable}" if unreadable else "")
-                            )
-                        try:
-                            stable, weight = observe(deadline)
-                        except BalanceNoFrame:
-                            # The scale can be silent while its tare is still
-                            # settling. Keep the robot stationary and query
-                            # again, but never resend the reference command.
-                            no_frame_seen = True
-                            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
-                            continue
-                        except ValueError as exc:
-                            # The scale answered, so it is alive and the tare
-                            # was delivered; this frame just is not a weight
-                            # (cut off at the read timeout, overload, error
-                            # code). Query again — the baseline needs two
-                            # stable near-zero readings, so an unreadable
-                            # frame can only cost time, never be mistaken
-                            # for one. Still never resend tare.
+                            try:
+                                stable, weight = observe(deadline)
+                            except BalanceNoFrame:
+                                # The scale can be silent while its tare is still
+                                # settling. Keep the robot stationary and query
+                                # again, but never resend the reference command
+                                # inside a wait.
+                                no_frame_seen = True
+                                time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                                continue
+                            except ValueError as exc:
+                                # The scale answered, so it is alive and the tare
+                                # was delivered; this frame just is not a weight
+                                # (cut off at the read timeout, overload, error
+                                # code). Query again — the baseline needs two
+                                # stable near-zero readings, so an unreadable
+                                # frame can only cost time, never be mistaken
+                                # for one.
+                                no_frame_seen = False
+                                unreadable = str(exc)
+                                time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                                continue
                             no_frame_seen = False
-                            unreadable = str(exc)
+                            unreadable = None
+                            if time.monotonic() >= deadline:
+                                raise BalanceReferenceTimeout(
+                                    f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
+                                )
+                            consecutive = consecutive + 1 if stable and abs(weight) <= _TARE_ZERO_TOLERANCE_G else 0
+                            if consecutive >= 2:
+                                break
                             time.sleep(min(0.25, max(0, deadline - time.monotonic())))
-                            continue
-                        no_frame_seen = False
-                        unreadable = None
-                        if time.monotonic() >= deadline:
+                    except BalanceReferenceTimeout as exc:
+                        if attempts_made >= attempts_allowed:
                             raise BalanceReferenceTimeout(
-                                f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
-                            )
-                        consecutive = consecutive + 1 if stable and abs(weight) <= _TARE_ZERO_TOLERANCE_G else 0
-                        if consecutive >= 2:
-                            outcome = "baseline_observed"
-                            break
-                        time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                                f"{exc} (after {attempts_made} tare attempt{'s' if attempts_made > 1 else ''})"
+                            ) from None
+                        continue
+                    outcome = "baseline_observed"
+                    break
             self._error = None
             self._operation = {"action": action, "outcome": outcome,
                                "at": datetime.now(timezone.utc).isoformat()}
+            if action != "read":
+                self._operation["attempts"] = attempts_made
         except Exception as exc:
             self._error = str(exc)
             self._operation = {"action": action, "outcome": ("baseline_unconfirmed" if isinstance(exc, BalanceReferenceTimeout)
                                else "stability_timeout" if isinstance(exc, BalanceStabilityTimeout)
                                else "failed" if action == "read" else "unknown_outcome"),
                                "at": datetime.now(timezone.utc).isoformat()}
+            if action != "read":
+                self._operation["attempts"] = attempts_made
             if isinstance(exc, BalanceReferenceTimeout):
                 raise
             if action != "read":

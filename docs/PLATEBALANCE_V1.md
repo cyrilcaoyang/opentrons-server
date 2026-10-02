@@ -178,7 +178,8 @@ of a serial acknowledgment. The manufacturer's default setting tares after
 stability, so vibration from nearby robot motion can delay the baseline. A
 weight query may return no frame, or an unreadable one (a frame cut off at
 the read timeout, an overload or error code), during this wait; the gateway
-retries both within the 30-second wait and never sends tare again, because
+retries both within the 30-second wait and never sends tare again inside a
+wait, because
 the balance answering proves the tare was delivered and an unreadable frame
 can only cost time, never be mistaken for a weight. If no frame at all is
 available at the deadline, the outcome remains unknown and the gateway
@@ -191,8 +192,13 @@ the deadline, so a frame is never cut off mid-line by the wait itself.
 gateway robot command cannot run during the tare wait. Park the robot and let
 motion settle before starting a tare; the gateway cannot stop motion commanded
 outside its own session. A timeout stops the plan before any following
-dispense. The last observed reading is retained for inspection, and Tare is
-never repeated automatically. A communication failure after the serial write
+dispense. The last observed reading is retained for inspection. A baseline
+that settles off zero earns another tare: the step sends tare again and waits
+again, up to three attempts by default (`attempts`, 1–3, in the request),
+because nothing is dosed between attempts and a tare the balance applied
+before the pan was still simply re-zeroes on the settled pan. The operation
+record reports `attempts`. Tare is never resent after silence through a whole
+wait, nor after a stop. A communication failure after the serial write
 latches `unknown_outcome` for operator reconciliation. Zero returns
 `sent_unconfirmed`; a later reading cannot prove that command changed the
 reference. A cached reading is timestamped and is not proof of current

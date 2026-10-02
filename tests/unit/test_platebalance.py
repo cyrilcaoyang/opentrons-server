@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -277,11 +277,12 @@ def test_zero_does_not_accept_stability_wait(tmp_path):
 def test_tare_timeout_halts_before_dosing_and_preserves_last_reading(tmp_path, balance_clock):
     service, driver, _ = make_service(tmp_path)
     driver._weigh.return_value = (True, 1.0)
-    with pytest.raises(BalanceReferenceTimeout, match="stable zero was not observed"):
+    with pytest.raises(BalanceReferenceTimeout, match="stable zero was not observed.*after 3 tare attempts"):
         service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
-    assert driver.set_reference.call_count == 1
-    assert driver._weigh.call_count > 1
+    assert driver.set_reference.call_count == 3  # default attempts, each with its own wait
+    assert driver._weigh.call_count > 3
     assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
+    assert service.platebalance.snapshot()["last_operation"]["attempts"] == 3
     assert service.platebalance.snapshot()["reading"]["value"] == 1.0
     assert service.state == OT2ServiceState.READY
 
@@ -319,7 +320,7 @@ def test_tare_with_only_unreadable_frames_is_unconfirmed_not_unknown(tmp_path, b
     service, driver, _ = make_service(tmp_path)
     driver._weigh.side_effect = ValueError("Invalid balance weight frame: 'Err 08\\r\\n'")
     with pytest.raises(BalanceReferenceTimeout, match="unreadable: Invalid balance weight frame"):
-        service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
+        service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1, attempts=1))
     driver.set_reference.assert_called_once_with("tare")
     assert driver._weigh.call_count > 1
     assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
@@ -358,6 +359,31 @@ def test_driver_never_shortens_the_serial_timeout_below_a_whole_frame(monkeypatc
     assert transport.timeout == 1.0  # restored
 
 
+def test_tare_is_resent_when_the_baseline_settles_off_zero(tmp_path, balance_clock):
+    """The live case: the balance tared before the pan was still and then read a
+    stable -0.0005 g for the whole wait. A second tare on the settled pan
+    re-zeroes it. Attempts are counted in the operation record."""
+    service, driver, _ = make_service(tmp_path)
+    readings = iter([(True, -0.0005)] * 12 + [(True, 0.0), (True, 0.0001)])
+    driver._weigh.side_effect = lambda **_k: next(readings)
+    result = service.platebalance_action("tare", PlateBalanceRequest(timeout_s=2))
+    assert result["last_operation"]["outcome"] == "baseline_observed"
+    assert result["last_operation"]["attempts"] == 2
+    assert driver.set_reference.call_args_list == [call("tare"), call("tare")]
+    assert service.state == OT2ServiceState.READY
+
+
+def test_tare_attempts_apply_only_to_tare_and_are_capped(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    with pytest.raises(ValueError, match="attempts applies only to tare"):
+        service.platebalance_action("read", PlateBalanceRequest(attempts=2))
+    with pytest.raises(ValueError):
+        PlateBalanceRequest(attempts=4)
+    driver._weigh.return_value = (True, 0.0)
+    result = service.platebalance_action("zero")
+    assert result["last_operation"] == {**result["last_operation"], "outcome": "sent_unconfirmed", "attempts": 1}
+
+
 def test_tare_with_only_empty_frames_latches_unknown_outcome(tmp_path, balance_clock):
     service, driver, _ = make_service(tmp_path)
     driver._weigh.side_effect = BalanceNoFrame("Balance returned no weight frame")
@@ -392,7 +418,7 @@ def test_tare_does_not_accept_zero_after_deadline(tmp_path, balance_clock):
     driver._weigh.side_effect = late_zero
     with pytest.raises(BalanceReferenceTimeout):
         service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
-    assert driver.set_reference.call_count == 1
+    assert driver.set_reference.call_count == 3  # every attempt refused the late zero
     assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
 
 

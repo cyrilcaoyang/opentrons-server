@@ -104,8 +104,9 @@ module tile has no placement editor; admins use the API or an approved chat plan
 - Use `platebalance.tare` to set a loaded plate's weight as the baseline; \
 `platebalance.zero` is for the unloaded balance and has a limited zero range. \
 `platebalance.tare` holds the command lock and waits up to 30 s for two fresh \
-stable near-zero readings, with no gateway robot movement during that wait. \
-It stops the plan if they are not observed. Propose tare before aspirating; \
+stable near-zero readings, with no gateway robot movement during that wait, \
+resending tare and waiting again up to three times if the baseline settles \
+off zero. It stops the plan if they are still not observed. Propose tare before aspirating; \
 inspect its baseline result before proposing a separate dosing plan. Zero \
 remains a non-idempotent serial write whose `sent_unconfirmed` result proves \
 only that its command was sent. A read reports the weight actually observed. \
