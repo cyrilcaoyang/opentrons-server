@@ -1,0 +1,6692 @@
+[
+ {
+  "plan_id": "gS0maKvThQsH_p2S",
+  "steps": [
+   {
+    "action": "set_flow_rate",
+    "args": {
+     "pipette": "left",
+     "blow_out": 40
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C4",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C4",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D4",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D4",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E4",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E4",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "F4",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "F4",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "F5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "F5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "F6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "F6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "F7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "F7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   }
+  ],
+  "step_hash": "d8ed179ceb9e5bf82b945552353a187f20c2b61ef0493f13858b4217ce11571d",
+  "status": "failed",
+  "created_at": "2026-10-02T19:02:37.217650Z",
+  "created_by": "assistant",
+  "results": [
+   {
+    "action": "set_flow_rate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:03:48.783113Z",
+    "finished_at": "2026-10-02T19:03:51.007213Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:03:52.830650+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:03:52.830650+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:03:51.010212Z",
+    "finished_at": "2026-10-02T19:03:52.921126Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:03:52.923126Z",
+    "finished_at": "2026-10-02T19:03:59.513730Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:03:59.515731Z",
+    "finished_at": "2026-10-02T19:04:03.383628Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:03.385627Z",
+    "finished_at": "2026-10-02T19:04:08.542056Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:08.544056Z",
+    "finished_at": "2026-10-02T19:04:10.175285Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1008,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:04:12.175144+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:10.176284Z",
+    "finished_at": "2026-10-02T19:04:12.266406Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:12.268402Z",
+    "finished_at": "2026-10-02T19:04:24.953589Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:04:38.131350+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:04:38.131350+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:04:24.955589Z",
+    "finished_at": "2026-10-02T19:04:38.228149Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:38.230148Z",
+    "finished_at": "2026-10-02T19:04:44.769291Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:44.771291Z",
+    "finished_at": "2026-10-02T19:04:48.555616Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:48.557616Z",
+    "finished_at": "2026-10-02T19:04:53.468001Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:53.470003Z",
+    "finished_at": "2026-10-02T19:04:55.220842Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1044,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:04:58.661198+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:55.222840Z",
+    "finished_at": "2026-10-02T19:04:58.754549Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:04:58.756548Z",
+    "finished_at": "2026-10-02T19:05:11.783609Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:05:13.398233+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:05:13.398233+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:05:11.785606Z",
+    "finished_at": "2026-10-02T19:05:13.492701Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:13.494701Z",
+    "finished_at": "2026-10-02T19:05:20.114988Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:20.116984Z",
+    "finished_at": "2026-10-02T19:05:23.953877Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:23.955877Z",
+    "finished_at": "2026-10-02T19:05:28.806637Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:28.808636Z",
+    "finished_at": "2026-10-02T19:05:30.429362Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1021,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:05:31.343473+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:30.431363Z",
+    "finished_at": "2026-10-02T19:05:31.437339Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:31.439342Z",
+    "finished_at": "2026-10-02T19:05:44.180318Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:05:49.768480+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:05:49.768480+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:05:44.181317Z",
+    "finished_at": "2026-10-02T19:05:49.860933Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:49.862929Z",
+    "finished_at": "2026-10-02T19:05:56.577381Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:05:56.579368Z",
+    "finished_at": "2026-10-02T19:06:00.416810Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:00.418812Z",
+    "finished_at": "2026-10-02T19:06:05.185701Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:05.187701Z",
+    "finished_at": "2026-10-02T19:06:06.931943Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1009,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:06:11.458773+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:06.933944Z",
+    "finished_at": "2026-10-02T19:06:11.552637Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:11.554637Z",
+    "finished_at": "2026-10-02T19:06:24.332383Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:06:25.949248+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:06:25.949248+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:06:24.334385Z",
+    "finished_at": "2026-10-02T19:06:26.033940Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:26.035938Z",
+    "finished_at": "2026-10-02T19:06:32.554025Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:32.555631Z",
+    "finished_at": "2026-10-02T19:06:36.382053Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:36.384189Z",
+    "finished_at": "2026-10-02T19:06:41.255914Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:41.257915Z",
+    "finished_at": "2026-10-02T19:06:42.875139Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:06:45.951101+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:42.877131Z",
+    "finished_at": "2026-10-02T19:06:46.036568Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:06:46.038569Z",
+    "finished_at": "2026-10-02T19:06:58.767220Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:07:01.828562+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:07:01.828562+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:06:58.769218Z",
+    "finished_at": "2026-10-02T19:07:01.922013Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:01.924016Z",
+    "finished_at": "2026-10-02T19:07:08.485961Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:08.488957Z",
+    "finished_at": "2026-10-02T19:07:12.410179Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:12.411180Z",
+    "finished_at": "2026-10-02T19:07:17.296367Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:17.298367Z",
+    "finished_at": "2026-10-02T19:07:18.904773Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1007,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:07:25.595689+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:18.905776Z",
+    "finished_at": "2026-10-02T19:07:25.682394Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:25.684515Z",
+    "finished_at": "2026-10-02T19:07:38.391368Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:07:40.008355+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:07:40.008355+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:07:38.393368Z",
+    "finished_at": "2026-10-02T19:07:40.110322Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:40.112323Z",
+    "finished_at": "2026-10-02T19:07:46.606730Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:46.608730Z",
+    "finished_at": "2026-10-02T19:07:50.416660Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:50.417691Z",
+    "finished_at": "2026-10-02T19:07:55.290333Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:55.292329Z",
+    "finished_at": "2026-10-02T19:07:56.931487Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.102,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:08:01.451040+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:07:56.933485Z",
+    "finished_at": "2026-10-02T19:08:01.667765Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:01.668766Z",
+    "finished_at": "2026-10-02T19:08:14.746194Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:08:16.359990+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:08:16.359990+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:08:14.748191Z",
+    "finished_at": "2026-10-02T19:08:16.447750Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:16.449752Z",
+    "finished_at": "2026-10-02T19:08:22.943229Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:22.945228Z",
+    "finished_at": "2026-10-02T19:08:26.817269Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:26.819270Z",
+    "finished_at": "2026-10-02T19:08:31.661313Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:31.663311Z",
+    "finished_at": "2026-10-02T19:08:33.306895Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1003,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:08:37.108198+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:33.307895Z",
+    "finished_at": "2026-10-02T19:08:37.196867Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:37.198868Z",
+    "finished_at": "2026-10-02T19:08:49.975316Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:08:51.593779+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:08:51.593779+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:08:49.977316Z",
+    "finished_at": "2026-10-02T19:08:51.692429Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:51.693428Z",
+    "finished_at": "2026-10-02T19:08:58.193282Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:08:58.195284Z",
+    "finished_at": "2026-10-02T19:09:02.022144Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:02.024140Z",
+    "finished_at": "2026-10-02T19:09:06.920814Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:06.921808Z",
+    "finished_at": "2026-10-02T19:09:08.534900Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1011,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:09:09.806778+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:08.536900Z",
+    "finished_at": "2026-10-02T19:09:09.899580Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:09.901580Z",
+    "finished_at": "2026-10-02T19:09:22.626265Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:09:25.327287+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:09:25.327287+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:09:22.627831Z",
+    "finished_at": "2026-10-02T19:09:25.430121Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:25.432120Z",
+    "finished_at": "2026-10-02T19:09:32.004319Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:32.006407Z",
+    "finished_at": "2026-10-02T19:09:35.815655Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:35.817654Z",
+    "finished_at": "2026-10-02T19:09:40.831441Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:40.833440Z",
+    "finished_at": "2026-10-02T19:09:42.442677Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1019,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:09:44.078166+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:42.444677Z",
+    "finished_at": "2026-10-02T19:09:44.166551Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:09:44.168550Z",
+    "finished_at": "2026-10-02T19:09:57.073850Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:10:07.720766+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:10:07.720766+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:09:57.075848Z",
+    "finished_at": "2026-10-02T19:10:07.867970Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:07.869967Z",
+    "finished_at": "2026-10-02T19:10:14.675653Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:14.677653Z",
+    "finished_at": "2026-10-02T19:10:18.480456Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:18.482458Z",
+    "finished_at": "2026-10-02T19:10:23.304392Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:23.306461Z",
+    "finished_at": "2026-10-02T19:10:24.922257Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:10:28.000927+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:24.923255Z",
+    "finished_at": "2026-10-02T19:10:28.090804Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:28.092800Z",
+    "finished_at": "2026-10-02T19:10:41.104894Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:10:42.720057+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:10:42.720057+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:10:41.106892Z",
+    "finished_at": "2026-10-02T19:10:42.807881Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:42.808884Z",
+    "finished_at": "2026-10-02T19:10:49.485075Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:49.487139Z",
+    "finished_at": "2026-10-02T19:10:53.288121Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:53.290160Z",
+    "finished_at": "2026-10-02T19:10:58.082778Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:58.084774Z",
+    "finished_at": "2026-10-02T19:10:59.724480Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1021,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:11:02.440733+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:10:59.726481Z",
+    "finished_at": "2026-10-02T19:11:02.534745Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:02.536745Z",
+    "finished_at": "2026-10-02T19:11:15.511716Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:11:17.128238+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:11:17.128238+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:11:15.513714Z",
+    "finished_at": "2026-10-02T19:11:17.218957Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:17.220954Z",
+    "finished_at": "2026-10-02T19:11:23.700905Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:23.702908Z",
+    "finished_at": "2026-10-02T19:11:27.495121Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:27.497121Z",
+    "finished_at": "2026-10-02T19:11:32.326730Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:32.328729Z",
+    "finished_at": "2026-10-02T19:11:33.928871Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1011,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:11:34.840368+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:33.930870Z",
+    "finished_at": "2026-10-02T19:11:34.931464Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:34.932465Z",
+    "finished_at": "2026-10-02T19:11:47.689587Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:11:55.807877+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:11:55.807877+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:11:47.691587Z",
+    "finished_at": "2026-10-02T19:11:55.894846Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:11:55.896847Z",
+    "finished_at": "2026-10-02T19:12:02.542792Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:12:02.544791Z",
+    "finished_at": "2026-10-02T19:12:06.295689Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:12:06.296694Z",
+    "finished_at": "2026-10-02T19:12:11.205631Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:12:11.207630Z",
+    "finished_at": "2026-10-02T19:12:12.820352Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1017,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:12:14.810340+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:12:12.822348Z",
+    "finished_at": "2026-10-02T19:12:14.895476Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:12:14.897476Z",
+    "finished_at": "2026-10-02T19:12:27.610078Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:13:00.361616+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:13:00.361616+00:00",
+     "attempts": 2
+    },
+    "started_at": "2026-10-02T19:12:27.612075Z",
+    "finished_at": "2026-10-02T19:13:00.451472Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:00.453470Z",
+    "finished_at": "2026-10-02T19:13:06.967229Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:06.969226Z",
+    "finished_at": "2026-10-02T19:13:10.751572Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:10.753571Z",
+    "finished_at": "2026-10-02T19:13:15.582892Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:15.584897Z",
+    "finished_at": "2026-10-02T19:13:17.219909Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1011,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:13:20.300459+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:17.221907Z",
+    "finished_at": "2026-10-02T19:13:20.394336Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:20.395338Z",
+    "finished_at": "2026-10-02T19:13:33.149799Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:13:34.765838+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:13:34.765838+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:13:33.151799Z",
+    "finished_at": "2026-10-02T19:13:34.855136Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:34.857137Z",
+    "finished_at": "2026-10-02T19:13:41.681704Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:41.683705Z",
+    "finished_at": "2026-10-02T19:13:45.444634Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:13:45.446633Z",
+    "finished_at": "2026-10-02T19:13:50.252116Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   }
+  ],
+  "approval": null,
+  "halt_reason": "approval expired or revoked; review remaining work before continuing",
+  "non_idempotent_actions": [
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip"
+  ],
+  "executable": false,
+  "blocked_reason": "plan gS0maKvThQsH_p2S is failed, not approved"
+ },
+ {
+  "plan_id": "C5B-GLbrcj7Q6rII",
+  "steps": [
+   {
+    "action": "set_flow_rate",
+    "args": {
+     "pipette": "left",
+     "blow_out": 40
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "F7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "A7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "A7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H5",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H5",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H6",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H6",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "H7",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "H7",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E1",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E1",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "C12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "C12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "D12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "D12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   },
+   {
+    "action": "platebalance.tare",
+    "args": {}
+   },
+   {
+    "action": "pick_up_tip",
+    "args": {
+     "pipette": "left",
+     "labware_nickname": "8"
+    }
+   },
+   {
+    "action": "aspirate",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "3",
+      "position": "B2"
+     }
+    }
+   },
+   {
+    "action": "dispense",
+    "args": {
+     "pipette": "left",
+     "volume_ul": 100,
+     "location": {
+      "labware_nickname": "9",
+      "position": "E12",
+      "top": 2
+     }
+    }
+   },
+   {
+    "action": "blow_out",
+    "args": {
+     "pipette": "left",
+     "location": {
+      "labware_nickname": "9",
+      "position": "E12",
+      "top": 3
+     }
+    }
+   },
+   {
+    "action": "platebalance.read",
+    "args": {
+     "wait_until_stable": true,
+     "timeout_s": 30
+    }
+   },
+   {
+    "action": "drop_tip",
+    "args": {
+     "pipette": "left"
+    }
+   }
+  ],
+  "step_hash": "1f2c880eca8ef708d33c04e8e6d93c92e3ad52f152f18e3a75bda8dfc3f981a8",
+  "status": "failed",
+  "created_at": "2026-10-02T19:16:01.302458Z",
+  "created_by": "assistant",
+  "results": [
+   {
+    "action": "set_flow_rate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:06.002652Z",
+    "finished_at": "2026-10-02T19:19:06.109147Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:06.111145Z",
+    "finished_at": "2026-10-02T19:19:07.935182Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.0897,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:19:08.849603+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:07.937183Z",
+    "finished_at": "2026-10-02T19:19:08.937083Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:08.939092Z",
+    "finished_at": "2026-10-02T19:19:21.709353Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:19:24.767682+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:19:24.767682+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:19:21.711435Z",
+    "finished_at": "2026-10-02T19:19:24.856590Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:24.858590Z",
+    "finished_at": "2026-10-02T19:19:31.442100Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:31.444101Z",
+    "finished_at": "2026-10-02T19:19:35.392706Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:35.393705Z",
+    "finished_at": "2026-10-02T19:19:40.346900Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:40.347900Z",
+    "finished_at": "2026-10-02T19:19:41.991461Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1011,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:19:42.903702+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:41.993458Z",
+    "finished_at": "2026-10-02T19:19:42.990653Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:42.992651Z",
+    "finished_at": "2026-10-02T19:19:55.691048Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:19:58.999265+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:19:58.999265+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:19:55.693152Z",
+    "finished_at": "2026-10-02T19:19:59.096730Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:19:59.098726Z",
+    "finished_at": "2026-10-02T19:20:05.789781Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:05.791780Z",
+    "finished_at": "2026-10-02T19:20:09.706243Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:09.708242Z",
+    "finished_at": "2026-10-02T19:20:14.614281Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:14.616260Z",
+    "finished_at": "2026-10-02T19:20:16.217728Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1016,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:20:17.127770+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:16.219730Z",
+    "finished_at": "2026-10-02T19:20:17.216622Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:17.218621Z",
+    "finished_at": "2026-10-02T19:20:29.919173Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:20:31.537117+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:20:31.537117+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:20:29.921173Z",
+    "finished_at": "2026-10-02T19:20:31.626583Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:31.628583Z",
+    "finished_at": "2026-10-02T19:20:38.200822Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:38.203821Z",
+    "finished_at": "2026-10-02T19:20:41.996514Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:41.998508Z",
+    "finished_at": "2026-10-02T19:20:46.923526Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:46.925525Z",
+    "finished_at": "2026-10-02T19:20:48.531790Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1008,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:20:52.326303+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:48.533787Z",
+    "finished_at": "2026-10-02T19:20:52.434761Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:20:52.436758Z",
+    "finished_at": "2026-10-02T19:21:05.267302Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:21:38.043780+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:21:38.043780+00:00",
+     "attempts": 2
+    },
+    "started_at": "2026-10-02T19:21:05.268293Z",
+    "finished_at": "2026-10-02T19:21:38.138764Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:38.139761Z",
+    "finished_at": "2026-10-02T19:21:44.728036Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:44.730036Z",
+    "finished_at": "2026-10-02T19:21:48.527560Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:48.529562Z",
+    "finished_at": "2026-10-02T19:21:53.300195Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:53.302196Z",
+    "finished_at": "2026-10-02T19:21:54.924970Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.0993,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:21:56.195635+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:54.926971Z",
+    "finished_at": "2026-10-02T19:21:56.304301Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:21:56.306300Z",
+    "finished_at": "2026-10-02T19:22:09.253669Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:22:15.579222+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:22:15.579222+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:22:09.256187Z",
+    "finished_at": "2026-10-02T19:22:15.676373Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:15.678374Z",
+    "finished_at": "2026-10-02T19:22:22.242031Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:22.244030Z",
+    "finished_at": "2026-10-02T19:22:25.987748Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:25.989736Z",
+    "finished_at": "2026-10-02T19:22:30.958818Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:30.960812Z",
+    "finished_at": "2026-10-02T19:22:32.568155Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.102,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:22:33.840189+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:32.570156Z",
+    "finished_at": "2026-10-02T19:22:33.926820Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:33.928817Z",
+    "finished_at": "2026-10-02T19:22:46.561926Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0002,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:22:56.123712+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:22:56.123712+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:22:46.563923Z",
+    "finished_at": "2026-10-02T19:22:56.209163Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:22:56.211158Z",
+    "finished_at": "2026-10-02T19:23:02.833585Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:02.835581Z",
+    "finished_at": "2026-10-02T19:23:06.602739Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:06.604730Z",
+    "finished_at": "2026-10-02T19:23:11.555141Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:11.557133Z",
+    "finished_at": "2026-10-02T19:23:13.161597Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1004,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:23:15.880442+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:13.162598Z",
+    "finished_at": "2026-10-02T19:23:15.968173Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:15.969173Z",
+    "finished_at": "2026-10-02T19:23:28.613495Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:23:30.232209+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:23:30.232209+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:23:28.615579Z",
+    "finished_at": "2026-10-02T19:23:30.333127Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:30.335132Z",
+    "finished_at": "2026-10-02T19:23:36.904387Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:36.906386Z",
+    "finished_at": "2026-10-02T19:23:40.647718Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:40.649306Z",
+    "finished_at": "2026-10-02T19:23:45.599998Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:45.601998Z",
+    "finished_at": "2026-10-02T19:23:47.340684Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1013,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:23:48.612724+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:47.342680Z",
+    "finished_at": "2026-10-02T19:23:48.703929Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:23:48.705930Z",
+    "finished_at": "2026-10-02T19:24:01.385555Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:24:03.000143+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:24:03.000143+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:24:01.387554Z",
+    "finished_at": "2026-10-02T19:24:03.087704Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:03.089703Z",
+    "finished_at": "2026-10-02T19:24:09.743173Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:09.744170Z",
+    "finished_at": "2026-10-02T19:24:13.521139Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:13.522139Z",
+    "finished_at": "2026-10-02T19:24:18.342353Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:18.344355Z",
+    "finished_at": "2026-10-02T19:24:19.980477Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.101,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:24:21.252032+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:19.982475Z",
+    "finished_at": "2026-10-02T19:24:21.339004Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:21.341000Z",
+    "finished_at": "2026-10-02T19:24:34.152184Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:24:35.770907+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:24:35.770907+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:24:34.154185Z",
+    "finished_at": "2026-10-02T19:24:35.857343Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:35.859342Z",
+    "finished_at": "2026-10-02T19:24:42.480652Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:42.482650Z",
+    "finished_at": "2026-10-02T19:24:46.255761Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:46.257760Z",
+    "finished_at": "2026-10-02T19:24:51.092596Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:51.094595Z",
+    "finished_at": "2026-10-02T19:24:52.687742Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1014,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:24:53.956334+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:52.689739Z",
+    "finished_at": "2026-10-02T19:24:54.045367Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:24:54.047367Z",
+    "finished_at": "2026-10-02T19:25:06.863517Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:25:08.476568+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:25:08.476568+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:25:06.865511Z",
+    "finished_at": "2026-10-02T19:25:08.567740Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:08.569737Z",
+    "finished_at": "2026-10-02T19:25:15.312220Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:15.313217Z",
+    "finished_at": "2026-10-02T19:25:19.051764Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:19.052765Z",
+    "finished_at": "2026-10-02T19:25:23.832801Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:23.834799Z",
+    "finished_at": "2026-10-02T19:25:25.445378Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1009,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:25:26.718316+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:25.447375Z",
+    "finished_at": "2026-10-02T19:25:26.809688Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:26.811688Z",
+    "finished_at": "2026-10-02T19:25:39.590177Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:25:46.982336+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:25:46.982336+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:25:39.592176Z",
+    "finished_at": "2026-10-02T19:25:47.068967Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:47.070978Z",
+    "finished_at": "2026-10-02T19:25:53.619461Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:53.621459Z",
+    "finished_at": "2026-10-02T19:25:57.360681Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:25:57.362681Z",
+    "finished_at": "2026-10-02T19:26:02.295343Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:02.297339Z",
+    "finished_at": "2026-10-02T19:26:04.009410Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:26:06.728561+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:04.011409Z",
+    "finished_at": "2026-10-02T19:26:06.817821Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:06.819821Z",
+    "finished_at": "2026-10-02T19:26:19.534887Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:26:21.148605+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:26:21.148605+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:26:19.536886Z",
+    "finished_at": "2026-10-02T19:26:21.235434Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:21.237434Z",
+    "finished_at": "2026-10-02T19:26:27.815839Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:27.817838Z",
+    "finished_at": "2026-10-02T19:26:31.696203Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:31.698201Z",
+    "finished_at": "2026-10-02T19:26:36.551641Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:36.553641Z",
+    "finished_at": "2026-10-02T19:26:38.290746Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1007,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:26:39.558897+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:38.292743Z",
+    "finished_at": "2026-10-02T19:26:39.651221Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:39.653221Z",
+    "finished_at": "2026-10-02T19:26:52.382241Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:26:53.998572+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:26:53.998572+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:26:52.384241Z",
+    "finished_at": "2026-10-02T19:26:54.088764Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:26:54.090305Z",
+    "finished_at": "2026-10-02T19:27:00.670105Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:00.672103Z",
+    "finished_at": "2026-10-02T19:27:04.521979Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:04.522979Z",
+    "finished_at": "2026-10-02T19:27:09.462677Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:09.464676Z",
+    "finished_at": "2026-10-02T19:27:11.062523Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1009,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:27:12.333874+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:11.064518Z",
+    "finished_at": "2026-10-02T19:27:12.434462Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:12.436458Z",
+    "finished_at": "2026-10-02T19:27:25.240193Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0001,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:27:58.017220+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:27:58.017220+00:00",
+     "attempts": 2
+    },
+    "started_at": "2026-10-02T19:27:25.242191Z",
+    "finished_at": "2026-10-02T19:27:58.113582Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:27:58.115582Z",
+    "finished_at": "2026-10-02T19:28:04.864343Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:04.866343Z",
+    "finished_at": "2026-10-02T19:28:08.605875Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:08.607873Z",
+    "finished_at": "2026-10-02T19:28:13.511236Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:13.513234Z",
+    "finished_at": "2026-10-02T19:28:15.101759Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1016,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:28:16.733879+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:15.103758Z",
+    "finished_at": "2026-10-02T19:28:16.823067Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:16.825066Z",
+    "finished_at": "2026-10-02T19:28:29.488732Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": -0.0002,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:28:31.104579+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:28:31.104579+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:28:29.490731Z",
+    "finished_at": "2026-10-02T19:28:31.192530Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:31.194527Z",
+    "finished_at": "2026-10-02T19:28:38.133385Z"
+   },
+   {
+    "action": "aspirate",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:38.135385Z",
+    "finished_at": "2026-10-02T19:28:41.874839Z"
+   },
+   {
+    "action": "dispense",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:41.876838Z",
+    "finished_at": "2026-10-02T19:28:46.755393Z"
+   },
+   {
+    "action": "blow_out",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:46.757393Z",
+    "finished_at": "2026-10-02T19:28:48.395559Z"
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "ok",
+    "message": null,
+    "reading": {
+     "value": 0.1003,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:28:51.116762+00:00"
+    },
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:48.397109Z",
+    "finished_at": "2026-10-02T19:28:51.210184Z"
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "ok",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": "2026-10-02T19:28:51.211183Z",
+    "finished_at": "2026-10-02T19:29:03.938081Z"
+   },
+   {
+    "action": "platebalance.tare",
+    "outcome": "ok",
+    "message": "Stable zero baseline observed after tare",
+    "reading": {
+     "value": 0.0,
+     "unit": "g",
+     "stable": true,
+     "observed_at": "2026-10-02T19:29:05.552851+00:00"
+    },
+    "balance_operation": {
+     "action": "tare",
+     "outcome": "baseline_observed",
+     "at": "2026-10-02T19:29:05.552851+00:00",
+     "attempts": 1
+    },
+    "started_at": "2026-10-02T19:29:03.940080Z",
+    "finished_at": "2026-10-02T19:29:05.652203Z"
+   },
+   {
+    "action": "pick_up_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "aspirate",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "dispense",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "blow_out",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "platebalance.read",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   },
+   {
+    "action": "drop_tip",
+    "outcome": "skipped",
+    "message": null,
+    "reading": null,
+    "balance_operation": null,
+    "started_at": null,
+    "finished_at": null
+   }
+  ],
+  "approval": null,
+  "halt_reason": "approval expired or revoked; review remaining work before continuing",
+  "non_idempotent_actions": [
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip",
+   "platebalance.tare",
+   "pick_up_tip",
+   "aspirate",
+   "dispense",
+   "blow_out",
+   "drop_tip"
+  ],
+  "executable": false,
+  "blocked_reason": "plan C5B-GLbrcj7Q6rII is failed, not approved"
+ }
+]

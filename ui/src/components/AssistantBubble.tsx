@@ -11,6 +11,7 @@ import {
   getAssistantHealth,
   getPlan,
   listPlans,
+  plateReportUrl,
 } from "../lib/api";
 import { moveWindow, resizeWindow } from "../lib/floating-window";
 import { AssistantMarkdown } from "../lib/assistant-markdown";
@@ -924,6 +925,19 @@ function ChatPlanCard({
         >
           {live.status}
         </span>
+        {/* Any plan that recorded a balance weighing gets a per-well heatmap.
+            Read-only, so it is offered whatever the claim or plan status. */}
+        {live.results.some((r) => r.reading) && (
+          <a
+            href={plateReportUrl([live.plan_id])}
+            target="_blank"
+            rel="noopener"
+            className="ml-auto rounded px-2 py-0.5 text-[10px] font-medium text-purple-700 underline-offset-2 hover:bg-purple-100 hover:underline dark:text-purple-300 dark:hover:bg-purple-900/40"
+            title="Open this plan's balance results as an interactive 96-well heatmap"
+          >
+            Plate report
+          </a>
+        )}
       </div>
       <ol className="mb-1 flex flex-col gap-0.5">
         {live.steps.map((s, si) => {
