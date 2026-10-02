@@ -41,6 +41,7 @@ from .plans import PlanStep, PlanStore, StepValidationError
 from .robot_profile import PROFILE, IS_FLEX
 from .documentation import action_catalog, equipment_documentation
 from .assistant_claude import claude_code_authenticated, run_claude_code
+from .plate_report import build_plate_report, summarize_for_agent
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,11 @@ use `in_place=true` as a balance workaround. Balance `touch_tip` is unavailable.
 failed, or aborted. Use `list_plans` to find the plan and `get_plan` for its \
 step results. Report only the status and results actually recorded; records \
 are in memory and disappear on restart.
+- Summarize balance results with `get_plate_report` when asked how a run went \
+or for a plate summary or heatmap. Report the stats and name outlying and \
+unweighed wells; tell the operator the interactive heatmap opens from the \
+plan card's **Plate report** button. Pass a density only if the operator gave \
+one; never assume water.
 
 What you cannot do, and must never imply otherwise:
 - You cannot run anything. `propose_plan` creates a DRAFT. A human reviews, \
@@ -517,6 +523,27 @@ def _tool_schemas() -> List[Dict[str, Any]]:
                 "parameters": {"type": "object", "properties": {}},
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_plate_report",
+                "description": (
+                    "Summarize balance results of one or more executed plans on a 96-well grid: "
+                    "per-well mass, deviation from the mean, mean/SD/CV, and wells not weighed. "
+                    "Combine a run split across plans by listing them in run order. The operator "
+                    "opens the interactive heatmap from the plan card. No robot I/O."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "plan_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                        "labware": {"type": "string", "description": "Labware nickname or slot; default is the first one dispensed into."},
+                        "density_g_per_ml": {"type": "number", "description": "Only if the operator gave one; enables implied volume."},
+                    },
+                    "required": ["plan_ids"],
+                },
+            },
+        },
     ]
 
 
@@ -570,6 +597,10 @@ class Assistant:
             "get_consumables": lambda _a: self._consumables(),
             "list_actions": lambda _a: self._actions(),
             "propose_plan": self._propose,
+            "get_plate_report": lambda a: summarize_for_agent(build_plate_report(
+                [self._plans.get(pid) for pid in a["plan_ids"]],
+                labware=a.get("labware"), density_g_per_ml=a.get("density_g_per_ml"),
+            )),
             "get_plan": lambda a: self._plans.get(a["plan_id"]).model_dump(mode="json"),
             "list_plans": lambda _a: [
                 {
@@ -595,6 +626,15 @@ class Assistant:
                 for plan in self._plans.list()[:20]
             ],
         }
+
+    def _plate_reports_for_context(self) -> List[Dict[str, Any]]:
+        """Per-plan plate summaries for recent plans that recorded a weighing."""
+        out: List[Dict[str, Any]] = []
+        for plan in self._plans.list()[:10]:
+            if not any(r.reading for r in plan.results):
+                continue
+            out.append({"plan_id": plan.plan_id, **summarize_for_agent(build_plate_report([plan]))})
+        return out
 
     def _consumables(self) -> Dict[str, Any]:
         details = self._service.get_status().details
@@ -691,7 +731,10 @@ class Assistant:
             answer = run_claude_code(
                 self._config.claude_code_path, system_prompt,
                 {"messages": messages, "reads": reads,
-                 "current_plans": tools["list_plans"]({})[:10]},
+                 "current_plans": tools["list_plans"]({})[:10],
+                 # No tool calls on this path, so the plate summary the tool
+                 # path gets from get_plate_report is precomputed per plan.
+                 "plate_reports": self._plate_reports_for_context()},
                 self._config.timeout_s, self._cancel_event,
             )
         except InterruptedError as exc:

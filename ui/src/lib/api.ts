@@ -40,6 +40,13 @@ const apiBase: string = (() => {
   return pathname.slice(0, idx + 1) || "/";
 })();
 
+/** Interactive plate heatmap for one or more plans, combined in run order.
+ *  A plain GET the browser opens in a new tab; read-only, no claim needed. */
+export function plateReportUrl(planIds: string[], format: "html" | "xlsx" = "html"): string {
+  const q = planIds.map((id) => `plan_id=${encodeURIComponent(id)}`).join("&");
+  return `${apiBase}plans/plate-report.${format}?${q}`;
+}
+
 function apiUrl(path: string): string {
   // Join without ever producing a leading "//": the browser would read that
   // as a scheme-relative URL (e.g. "//status" -> http://status/). apiBase

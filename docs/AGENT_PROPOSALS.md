@@ -38,8 +38,9 @@ Three properties, each with a test named after it in `tests/unit/test_plans.py`:
 2. **Approval is bound to a claim session, not just a person.** The claim only
    stays alive while the operator's page heartbeats, so "a human approved
    this" decays into "a human is still here". A different tab is a different
-   session and must re-review. Approvals also expire after 10 minutes and are
-   spent on use.
+   session and must re-review. An approval must be *started* within 10 minutes
+   and is spent on use; once running, the plan continues for as long as the
+   approving claim session stays live, however long it takes.
 3. **`allowed_actions` is re-checked live before every step.** A plan approved
    against a ready robot cannot fire into one that has since faulted, paused,
    or been seized by an external run. The first refusal halts the plan and
@@ -57,7 +58,8 @@ protocol schema version and a compiled-package digest, revalidates inventory and
 device readiness, and lands an immutable `authorization_id` in AnaliticaDB.
 
 What this module produces is a **step approval** — one operator, holding the
-claim, agreeing to one ad-hoc step list on one robot for the next ten minutes.
+claim, agreeing to one ad-hoc step list on one robot, to be started within ten
+minutes.
 It covers the work a run authorization does not: bring-up, homing, a manual tip
 pickup, turning the lights off. The two compose; calling both "authorization"
 would conflate a durable scientific record with an ephemeral operator gesture.

@@ -6,13 +6,14 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
@@ -85,6 +86,7 @@ from .plate_state import PlateStateStore
 from .limits import OutOfEnvelope
 from .service import OT2Service, UnknownOutcomeError
 from .tip_state import TipStateStore, TipUnavailable
+from .plate_report import build_plate_report, render_plate_report_html, render_plate_report_xlsx
 
 
 UI_DIST_DIR = Path(__file__).resolve().parent.parent / "ui_dist"
@@ -1126,6 +1128,59 @@ def create_app(
     def list_plans() -> list[dict[str, Any]]:
         return [_plan_view(p) for p in plans.list()]
 
+    def _plate_report(plan_id: list[str], labware: Optional[str], density_g_per_ml: Optional[float]) -> dict[str, Any]:
+        if not plan_id:
+            raise HTTPException(status_code=422, detail="give at least one plan_id")
+        try:
+            selected = [plans.get(pid) for pid in plan_id]
+        except PlanError as exc:
+            raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
+        try:
+            return build_plate_report(selected, labware=labware, density_g_per_ml=density_g_per_ml)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    @app.get("/plans/plate-report", tags=["plans"])
+    def plate_report(
+        plan_id: list[str] = Query(default=[]),
+        labware: Optional[str] = None,
+        density_g_per_ml: Optional[float] = None,
+    ) -> dict[str, Any]:
+        """Per-well balance results of one or more plans on a 96-well grid.
+
+        Read-only, from the in-memory plan records (lost on restart). Plans are
+        combined in the order given, so a run split across plans reads as one
+        plate. No implied volume unless the caller supplies a density.
+        """
+        return _plate_report(plan_id, labware, density_g_per_ml)
+
+    @app.get("/plans/plate-report.html", response_class=HTMLResponse, tags=["plans"])
+    def plate_report_html(
+        plan_id: list[str] = Query(default=[]),
+        labware: Optional[str] = None,
+        density_g_per_ml: Optional[float] = None,
+    ) -> HTMLResponse:
+        """The same report as an interactive, self-contained heatmap page."""
+        report = _plate_report(plan_id, labware, density_g_per_ml)
+        title = f"{service.equipment_id} plate report"
+        return HTMLResponse(render_plate_report_html(report, title=title))
+
+    @app.get("/plans/plate-report.xlsx", tags=["plans"])
+    def plate_report_xlsx(
+        plan_id: list[str] = Query(default=[]),
+        labware: Optional[str] = None,
+        density_g_per_ml: Optional[float] = None,
+    ) -> Response:
+        """The same report as an Excel workbook: summary, mass and deviation
+        plate grids with colour-scale heatmaps, per-well table, weighing log."""
+        report = _plate_report(plan_id, labware, density_g_per_ml)
+        name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{service.equipment_id}_plate_report_{'_'.join(plan_id)}")[:120]
+        return Response(
+            render_plate_report_xlsx(report),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'},
+        )
+
     @app.post("/plans", status_code=201, tags=["plans"])
     def create_plan(request: PlanCreateRequest, http_request: Request) -> dict[str, Any]:
         """Propose a plan. Creates a draft — never touches the robot.
@@ -1303,6 +1358,7 @@ def create_app(
         app.mount("/ui", SPAStaticFiles(directory=UI_DIST_DIR, html=True), name="ui")
 
     app.state.service = service
+    app.state.plans = plans
 
     # Guarded self-heal on process start: probe the robot over HTTP and, only
     # when it's reachable AND idle, re-establish the REPL session in the

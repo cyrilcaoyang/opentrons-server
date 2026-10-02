@@ -169,6 +169,7 @@ def test_no_tool_can_move_the_robot():
         "propose_plan",
         "get_plan",
         "list_plans",
+        "get_plate_report",  # read-only: plan records only, no robot I/O
     }
     for forbidden in (
         "approve_plan",   # the current name
@@ -915,3 +916,22 @@ def test_a_model_outside_the_allowlist_is_refused_not_substituted(monkeypatch, p
     assert resp.status_code == 422
     assert "not offered" in resp.json()["detail"]
     assert calls["sent"] == []
+
+
+def test_plate_report_tool_reads_plan_records_only():
+    import json as _json
+    from pathlib import Path as _Path
+    from opentrons_server.gateway.plans import Plan, PlanStore
+    store = PlanStore()
+    fixture = _Path(__file__).resolve().parent.parent / "fixtures" / "plans_balance_run_split.json"
+    for raw in _json.loads(fixture.read_text()):
+        plan = Plan.model_validate(raw)
+        store._plans[plan.plan_id] = plan
+    service = Mock()
+    assistant = assistant_mod.Assistant.__new__(assistant_mod.Assistant)
+    assistant._service, assistant._plans = service, store
+    out = assistant._tools()["get_plate_report"]({"plan_ids": ["gS0maKvThQsH_p2S", "C5B-GLbrcj7Q6rII"]})
+    assert out["stats"]["n"] == 31
+    assert service.method_calls == []  # no robot or gateway call at all
+    context = assistant._plate_reports_for_context()
+    assert {r["plan_id"] for r in context} == {"gS0maKvThQsH_p2S", "C5B-GLbrcj7Q6rII"}

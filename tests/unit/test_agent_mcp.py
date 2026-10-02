@@ -61,6 +61,10 @@ async def test_exposes_reads_and_proposal_only():
         "revise_plan",
         "get_plan",
         "list_plans",
+        # Read-only plate reports: plan records only, no robot I/O.
+        "get_plate_report",
+        "download_plate_spreadsheet",
+        "plate_report_url",
     }
 
 
@@ -123,3 +127,22 @@ def test_base_url_trailing_slash_does_not_double_up(monkeypatch):
     monkeypatch.setattr(ot2_agent_mcp.requests, "request", capture)
     Gateway("http://host/ot2/complexation/").get("/status")
     assert seen["url"] == "http://host/ot2/complexation/status"
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_tool_saves_only_an_xlsx(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen.update(url=url, params=kwargs.get("params"))
+        return Mock(ok=True, content=b"PK-xlsx")
+
+    monkeypatch.setattr(ot2_agent_mcp.requests, "get", fake_get)
+    server = build_server(Gateway("http://gw"), instance="test")
+    out = tmp_path / "run.xlsx"
+    await server.call_tool("download_plate_spreadsheet", {"plan_ids": ["a", "b"], "path": str(out)})
+    assert out.read_bytes() == b"PK-xlsx"
+    assert seen["url"] == "http://gw/plans/plate-report.xlsx"
+    assert seen["params"] == [("plan_id", "a"), ("plan_id", "b")]
+    with pytest.raises(Exception, match="xlsx"):
+        await server.call_tool("download_plate_spreadsheet", {"plan_ids": ["a"], "path": str(tmp_path / "x.sh")})
