@@ -547,6 +547,8 @@ export function ControlPanel({
   // is `unknown` while the session still exists and only `shutdown` is
   // allowed — deriving "disconnected" from the status offered a startup the
   // gateway refused and hid the one action that gets out of that state.
+  const stopLatched = status.details?.stop_latched === true;
+  const stopConfirmed = status.details?.stop_confirmed === true;
   const canShutdown = allowedActions.includes("shutdown");
   const canStartup = allowedActions.includes("startup");
   const deviceOn = canShutdown || (!canStartup && status.details?.service_state !== "requires_init");
@@ -755,12 +757,14 @@ export function ControlPanel({
               controlHint ??
               (deviceOn
                 ? canShutdown
-                  ? status.equipment_status === "unknown"
-                    ? "Stop not confirmed — inspect the robot, then click to close this session; start a fresh one afterwards"
+                  ? stopLatched
+                    ? "Stopped — inspect the robot, then click to close this session; start a fresh one afterwards"
                     : "Gateway session connected — click to disconnect (does NOT power off the robot)"
                   : "Session busy — shutdown is not available right now"
                 : canStartup
-                  ? "Click to connect & initialize the gateway session"
+                  ? stopLatched
+                    ? "Stopped and closed — click to start a fresh session (clears the stop)"
+                    : "Click to connect & initialize the gateway session"
                   : "Startup is not available right now")
             }
           >
@@ -771,9 +775,12 @@ export function ControlPanel({
               ].join(" ")}
               aria-hidden
             />
-            {deviceOn ? "CONNECTED" : "DISCONNECTED"}
+            {stopLatched
+              ? deviceOn ? "CLOSE SESSION" : "START SESSION"
+              : deviceOn ? "CONNECTED" : "DISCONNECTED"}
           </TileButton>
-          <StatusPill state={status.equipment_status} />
+          <StatusPill state={status.equipment_status}
+            stopped={stopLatched ? (stopConfirmed ? "confirmed" : "unconfirmed") : undefined} />
         </div>
       </header>
 
