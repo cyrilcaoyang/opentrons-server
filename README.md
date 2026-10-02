@@ -292,9 +292,8 @@ cd ui && npm run build   # writes src/opentrons_server/ui_dist/
 ## Chat assistant (optional)
 
 A chat bubble in the operator panel that can read this robot and **propose**
-work on it. Off unless you configure a key: with none, `/assistant/health`
-reports why, the UI renders no bubble, and every other surface behaves exactly
-as before.
+work on it. Off unless you configure a provider key or an authenticated Claude
+Code CLI: otherwise `/assistant/health` reports why and the UI renders no bubble.
 
 It exists so the package stays self-contained — install this gateway alone, with
 no dashboard, no central server and no agent harness, and you still get one.
@@ -309,10 +308,11 @@ over one service instance, so there is no device to select and no shell.
 ### Turning it on
 
 Any OpenAI-compatible endpoint works; OpenRouter is the default. Either put the
-key in the environment, or drop a `.env` at the repo root:
+key in the gateway service environment, or drop a `.env` in that service's
+deploy checkout:
 
 ```bash
-# opentrons-server/.env   (git-ignored)
+# deploy-checkout/.env   (git-ignored)
 OPENROUTER_API_KEY=sk-or-v1-…
 ```
 
@@ -321,18 +321,17 @@ restart. Prefer this to `nssm set … AppEnvironmentExtra`, which **replaces the
 entire variable block**: get it wrong and you wipe the three state paths that
 stop two gateways from overwriting each other's plate and tip records.
 
-> ⚠️ **A repo-root `.env` is shared by every gateway running from this
-> checkout.** Fine for an API key. It cannot supply anything instance-specific
-> — the reader takes an allowlist of assistant settings only, so
-> `OT2_EQUIPMENT_ID`, `OT2_HOST_ALIAS` and the state paths can never come from
-> it. Those stay in each service's own environment.
+Each gateway runs from its own deploy checkout and reads its own `.env`. The
+reader accepts assistant settings only; `OT2_EQUIPMENT_ID`, `OT2_HOST_ALIAS`
+and the state paths stay in each service's environment.
 
 | Setting | Purpose | Default |
 |---|---|---|
 | `OPENROUTER_API_KEY` / `OPENAI_API_KEY` | provider credential; `OPENAI_API_KEY` requires an explicit base URL | unset → off |
-| `OT2_ASSISTANT_MODEL` | any OpenAI-compatible model slug | `deepseek/deepseek-v4.1-flash` |
+| `OT2_ASSISTANT_MODEL` | an offered OpenAI-compatible slug or `claude-sonnet-5-5` for Claude Code | `deepseek/deepseek-v4.1-flash` with an API key; `claude-sonnet-5-5` with only Claude Code |
 | `OT2_ASSISTANT_MODELS` | comma-separated models the chat panel's picker may switch to per turn (the default model is always offered); the gateway refuses any other slug with 422 | OpenRouter: `deepseek/deepseek-v4.1-flash,z-ai/glm-5.3-flash`; custom base URL: none |
 | `OT2_ASSISTANT_BASE_URL` | provider endpoint | OpenRouter |
+| `OT2_ASSISTANT_CLAUDE_PATH` | path to the Claude Code executable, set in the gateway service environment to offer Sonnet 5.5 through that service account's Claude Code login | unset |
 | `OT2_ASSISTANT_ENABLED` | `0` disables it even with a key — per-instance kill switch | `true` |
 | `OT2_ASSISTANT_MAX_TOKENS` / `_TIMEOUT_S` | per-reply cap, per-request wallclock | 4096 / 60 s |
 | `OT2_ENV_FILE` | explicit `.env` path | `./.env` |
@@ -342,8 +341,25 @@ When using `OPENAI_API_KEY`, set `OT2_ASSISTANT_BASE_URL` and a model supported
 by that provider explicitly; the gateway will not send that key to OpenRouter
 by default. Invalid numeric assistant settings disable chat with a diagnostic
 from `/assistant/health` while the device service stays available.
-A shared `.env` can carry the key while one instance turns itself off with
-`OT2_ASSISTANT_ENABLED=0` in its own service environment.
+A service-local `.env` can carry the key while that instance turns itself off
+with `OT2_ASSISTANT_ENABLED=0` in its service environment.
+
+To offer Claude Code's Sonnet 5.5, install Claude Code on the **gateway host**,
+authenticate the account that runs that gateway service, and set its
+`OT2_ASSISTANT_CLAUDE_PATH` to the executable. A login in an operator's RDP
+account does not authenticate the LocalService process. The gateway checks
+`claude auth status`, then runs `claude -p --model claude-sonnet-5-5` with
+built-in tools, MCP servers and session persistence disabled. It supplies the
+robot reads and validates any proposed steps through the same draft-plan gate.
+Claude Code does not use the OpenRouter key. An explicit `OT2_ASSISTANT_MODELS`
+list replaces the defaults; include `claude-sonnet-5-5` to offer it alongside
+other models. This path is service-local and does not belong in the shared
+repo `.env`.
+
+While a streamed reply is pending, **Stop reply** cancels its gateway turn and
+closes the browser stream. Claude Code's child process is terminated; a draft
+created before cancellation remains visible in the plans list for review.
+This control does not stop robot motion or an executing plan.
 
 **Pick a model that supports tool calling.** The assistant works by choosing a
 verb from the plan catalog and filling in its schema. Nous Hermes models on

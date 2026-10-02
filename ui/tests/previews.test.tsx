@@ -1,5 +1,5 @@
 import "./browser";
-import { formatApiDetail } from "../src/lib/api";
+import { assistantChatStream, cancelAssistantChat, formatApiDetail } from "../src/lib/api";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readdirSync, readFileSync } from "node:fs";
@@ -43,6 +43,57 @@ test("chat window moves inside the viewport and resizes from every corner", () =
     { left: 16, top: 16, right: 476, bottom: 536 });
   assert.deepEqual(moveWindow(rect, 1000, 1000, 1200, 900),
     { left: 724, top: 364, right: 1184, bottom: 884 });
+});
+
+test("assistant stream stops reading after cancellation", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  const events: string[] = [];
+  let requestSignal: AbortSignal | undefined;
+  let requestBody: unknown;
+  Object.assign(globalThis, { fetch: async (_url: string, init: RequestInit) => {
+    requestSignal = init.signal ?? undefined;
+    requestBody = JSON.parse(String(init.body));
+    const body = new ReadableStream<Uint8Array>({ start(stream) {
+      stream.enqueue(new TextEncoder().encode('data: {"type":"thinking","round":1}\n\n'));
+      requestSignal?.addEventListener("abort", () =>
+        stream.error(new DOMException("Stopped", "AbortError")), { once: true });
+    } });
+    return new Response(body, { status: 200 });
+  } });
+  try {
+    await assert.rejects(
+      assistantChatStream([{ role: "user", content: "status" }], null, (event) => {
+        events.push(event.type);
+        controller.abort();
+      }, null, controller.signal, "a".repeat(32)),
+      (error: unknown) => error instanceof DOMException && error.name === "AbortError",
+    );
+    assert.equal(requestSignal, controller.signal);
+    assert.equal((requestBody as { request_id: string }).request_id, "a".repeat(32));
+    assert.deepEqual(events, ["thinking"]);
+  } finally {
+    Object.assign(globalThis, { fetch: originalFetch });
+  }
+});
+
+test("assistant stop sends its request ID through the claim gate", async () => {
+  const originalFetch = globalThis.fetch;
+  let sent: { url: string; init: RequestInit } | null = null;
+  Object.assign(globalThis, { fetch: async (url: string, init: RequestInit) => {
+    sent = { url, init };
+    return new Response('{"canceled":true}', { status: 200,
+      headers: { "Content-Type": "application/json" } });
+  } });
+  try {
+    assert.deepEqual(await cancelAssistantChat("b".repeat(32), "claim-token"), { canceled: true });
+    assert.ok(sent);
+    assert.equal(sent.url, "/assistant/chat/cancel");
+    assert.equal((sent.init.headers as Record<string, string>)["X-Claim-Token"], "claim-token");
+    assert.deepEqual(JSON.parse(String(sent.init.body)), { request_id: "b".repeat(32) });
+  } finally {
+    Object.assign(globalThis, { fetch: originalFetch });
+  }
 });
 
 test("camera window resizes from every corner with a compact minimum", () => {

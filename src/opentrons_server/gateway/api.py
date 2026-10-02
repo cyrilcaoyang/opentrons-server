@@ -13,6 +13,7 @@ from typing import Any, Literal, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
 
@@ -57,6 +58,8 @@ from .models import (
 )
 from .assistant import (
     Assistant,
+    AssistantCancelRequest,
+    AssistantCancelled,
     AssistantChatRequest,
     AssistantConfig,
     AssistantDisabled,
@@ -280,6 +283,8 @@ def create_app(
     # gate in AGENTIC_ELN_DESIGN.md §12. See gateway/plans.py.)
     plans = PlanStore()
     executor = PlanExecutor(service, plans)
+    active_assistants: dict[str, Assistant] = {}
+    active_assistants_lock = threading.Lock()
 
     app = FastAPI(
         title="Opentrons OT-2 Gateway",
@@ -961,14 +966,15 @@ def create_app(
         if require_login:
             _require_identity(http_request)
         config = AssistantConfig.from_env()
-        unavailable = config.unavailable_reason()
+        try:
+            selected = config.with_model(model)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        unavailable = selected.unavailable_reason()
         if unavailable:
             raise HTTPException(status_code=503, detail=unavailable)
         require_claim(http_request, http_request.headers.get("X-Claim-Token"))
-        try:
-            return config.with_model(model)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+        return selected
 
     @app.get("/assistant/health", tags=["assistant"])
     def assistant_health() -> dict[str, Any]:
@@ -1036,13 +1042,27 @@ def create_app(
         """
         config = _assistant_config_for_request(http_request, request.model)
         messages = [m.model_dump() for m in request.messages]
+        assistant = Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
+            http_request, http_request.headers.get("X-Claim-Token")
+        ))
+        if request.request_id:
+            with active_assistants_lock:
+                if request.request_id in active_assistants:
+                    raise HTTPException(status_code=409, detail="assistant request ID is already active")
+                active_assistants[request.request_id] = assistant
+
+        def cleanup() -> None:
+            if request.request_id:
+                with active_assistants_lock:
+                    if active_assistants.get(request.request_id) is assistant:
+                        del active_assistants[request.request_id]
 
         def events() -> Any:
             try:
-                for event in Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
-                    http_request, http_request.headers.get("X-Claim-Token")
-                )).chat_events(messages):
+                for event in assistant.chat_events(messages):
                     yield f"data: {json.dumps(event, default=str)}\n\n"
+            except AssistantCancelled:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Assistant reply stopped.'})}\n\n"
             except AssistantDisabled as exc:
                 yield f"data: {json.dumps({'type': 'error', 'message': exc.reason})}\n\n"
             except (ClaimHTTPError, HTTPException):
@@ -1054,6 +1074,8 @@ def create_app(
                     "message": f"assistant request failed ({type(exc).__name__})",
                 }
                 yield f"data: {json.dumps(body, default=str)}\n\n"
+            finally:
+                cleanup()
 
         return StreamingResponse(
             events(),
@@ -1062,7 +1084,21 @@ def create_app(
                 "Cache-Control": "no-cache",
                 "X-Accel-Buffering": "no",
             },
+            background=BackgroundTask(cleanup),
         )
+
+    @app.post("/assistant/chat/cancel", tags=["assistant"])
+    def assistant_chat_cancel(request: AssistantCancelRequest, http_request: Request) -> dict[str, bool]:
+        """Stop one in-flight assistant reply; it never touches a robot plan."""
+        if require_login:
+            _require_identity(http_request)
+        require_claim(http_request, http_request.headers.get("X-Claim-Token"))
+        with active_assistants_lock:
+            assistant = active_assistants.get(request.request_id)
+        if assistant is None:
+            return {"canceled": False}
+        assistant.cancel()
+        return {"canceled": True}
 
     @app.get("/plans/actions", tags=["plans"])
     def plan_actions() -> dict[str, Any]:
