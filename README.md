@@ -346,9 +346,9 @@ with `OT2_ASSISTANT_ENABLED=0` in its service environment.
 
 To offer Claude Code's Sonnet 5.5, install Claude Code on the **gateway host**,
 authenticate the account that runs that gateway service, and set its
-`OT2_ASSISTANT_CLAUDE_PATH` to the executable. A login in an operator's RDP
-account does not authenticate the LocalService process. The gateway checks
-`claude auth status`, then runs `claude -p --model claude-sonnet-5-5` with
+`OT2_ASSISTANT_CLAUDE_PATH` to the executable. The login must belong to the
+service account; Complexation now runs as `.\sdl2`, like HTE. The gateway
+checks `claude auth status`, then runs `claude -p --model claude-sonnet-5-5` with
 built-in tools, MCP servers and session persistence disabled. It supplies the
 robot reads and validates any proposed steps through the same draft-plan gate.
 Claude Code does not use the OpenRouter key. An explicit `OT2_ASSISTANT_MODELS`

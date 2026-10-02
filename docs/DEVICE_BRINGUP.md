@@ -50,11 +50,12 @@ identity (`ot2training`, serial `weathered-dream`) with the required
 `Opentrons-Version: *` header. A headerless health request can return HTTP 422
 and must not be mistaken for an unreachable robot.
 
-Complexation runs from its own deploy checkout as LocalService, using the venv
-Python directly. Install both `labware` and `platebalance` extras without an
-elevated uv sync. Its WZB254-N local peripheral uses COM3; settings are in the
-instance's `OT2_PLATEBALANCE_CONFIG` file. The former Cytation gateway service
-remains disabled for rollback. Never start both gateway instances together.
+Complexation runs from its own deploy checkout as `.\sdl2` (since 2026-10-02),
+using the venv Python directly. Install both `labware` and `platebalance`
+extras without an elevated uv sync. Its WZB254-N local peripheral uses COM3;
+settings are in the instance's `OT2_PLATEBALANCE_CONFIG` file. The former
+Cytation gateway service remains disabled for rollback. Never start both
+gateway instances together.
 
 The older UPLC portproxy rules (`31951` to the USB robot and `31952` to HTE's
 wired address) are not required by the new Complexation gateway. They were not
