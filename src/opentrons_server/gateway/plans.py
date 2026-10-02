@@ -90,10 +90,14 @@ from .models import (
     WellUpdateRequest,
 )
 
-# How long an approval stays good. Short on purpose: it is a standing
-# permission to move a robot, and the operator who granted it is expected to be
-# watching. The claim-session binding (rule 2 above) is the primary guard; this
-# is the backstop for a page that keeps heartbeating in an empty room.
+# How long an approval stays good *to start* the plan. Short on purpose: it is
+# a standing permission to move a robot, and the operator who granted it is
+# expected to be watching. Once execution has started, the approval covers the
+# whole run for as long as the approving claim session stays live — a 225-step
+# balance plan halted mid-run at exactly this many seconds on 2026-10-02 when
+# the window was also checked before every step. The claim-session binding
+# (rule 2 above) is the guard during a run: the claim lapses within its own
+# short TTL once the panel stops heartbeating, and the next step then halts.
 APPROVAL_TTL_S = 600.0
 
 
@@ -666,9 +670,16 @@ class PlanExecutor:
             time.sleep(0.2)
 
     def _assert_live_approval(self, plan: Plan) -> None:
+        """Before each step: the approval still exists and its claim is live.
+
+        The approval's start window is not re-checked here. It was enforced by
+        ``check_executable`` when execution began; applying it per step killed
+        any plan that ran longer than the window. A revoked approval (cleared
+        by abort, revise, or stop) still halts at the next step.
+        """
         auth = plan.approval
-        if auth is None or auth.expired():
-            raise PlanStateError("approval expired or revoked; review remaining work before continuing")
+        if auth is None:
+            raise PlanStateError("approval revoked; review remaining work before continuing")
         live = self._service.claims.current()
         if (live is None or live.expires_at <= datetime.now(timezone.utc)
                 or live.session_id != auth.session_id or live.owner != auth.owner):

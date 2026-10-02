@@ -306,8 +306,10 @@ not survive a restart, so an approval must not either.
    discarded by design.
 3. **`POST /plans/{plan_id}/approve`** `{step_hash}` — the human gate.
    Claim-gated. The hash must match what the reviewer was shown; a mismatch is
-   **409**. The approval records the claim's owner and session and expires
-   after **600 s**.
+   **409**. The approval records the claim's owner and session; execution
+   must start within **600 s**. A started plan is not cut off by that window:
+   it halts only if the approving claim session lapses, the approval is
+   revoked, a step fails, or the device refuses the next step.
 4. **`POST /plans/{plan_id}/execute`** — claim-gated, and the live claim must
    be the *same owner and session* that approved. Runs one step at a time,
    re-checking `allowed_actions` before **every** step, so a plan approved

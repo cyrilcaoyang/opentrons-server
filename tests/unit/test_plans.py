@@ -228,6 +228,52 @@ def test_execution_requires_the_same_claim_session_that_approved():
     assert store.check_executable(plan.plan_id, claimed_by=_claimed_by("sess-1"))
 
 
+def test_a_running_plan_outlives_the_approval_start_window():
+    """Live halt 2026-10-02: a 225-step plan stopped at step 111, 600 s after
+    approval, because the start window was checked before every step."""
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = _approved(store, "lights.set", "plate.unload")
+
+    def slow_first_step(_on):
+        # The run is now past the window; the claim session is still live.
+        plan.approval.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+    service.set_lights.side_effect = slow_first_step
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+    assert done.status == "executed"
+    service.unload_plate.assert_called_once()
+
+
+def test_a_running_plan_still_halts_when_its_claim_session_goes():
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = _approved(store, "lights.set", "plate.unload")
+    service.set_lights.side_effect = lambda _on: setattr(
+        service.claims.current, "return_value", None)  # panel closed, claim lapsed
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+    assert done.status == "failed"
+    assert "no longer holds a live claim" in done.halt_reason
+    service.unload_plate.assert_not_called()
+
+
+def test_a_running_plan_halts_when_its_approval_is_revoked():
+    store = PlanStore()
+    service = Mock()
+    service.claims.current.return_value = _claimed_by()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = _approved(store, "lights.set", "plate.unload")
+    service.set_lights.side_effect = lambda _on: setattr(plan, "approval", None)
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+    assert done.status == "failed"
+    assert "revoked" in done.halt_reason
+    service.unload_plate.assert_not_called()
+
+
 def test_expired_approval_falls_back_to_draft():
     """A standing permission to move a robot should not outlive the operator's
     attention. On expiry the plan reverts to draft rather than lingering."""
