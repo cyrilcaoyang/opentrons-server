@@ -272,6 +272,14 @@ export const postSetTempmod = (
 export const postDeactivateTempmod = (token: string | null, module?: string) =>
   controlPost("tempmod/deactivate", module ? { module } : {}, token);
 
+/** Drop the tip on `pipette` ("left" / "right" or a recipe nickname) into the
+ *  fixed trash. No location on purpose: an explicit rack+well is a tip return,
+ *  and the trash is not addressable labware. Also the recovery when the robot
+ *  believes a tip is on a head the operator sees bare — the run engine's own
+ *  record clears with the drop. */
+export const postDropTip = (token: string | null, pipette: string) =>
+  controlPost("drop-tip", { pipette }, token);
+
 /** Mark every tip in the rack on `slot` fresh again — the operator asserting a
  *  physical refill. Never inferred: the gateway cannot observe new tips being
  *  put in, and guessing wrong claims tips that aren't there. Addressed by slot

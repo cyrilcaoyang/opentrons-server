@@ -12,6 +12,7 @@ import {
   postStop,
   postResume,
   postReconcile,
+  postDropTip,
   postSetLights,
   postSetTempmod,
   postDeactivateTempmod,
@@ -66,15 +67,6 @@ import { PANEL_STYLE, PANEL_HEADING_STYLE } from "./panel-styles";
    `currentColor` — so a disabled or danger-variant button would keep a full
    colour glyph. `currentColor` + `aria-hidden` keeps them tinted by the
    button variant and silent to screen readers, which read the ariaLabel. */
-function PauseGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden>
-      <rect x="1" y="0.5" width="3" height="9" rx="0.5" />
-      <rect x="6" y="0.5" width="3" height="9" rx="0.5" />
-    </svg>
-  );
-}
-
 function PlayGlyph() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden>
@@ -550,10 +542,14 @@ export function ControlPanel({
   const lightsRaw = components["lights"]?.state;
   const lightsOn = lightsRaw === "on";
   const lightsKnown = lightsRaw === "on" || lightsRaw === "off";
-  // Gateway session state for the CONNECTED toggle: anything but
-  // requires_init / unknown counts as connected (ready/busy while up).
-  const deviceOn =
-    status.equipment_status !== "requires_init" && status.equipment_status !== "unknown";
+  // Gateway session state for the CONNECTED toggle. Follow what the gateway
+  // advertises (§6.2), not equipment_status: after a software stop the status
+  // is `unknown` while the session still exists and only `shutdown` is
+  // allowed — deriving "disconnected" from the status offered a startup the
+  // gateway refused and hid the one action that gets out of that state.
+  const canShutdown = allowedActions.includes("shutdown");
+  const canStartup = allowedActions.includes("startup");
+  const deviceOn = canShutdown || (!canStartup && status.details?.service_state !== "requires_init");
 
   const selectedView = selectedSlot != null ? buildSlotView(selectedSlot, deviceDeck, {}) : null;
   const selectedDeclare = selectedSlot != null ? (declaredMap[String(selectedSlot)] ?? null) : null;
@@ -753,13 +749,19 @@ export function ControlPanel({
                 ? runControl("shutdown", () => postShutdown(token))
                 : runControl("startup", () => postStartup(token))
             }
-            disabled={locked || pending}
+            disabled={locked || pending || !(canShutdown || canStartup)}
             variant={deviceOn ? "primary" : "default"}
             title={
               controlHint ??
               (deviceOn
-                ? "Gateway session connected — click to disconnect (does NOT power off the robot)"
-                : "Click to connect & initialize the gateway session")
+                ? canShutdown
+                  ? status.equipment_status === "unknown"
+                    ? "Stop not confirmed — inspect the robot, then click to close this session; start a fresh one afterwards"
+                    : "Gateway session connected — click to disconnect (does NOT power off the robot)"
+                  : "Session busy — shutdown is not available right now"
+                : canStartup
+                  ? "Click to connect & initialize the gateway session"
+                  : "Startup is not available right now")
             }
           >
             <span
@@ -932,10 +934,10 @@ export function ControlPanel({
             >
               HOME
             </TileButton>
-            {/* Transport-control glyphs rather than words: they are the two
-                narrowest buttons in the strip and the symbols are universal.
-                Icon-only, so each carries an ariaLabel — a title alone is not
-                exposed to a screen reader as an accessible name.
+            {/* Pause is a word, play a glyph: "||" read as two bars, not as
+                pause, to operators on the bench. Play carries an ariaLabel —
+                a title alone is not exposed to a screen reader as an
+                accessible name.
 
                 Neither is tinted at rest. Pause was `danger` red, which read as
                 a warning on an idle robot and made the strip look alarmed when
@@ -967,7 +969,7 @@ export function ControlPanel({
                       : "Nothing to pause")
               }
             >
-              <PauseGlyph />
+              PAUSE
             </TileButton>
             <TileButton
               onClick={() => runControl("resume", () => postResume(token))}
@@ -990,6 +992,10 @@ export function ControlPanel({
                 {isPaused ? "Paused" : "Pausing…"}
               </span>
             )}
+            {/* Second line: things that are not run control — lights, camera,
+                and clearing a head — so the top line stays HOME / STOP /
+                PAUSE / play and nothing else. */}
+            <div className="h-0 basis-full" aria-hidden />
             <TileButton
               onClick={() => runControl("lights.set", () => postSetLights(token, !lightsOn))}
               disabled={locked || pending}
@@ -1014,6 +1020,28 @@ export function ControlPanel({
               Light
             </TileButton>
             <CameraControl stream={status.equipment_id === "ot2_complexation" ? "cam_echem_tapo_c100_main" : undefined} />
+            {/* One per attached pipette. Drops into the fixed trash with no
+                location, which is also the recovery when the robot's run
+                engine believes a tip is on a head the operator sees bare: the
+                engine's record clears with the drop. Gated on the gateway's
+                own allowed_actions, like every other robot action here. */}
+            {(["left", "right"] as const)
+              .filter((mount) => components[`pipette_${mount}`]?.connected)
+              .map((mount, _i, attached) => (
+                <TileButton
+                  key={mount}
+                  onClick={() => runControl("drop_tip", () => postDropTip(token, mount))}
+                  disabled={locked || pending || !allowedActions.includes("drop_tip")}
+                  title={
+                    controlHint ??
+                    (allowedActions.includes("drop_tip")
+                      ? `Drop the ${mount} pipette's tip into the fixed trash. Also clears the robot's own tip record if it believes a tip is on when the head is bare.`
+                      : "Drop tip is not available in the current state")
+                  }
+                >
+                  {attached.length > 1 ? `DROP TIP ${mount === "left" ? "L" : "R"}` : "DROP TIP"}
+                </TileButton>
+              ))}
           </div>
 
 
