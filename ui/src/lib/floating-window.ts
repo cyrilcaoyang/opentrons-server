@@ -7,6 +7,12 @@ export interface WindowRect {
   bottom: number;
 }
 
+export interface ResizeLimits {
+  margin?: number;
+  minWidth?: number;
+  minHeight?: number;
+}
+
 const MARGIN = 16;
 
 function clamp(value: number, min: number, max: number): number {
@@ -23,22 +29,24 @@ export function moveWindow(rect: WindowRect, dx: number, dy: number,
 }
 
 export function resizeWindow(rect: WindowRect, corner: Corner, dx: number, dy: number,
-                             viewportWidth: number, viewportHeight: number): WindowRect {
-  const minWidth = Math.min(320, viewportWidth - 2 * MARGIN);
-  const minHeight = Math.min(360, viewportHeight - 2 * MARGIN);
+                             viewportWidth: number, viewportHeight: number,
+                             limits: ResizeLimits = {}): WindowRect {
+  const margin = limits.margin ?? MARGIN;
+  const minWidth = Math.min(limits.minWidth ?? 320, viewportWidth - 2 * margin);
+  const minHeight = Math.min(limits.minHeight ?? 360, viewportHeight - 2 * margin);
   const west = corner.endsWith("w");
   const north = corner.startsWith("n");
   const left = west
-    ? clamp(rect.left + dx, MARGIN, rect.right - minWidth)
+    ? clamp(rect.left + dx, margin, rect.right - minWidth)
     : rect.left;
   const right = west
     ? rect.right
-    : clamp(rect.right + dx, rect.left + minWidth, viewportWidth - MARGIN);
+    : clamp(rect.right + dx, rect.left + minWidth, viewportWidth - margin);
   const top = north
-    ? clamp(rect.top + dy, MARGIN, rect.bottom - minHeight)
+    ? clamp(rect.top + dy, margin, rect.bottom - minHeight)
     : rect.top;
   const bottom = north
     ? rect.bottom
-    : clamp(rect.bottom + dy, rect.top + minHeight, viewportHeight - MARGIN);
+    : clamp(rect.bottom + dy, rect.top + minHeight, viewportHeight - margin);
   return { left, top, right, bottom };
 }

@@ -116,6 +116,10 @@ class BalanceReferenceTimeout(BalanceStabilityTimeout):
     """Tare was sent, but a stable zero baseline was not observed in time."""
 
 
+class BalanceNoFrame(TimeoutError):
+    """A weight query returned no bytes before its serial read timeout."""
+
+
 _TARE_ZERO_TOLERANCE_G = 0.0002  # Two WZB254-N display increments.
 
 
@@ -174,6 +178,8 @@ def matterlab_driver(config: PlateBalanceConfig) -> Any:
                     self.device.write_timeout = min(config.timeout, timeout_s)
                 # read_until already waits for a complete frame; no fixed delay.
                 response = self.query("\x1bP\r\n", num_bytes=64, read_delay=0)
+                if response == "":
+                    raise BalanceNoFrame("Balance returned no weight frame")
                 return parse_weight(response)
             finally:
                 self.device.timeout = previous_timeout
@@ -283,12 +289,26 @@ class PlateBalanceV1:
                     # fresh, stable near-zero values before the next plan step.
                     deadline = time.monotonic() + request.timeout_s
                     consecutive = 0
+                    no_frame_seen = False
                     while True:
                         if time.monotonic() >= deadline:
+                            if no_frame_seen:
+                                raise TimeoutError(
+                                    f"Tare sent, but no frame was available at the {request.timeout_s:g} s deadline"
+                                )
                             raise BalanceReferenceTimeout(
                                 f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"
                             )
-                        stable, weight = observe(deadline)
+                        try:
+                            stable, weight = observe(deadline)
+                        except BalanceNoFrame:
+                            # The scale can be silent while its tare is still
+                            # settling. Keep the robot stationary and query
+                            # again, but never resend the reference command.
+                            no_frame_seen = True
+                            time.sleep(min(0.25, max(0, deadline - time.monotonic())))
+                            continue
+                        no_frame_seen = False
                         if time.monotonic() >= deadline:
                             raise BalanceReferenceTimeout(
                                 f"Tare sent, but stable zero was not observed within {request.timeout_s:g} s"

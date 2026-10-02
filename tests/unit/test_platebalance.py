@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 
-from opentrons_server.gateway.platebalance import BalancePipettingGeometry, BalanceReferenceTimeout, BalanceStabilityTimeout, PlateBalanceConfig, PlateBalanceRequest, PlateBalanceV1, parse_weight
+from opentrons_server.gateway.platebalance import BalanceNoFrame, BalancePipettingGeometry, BalanceReferenceTimeout, BalanceStabilityTimeout, PlateBalanceConfig, PlateBalanceRequest, PlateBalanceV1, parse_weight
 from opentrons_server.gateway.advanced import BlowOutRequest
 from opentrons_server.gateway.limits import OutOfEnvelope
 from opentrons_server.gateway.models import DispenseRequest, MoveToRequest, WellLocation
@@ -144,9 +144,13 @@ def test_driver_wire_commands_use_distinct_tare_and_zero_without_open_on_init(mo
     transport.read_until.return_value = b"+     12.3456 g  \r\n"
     driver.device = transport
     assert driver._weigh() == (True, 12.3456)
+    transport.read_until.return_value = b""
+    with pytest.raises(BalanceNoFrame, match="no weight frame"):
+        driver._weigh()
     driver.set_reference("tare")
     driver.set_reference("zero")
-    assert [call.args[0] for call in transport.write.call_args_list] == [b"\x1bP\r\n", b"\x1bU\r\n", b"\x1bV\r\n"]
+    assert [call.args[0] for call in transport.write.call_args_list] == [
+        b"\x1bP\r\n", b"\x1bP\r\n", b"\x1bU\r\n", b"\x1bV\r\n"]
     assert transport.close.call_count >= 3
 
 
@@ -280,6 +284,30 @@ def test_tare_timeout_halts_before_dosing_and_preserves_last_reading(tmp_path, b
     assert service.platebalance.snapshot()["last_operation"]["outcome"] == "baseline_unconfirmed"
     assert service.platebalance.snapshot()["reading"]["value"] == 1.0
     assert service.state == OT2ServiceState.READY
+
+
+def test_tare_waits_through_empty_weight_frames_without_resending(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    driver._weigh.side_effect = [BalanceNoFrame("Balance returned no weight frame"),
+                                 (False, 0.01), BalanceNoFrame("Balance returned no weight frame"),
+                                 (True, 0.0), (True, 0.0001)]
+    result = service.platebalance_action("tare", PlateBalanceRequest(timeout_s=3))
+    assert result["last_operation"]["outcome"] == "baseline_observed"
+    assert result["reading"]["value"] == 0.0001
+    assert driver._weigh.call_count == 5
+    driver.set_reference.assert_called_once_with("tare")
+    assert service.state == OT2ServiceState.READY
+
+
+def test_tare_with_only_empty_frames_latches_unknown_outcome(tmp_path, balance_clock):
+    service, driver, _ = make_service(tmp_path)
+    driver._weigh.side_effect = BalanceNoFrame("Balance returned no weight frame")
+    with pytest.raises(UnknownOutcomeError, match="no frame"):
+        service.platebalance_action("tare", PlateBalanceRequest(timeout_s=1))
+    driver.set_reference.assert_called_once_with("tare")
+    assert driver._weigh.call_count > 1
+    assert service.platebalance.snapshot()["last_operation"]["outcome"] == "unknown_outcome"
+    assert service.state == OT2ServiceState.UNKNOWN_OUTCOME
 
 
 def test_tare_holds_command_lock_until_stable_baseline(tmp_path, balance_clock):

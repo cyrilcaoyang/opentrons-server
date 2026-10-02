@@ -142,7 +142,9 @@ lab-skills / dashboard / agents          this repo                        robot
   `platebalance.read`, `platebalance.tare`, and `platebalance.zero` can be
   proposed as plan steps. Read returns a timestamped measurement; tare/zero
   are non-idempotent. Tare waits up to 30 seconds for two stable near-zero
-  readings and halts a plan if they are absent; Zero remains `sent_unconfirmed`.
+  readings and halts a plan if they are absent. Empty serial frames during
+  tare are retried within that wait without resending tare; persistent silence
+  latches `unknown_outcome`. Zero remains `sent_unconfirmed`.
   See
   `docs/PLATEBALANCE_V1.md`.
 - **Module placement:** the panel has no module assignment controls. Assign, move,

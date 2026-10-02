@@ -45,6 +45,21 @@ test("chat window moves inside the viewport and resizes from every corner", () =
     { left: 724, top: 364, right: 1184, bottom: 884 });
 });
 
+test("camera window resizes from every corner with a compact minimum", () => {
+  const rect = { left: 100, top: 80, right: 580, bottom: 390 };
+  const limits = { margin: 8, minWidth: 240, minHeight: 180 };
+  assert.deepEqual(resizeWindow(rect, "nw", -30, -20, 1200, 900, limits),
+    { left: 70, top: 60, right: 580, bottom: 390 });
+  assert.deepEqual(resizeWindow(rect, "ne", 30, -20, 1200, 900, limits),
+    { left: 100, top: 60, right: 610, bottom: 390 });
+  assert.deepEqual(resizeWindow(rect, "sw", -30, 20, 1200, 900, limits),
+    { left: 70, top: 80, right: 580, bottom: 410 });
+  assert.deepEqual(resizeWindow(rect, "se", 30, 20, 1200, 900, limits),
+    { left: 100, top: 80, right: 610, bottom: 410 });
+  assert.deepEqual(resizeWindow(rect, "nw", 1000, 1000, 1200, 900, limits),
+    { left: 340, top: 210, right: 580, bottom: 390 });
+});
+
 test("manual panel provides increments, speed, XYZ copy and stays disarmed initially", () => {
   const html = renderToStaticMarkup(<ManualPipettePanel token="claim" locked={false} offline={false}
     allowedActions={["jog", "pipette_position", "move_to", "stop"]}
@@ -326,7 +341,7 @@ test("balance has three claim-gated controls and never becomes a native module d
   const html = renderToStaticMarkup(<PlateBalanceControls balance={balance} disabled={true}
     allowedActions={["platebalance.read", "platebalance.tare", "platebalance.zero"]} onAction={() => {}} />);
   for (const label of ["Weight", "Tare", "Zero"]) assert.match(html, new RegExp(`disabled=""[^>]*>${label}</button>`));
-  assert.match(html, /Wait until stable/);
+  assert.match(html, /Weight read: wait until stable/);
   assert.match(html, /checked=""/);
   const deck: DeviceDeck = { slots: { "9": { labware: null, module: { module_name: "platebalanceV1", local_peripheral: true }, source: "declared", slot_state: "declared" } } } as DeviceDeck;
   assert.deepEqual(declarationPayload(deck), {});

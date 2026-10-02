@@ -176,6 +176,11 @@ then queries the balance under the same command lock until two stable values
 within 0.0002 g of zero are observed; this verifies the baseline, not receipt
 of a serial acknowledgment. The manufacturer's default setting tares after
 stability, so vibration from nearby robot motion can delay the baseline. A
+weight query may return no frame during this wait; the gateway retries
+only those empty reads within the 30-second wait and never sends tare again.
+If no frame is available at the deadline, the outcome remains unknown and the
+gateway requires operator reconciliation. Malformed nonempty frames fail
+immediately. A valid but unsettled baseline times out as `baseline_unconfirmed`.
 gateway robot command cannot run during the tare wait. Park the robot and let
 motion settle before starting a tare; the gateway cannot stop motion commanded
 outside its own session. A timeout stops the plan before any following
