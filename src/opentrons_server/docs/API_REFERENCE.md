@@ -230,14 +230,15 @@ Plans live in memory and die with the process. Errors map as: `PlanNotFound`
 
 ## Assistant — optional in-page chat
 
-A proposer, not a driver: its only write tool is `propose_plan`. Off unless an
-API key is configured.
+A proposer, not a driver: its only write tool is `propose_plan`. Off unless a
+provider key or an authenticated Claude Code CLI is configured.
 
 | method + path | gate | body | responses / notes |
 |---|---|---|---|
 | `GET /assistant/health` | open | — | `{configured, reason, model, key_source, env_file_searched}`. Never the key or provider URL. |
 | `POST /assistant/chat` | claim (+ identity when required) | `{messages: [{role: "user"\|"assistant", content}]}` — 1–40 messages, content ≤ 8000 chars | **503** when not configured; **502** on a provider failure; **423** without a claim |
-| `POST /assistant/chat/stream` | claim (+ identity when required) | same | `text/event-stream` of tool-boundary events (never model reasoning). Access is validated **before** the stream opens, so 401/403/423/503 keep their normal status; a provider failure after that arrives as a terminal `error` event. |
+| `POST /assistant/chat/stream` | claim (+ identity when required) | same, with optional 32-character hex `request_id` for cancellation | `text/event-stream` of tool-boundary events (never model reasoning). Access is validated **before** the stream opens, so 401/403/423/503 keep their normal status; a provider failure after that arrives as a terminal `error` event. |
+| `POST /assistant/chat/cancel` | claim (+ identity when required) | `{request_id}` | Sets cancellation for the matching in-flight assistant turn. Returns `{canceled: boolean}`. It never stops robot motion or aborts an approved plan. |
 
 ## Refusal codes
 

@@ -314,7 +314,7 @@ export interface AssistantReply {
 export interface AssistantToolProgress {
   id: string;
   name: string;
-  status: "running" | "succeeded" | "failed";
+  status: "running" | "succeeded" | "failed" | "canceled";
   error?: string;
 }
 

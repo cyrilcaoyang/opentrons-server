@@ -17,9 +17,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opentrons_server.gateway import assistant as assistant_mod
+from opentrons_server.gateway import assistant_claude as claude_mod
 from opentrons_server.gateway.api import create_app
 from opentrons_server.gateway.assistant import (
     Assistant,
+    AssistantCancelled,
     AssistantConfig,
     AssistantDisabled,
     _tool_schemas,
@@ -638,6 +640,167 @@ def test_flex_prompt_does_not_assume_ot2_fixed_trash(monkeypatch):
 # ---------------------------------------------------------------------------
 # Operator-selectable model
 # ---------------------------------------------------------------------------
+
+
+def test_claude_code_subscription_is_a_separate_model_choice(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OT2_ASSISTANT_CLAUDE_PATH", "/opt/claude")
+    monkeypatch.setattr(assistant_mod.shutil, "which", lambda path: path)
+    monkeypatch.setattr(assistant_mod, "claude_code_authenticated", lambda _: True)
+
+    config = AssistantConfig.from_env()
+    assert config.model == "claude-sonnet-5-5"
+    assert config.choices == ("claude-sonnet-5-5",)
+    assert config.unavailable_reason() is None
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k-test")
+    with_openrouter = AssistantConfig.from_env()
+    assert with_openrouter.model == assistant_mod.DEFAULT_MODEL
+    assert "claude-sonnet-5-5" in with_openrouter.choices
+    assert with_openrouter.with_model("claude-sonnet-5-5").unavailable_reason() is None
+
+
+def test_claude_code_unavailable_for_an_unauthenticated_service_account(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OT2_ASSISTANT_CLAUDE_PATH", "/opt/claude")
+    monkeypatch.setattr(assistant_mod.shutil, "which", lambda path: path)
+    monkeypatch.setattr(assistant_mod, "claude_code_authenticated", lambda _: False)
+
+    config = AssistantConfig.from_env()
+    assert config.model == "claude-sonnet-5-5"
+    assert "not authenticated" in config.unavailable_reason()
+
+
+def test_claude_code_still_rejects_bad_timeout(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OT2_ASSISTANT_CLAUDE_PATH", "/opt/claude")
+    monkeypatch.setenv("OT2_ASSISTANT_TIMEOUT_S", "nan")
+    monkeypatch.setattr(assistant_mod.shutil, "which", lambda path: path)
+    monkeypatch.setattr(assistant_mod, "claude_code_authenticated", lambda _: True)
+
+    assert "TIMEOUT_S" in AssistantConfig.from_env().unavailable_reason()
+
+
+def test_claude_code_can_run_when_openai_key_has_no_provider(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OT2_ASSISTANT_BASE_URL", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "unused-key")
+    monkeypatch.setenv("OT2_ASSISTANT_CLAUDE_PATH", "/opt/claude")
+    monkeypatch.setattr(assistant_mod.shutil, "which", lambda path: path)
+    monkeypatch.setattr(assistant_mod, "claude_code_authenticated", lambda _: True)
+
+    config = AssistantConfig.from_env()
+    assert config.model == "claude-sonnet-5-5"
+    assert config.choices == ("claude-sonnet-5-5",)
+    assert config.unavailable_reason() is None
+
+
+def test_claude_code_runs_without_builtin_tools_or_persisted_session(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-be-used")
+
+    def fake_run(command, **kwargs):
+        captured.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "structured_output": {"reply": "The balance is ready.", "steps": []},
+        }))
+
+    monkeypatch.setattr(claude_mod.subprocess, "run", fake_run)
+    result = claude_mod.run_claude_code(
+        "/opt/claude", "You may only propose drafts.", {"messages": []}, 60,
+    )
+    assert result == {"reply": "The balance is ready.", "steps": []}
+    assert captured["command"][:4] == ["/opt/claude", "-p", "--model", "claude-sonnet-5-5"]
+    assert captured["command"][captured["command"].index("--tools") + 1] == ""
+    assert {"--safe-mode", "--strict-mcp-config", "--no-session-persistence"} <= set(captured["command"])
+    assert captured["kwargs"]["input"] == '{"messages": []}'
+    assert "ANTHROPIC_API_KEY" not in captured["kwargs"]["env"]
+
+
+def test_claude_code_rejects_an_api_key_login(monkeypatch):
+    monkeypatch.setattr(claude_mod.subprocess, "run", lambda *_args, **_kwargs:
+                        SimpleNamespace(returncode=0, stdout=json.dumps({
+                            "loggedIn": True, "authMethod": "apiKey", "apiProvider": "firstParty",
+                        })))
+    assert claude_mod.claude_code_authenticated("/opt/claude") is False
+
+
+def test_claude_code_timeout_is_reported_clearly(monkeypatch):
+    import subprocess
+    def timed_out(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired("claude", 12)
+    monkeypatch.setattr(claude_mod.subprocess, "run", timed_out)
+    with pytest.raises(TimeoutError, match="did not reply within 12 seconds"):
+        claude_mod.run_claude_code("/opt/claude", "test", {"messages": []}, 12)
+
+
+def test_cancel_kills_the_claude_code_process(monkeypatch):
+    import subprocess
+    import threading
+
+    canceled = threading.Event()
+
+    class FakeClaudeProcess:
+        killed = False
+        returncode = -9
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def poll(self):
+            return -9 if self.killed else None
+
+        def kill(self):
+            self.killed = True
+
+        def communicate(self, **_kwargs):
+            if self.killed:
+                return "", ""
+            canceled.set()
+            raise subprocess.TimeoutExpired("claude", 0.25)
+
+    process = FakeClaudeProcess()
+    monkeypatch.setattr(claude_mod.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    with pytest.raises(InterruptedError, match="stopped"):
+        claude_mod.run_claude_code("/opt/claude", "test", {"messages": []}, 12, canceled)
+    assert process.killed
+
+
+def test_claude_code_can_only_create_a_validated_draft(monkeypatch):
+    monkeypatch.setattr(assistant_mod, "run_claude_code", lambda *_args: {
+        "reply": "I proposed a draft for approval.",
+        "steps": [{"action": "comment", "args": {"message": "test draft"}}],
+    })
+    config = _config(api_key=None, model="claude-sonnet-5-5",
+                     claude_code_path="/opt/claude", claude_code_ready=True)
+    plans = PlanStore()
+    result = Assistant(OT2Service(dry_run=True), plans, config).chat([
+        {"role": "user", "content": "propose a comment"},
+    ])
+    assert result["plan_id"] is not None
+    assert plans.get(result["plan_id"]).status == "draft"
+    assert result["tools_used"][-1] == "propose_plan"
+
+
+def test_cancel_before_claude_proposal_creates_no_draft(monkeypatch):
+    def stopped_before_proposal(_path, _system, _context, _timeout, cancel_event):
+        cancel_event.set()
+        return {"reply": "draft", "steps": [{"action": "comment", "args": {"message": "no"}}]}
+
+    monkeypatch.setattr(assistant_mod, "run_claude_code", stopped_before_proposal)
+    config = _config(api_key=None, model="claude-sonnet-5-5",
+                     claude_code_path="/opt/claude", claude_code_ready=True)
+    plans = PlanStore()
+    with pytest.raises(AssistantCancelled):
+        Assistant(OT2Service(dry_run=True), plans, config).chat([
+            {"role": "user", "content": "propose a comment"},
+        ])
+    assert plans.list() == []
 
 
 def test_health_offers_the_default_model_choices_first(monkeypatch):

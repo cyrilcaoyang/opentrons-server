@@ -6,10 +6,9 @@ central server and no agent harness. This module keeps that true for the chat
 box: install the package alone and you get one, without installing anything
 else.
 
-**Optional, and off unless configured.** With no API key the assistant reports
-itself disabled, the UI hides the bubble, and every other surface behaves
-exactly as before. The ``openai`` import is deliberately soft for the same
-reason: a venv without it still serves a healthy gateway.
+**Optional, and off unless configured.** With no provider key or configured
+Claude Code CLI the assistant reports itself disabled. The ``openai`` import
+is deliberately soft so a venv without it still serves a healthy gateway.
 
 **It cannot move the robot.** Its entire tool surface is reads plus
 ``propose_plan`` — the same door an agent harness comes through
@@ -30,6 +29,8 @@ import json
 import logging
 import math
 import os
+import shutil
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
@@ -39,6 +40,7 @@ from pydantic import BaseModel, Field
 from .plans import PlanStep, PlanStore, StepValidationError
 from .robot_profile import PROFILE, IS_FLEX
 from .documentation import action_catalog, equipment_documentation
+from .assistant_claude import claude_code_authenticated, run_claude_code
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 # the empty-reply nudge below is what keeps a spent token budget from
 # surfacing as a silent "…".
 DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash"
+CLAUDE_CODE_MODEL = "claude-sonnet-5-5"
 
 # What the operator may pick in the chat panel when OT2_ASSISTANT_MODELS is
 # unset. An allowlist, never free text: the chat endpoint is reachable by
@@ -175,6 +178,10 @@ class AssistantDisabled(Exception):
         self.reason = reason
 
 
+class AssistantCancelled(Exception):
+    """The operator stopped this assistant turn."""
+
+
 # Settings a `.env` file may supply. An allowlist, not a general loader, and
 # the reason is specific to this deployment: the file lives at the repo root,
 # which BOTH gateway instances share. A general loader would let it provide an
@@ -276,6 +283,8 @@ class AssistantConfig:
     # Other models an operator may switch to per turn. ``model`` is always
     # allowed as well; see ``choices``.
     alternatives: Tuple[str, ...] = ()
+    claude_code_path: Optional[str] = None
+    claude_code_ready: bool = False
 
     @property
     def choices(self) -> Tuple[str, ...]:
@@ -334,33 +343,53 @@ class AssistantConfig:
         except (TypeError, ValueError):
             configuration_error = "OT2_ASSISTANT_TIMEOUT_S must be a positive finite number"
         listed = setting("OT2_ASSISTANT_MODELS")
+        configured_claude = os.environ.get("OT2_ASSISTANT_CLAUDE_PATH")
+        claude_path = shutil.which(configured_claude) if configured_claude else None
+        claude_ready = bool(claude_path and claude_code_authenticated(claude_path))
+        provider_ready = bool(key and (key_name != "OPENAI_API_KEY" or base_url))
         if listed:
-            alternatives = tuple(m.strip() for m in listed.split(",") if m.strip())
-        elif not base_url:
-            alternatives = DEFAULT_MODEL_CHOICES
+            alternatives = tuple(
+                m for item in listed.split(",") if (m := item.strip())
+                and ((m == CLAUDE_CODE_MODEL and claude_ready)
+                     or (m != CLAUDE_CODE_MODEL and provider_ready))
+            )
+        elif not base_url and provider_ready:
+            alternatives = (*DEFAULT_MODEL_CHOICES, *((CLAUDE_CODE_MODEL,) if claude_ready else ()))
         else:
-            alternatives = ()
+            alternatives = (CLAUDE_CODE_MODEL,) if claude_ready else ()
+        model_default = DEFAULT_MODEL if provider_ready else CLAUDE_CODE_MODEL if configured_claude else DEFAULT_MODEL
         return cls(
             enabled=(setting("OT2_ASSISTANT_ENABLED", "true") or "true").lower()
             not in {"0", "false", "no", "off"},
             api_key=key,
-            model=setting("OT2_ASSISTANT_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL,
+            model=setting("OT2_ASSISTANT_MODEL", model_default) or model_default,
             base_url=base_url or DEFAULT_BASE_URL,
             max_tokens=max_tokens,
             timeout_s=timeout_s,
             key_source=source,
             configuration_error=configuration_error,
             alternatives=alternatives,
+            claude_code_path=claude_path,
+            claude_code_ready=claude_ready,
         )
 
     def unavailable_reason(self) -> Optional[str]:
         """Why the assistant cannot run, or None when it can."""
         if not self.enabled:
             return "assistant disabled (OT2_ASSISTANT_ENABLED=0)"
+        if self.configuration_error and (
+            self.model != CLAUDE_CODE_MODEL
+            or not self.configuration_error.startswith("OPENAI_API_KEY requires")
+        ):
+            return self.configuration_error
+        if self.model == CLAUDE_CODE_MODEL:
+            if not self.claude_code_path:
+                return "Claude Code CLI is not configured (set OT2_ASSISTANT_CLAUDE_PATH)"
+            if not self.claude_code_ready:
+                return "Claude Code is not authenticated for the gateway service account"
+            return None
         if not self.api_key:
             return "no API key configured (set OPENROUTER_API_KEY)"
-        if self.configuration_error:
-            return self.configuration_error
         try:
             import openai  # noqa: F401
         except ImportError:
@@ -502,6 +531,23 @@ class Assistant:
         self._plans = plans
         self._config = config
         self._ensure_authorized = ensure_authorized
+        self._cancel_event = threading.Event()
+        self._client: Any = None
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+        client = self._client
+        if client is not None:
+            try:
+                client.close()
+            except Exception as exc:
+                logger.warning("could not close canceled assistant client (%s)", type(exc).__name__)
+
+    def _ensure_active(self) -> None:
+        if self._cancel_event.is_set():
+            raise AssistantCancelled()
+        if self._ensure_authorized:
+            self._ensure_authorized()
 
     # -- tools -------------------------------------------------------------
 
@@ -599,6 +645,74 @@ class Assistant:
             return refusal
         return ""
 
+    def _chat_claude_events(self, messages: List[Dict[str, str]]) -> Iterator[Dict[str, Any]]:
+        """Supply read-only context to Claude Code and validate its draft here."""
+        tools = self._tools()
+        used: List[str] = []
+        reads: Dict[str, Any] = {}
+        yield {"type": "thinking", "round": 1}
+        for index, name in enumerate((
+            "get_status", "get_deck", "get_consumables", "list_actions", "get_equipment_docs",
+        ), start=1):
+            self._ensure_active()
+            event_id = f"1:claude-read-{index}"
+            yield {"type": "tool_started", "id": event_id, "name": name}
+            reads[name] = tools[name]({})
+            used.append(name)
+            yield {"type": "tool_finished", "id": event_id, "name": name,
+                   "success": True, "error": None}
+
+        self._ensure_active()
+        yield {"type": "thinking", "round": 2}
+        system_prompt = _SYSTEM_PROMPT.format(
+            robot_model=PROFILE.model,
+            trash_guidance=(
+                "Flex has no assumed fixed trash: register a physically present bin or name an explicit drop well."
+                if IS_FLEX else "propose drop_tip with only the pipette when its fixed trash is registered."
+            ),
+        ) + (
+            "\nFor this turn, the gateway has supplied the read results below. "
+            "You have no tools. Return a JSON reply and an ordered steps array. "
+            "Use an empty steps array if you cannot safely propose a plan. "
+            "A nonempty steps array creates only a draft, subject to gateway validation "
+            "and operator approval. Say clearly when a draft awaits approval."
+        )
+        assert self._config.claude_code_path is not None
+        try:
+            answer = run_claude_code(
+                self._config.claude_code_path, system_prompt,
+                {"messages": messages, "reads": reads,
+                 "current_plans": tools["list_plans"]({})[:10]},
+                self._config.timeout_s, self._cancel_event,
+            )
+        except InterruptedError as exc:
+            raise AssistantCancelled() from exc
+        self._ensure_active()
+        plan_id: Optional[str] = None
+        reply = answer["reply"].strip()
+        if answer["steps"]:
+            self._ensure_active()
+            used.append("propose_plan")
+            event_id = "2:claude-proposal"
+            yield {"type": "tool_started", "id": event_id, "name": "propose_plan"}
+            self._ensure_active()
+            proposal = self._propose({"steps": answer["steps"]})
+            error = proposal.get("error")
+            yield {"type": "tool_finished", "id": event_id, "name": "propose_plan",
+                   "success": error is None, "error": error}
+            if error:
+                reply = f"I could not create that draft: {error}"
+            else:
+                plan_id = proposal["plan_id"]
+                if not reply:
+                    reply = "I proposed a draft for your review and approval."
+        yield {"type": "complete", "result": {
+            "reply": reply or "Claude Code returned no reply or draft.",
+            "tools_used": used,
+            "plan_id": plan_id,
+            "model": CLAUDE_CODE_MODEL,
+        }}
+
     # -- the turn ----------------------------------------------------------
 
     def chat_events(self, messages: List[Dict[str, str]]) -> Iterator[Dict[str, Any]]:
@@ -614,6 +728,10 @@ class Assistant:
         if reason:
             raise AssistantDisabled(reason)
 
+        if self._config.model == CLAUDE_CODE_MODEL:
+            yield from self._chat_claude_events(messages)
+            return
+
         from openai import OpenAI
 
         client = OpenAI(
@@ -621,6 +739,7 @@ class Assistant:
             api_key=self._config.api_key,
             timeout=self._config.timeout_s,
         )
+        self._client = client
         try:
             tools = self._tools()
             convo: List[Dict[str, Any]] = [{"role": "system", "content": _SYSTEM_PROMPT.format(
@@ -645,8 +764,7 @@ class Assistant:
             empty_nudges = 0
 
             for round_index in range(self.MAX_TOOL_ROUNDS):
-                if self._ensure_authorized:
-                    self._ensure_authorized()
+                self._ensure_active()
                 yield {"type": "thinking", "round": round_index + 1}
                 response = client.chat.completions.create(
                     model=self._config.model,
@@ -655,6 +773,7 @@ class Assistant:
                     max_tokens=self._config.max_tokens,
                 )
                 choice = response.choices[0].message
+                self._ensure_active()
                 calls = getattr(choice, "tool_calls", None) or []
                 if not calls:
                     text = self._message_text(choice)
@@ -696,8 +815,7 @@ class Assistant:
                     }
                 )
                 for call in calls:
-                    if self._ensure_authorized:
-                        self._ensure_authorized()
+                    self._ensure_active()
                     name = call.function.name
                     used.append(name)
                     event_id = f"{round_index + 1}:{call.id}"
@@ -715,7 +833,10 @@ class Assistant:
                         result: Any = {"error": f"unknown tool {name!r}"}
                     else:
                         try:
+                            self._ensure_active()
                             result = fn(args)
+                        except AssistantCancelled:
+                            raise
                         except Exception as exc:  # surfaced to the model, not the operator
                             logger.warning("assistant tool %s failed: %s", name, exc)
                             result = {"error": str(exc)}
@@ -756,6 +877,7 @@ class Assistant:
                 },
             }
         finally:
+            self._client = None
             client.close()
 
     def chat(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -788,3 +910,8 @@ class AssistantChatRequest(BaseModel):
     # One of /assistant/health's ``models``; omitted means the configured
     # default. Anything else is refused with 422, never substituted.
     model: Optional[str] = Field(None, min_length=1, max_length=200)
+    request_id: Optional[str] = Field(None, pattern=r"^[a-f0-9]{32}$")
+
+
+class AssistantCancelRequest(BaseModel):
+    request_id: str = Field(pattern=r"^[a-f0-9]{32}$")

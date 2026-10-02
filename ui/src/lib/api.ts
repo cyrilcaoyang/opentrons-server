@@ -348,8 +348,8 @@ export function listPlans(): Promise<Plan[]> {
 
 /** One plan — used by the chat bubble to show, read-only, the steps it just
  *  proposed, so the operator sees what was drafted without leaving the chat. */
-export function getPlan(planId: string): Promise<Plan> {
-  return fetchJson<Plan>(`/plans/${encodeURIComponent(planId)}`);
+export function getPlan(planId: string, signal?: AbortSignal): Promise<Plan> {
+  return fetchJson<Plan>(`/plans/${encodeURIComponent(planId)}`, { signal });
 }
 
 /** Approve one exact step list. `stepHash` must be the digest the operator was
@@ -423,14 +423,18 @@ export async function assistantChatStream(
   onEvent: (event: AssistantProgressEvent) => void,
   /** One of /assistant/health's `models`; omitted uses the gateway default. */
   model?: string | null,
+  signal?: AbortSignal,
+  requestId?: string,
 ): Promise<AssistantReply> {
   const path = "/assistant/chat/stream";
   const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: withToken(token),
+    signal,
     body: JSON.stringify({
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
       ...(model ? { model } : {}),
+      ...(requestId ? { request_id: requestId } : {}),
     }),
   });
   if (!res.ok) throw await apiErrorFromResponse(res, path);
@@ -468,6 +472,18 @@ export async function assistantChatStream(
   if (buffer.trim()) consumeRecord(buffer);
   if (!completed) throw new Error("assistant stream ended without a completion");
   return completed;
+}
+
+/** Cancel an in-flight assistant turn on the gateway. This never stops robot motion. */
+export function cancelAssistantChat(
+  requestId: string, token: string | null, signal?: AbortSignal,
+): Promise<{ canceled: boolean }> {
+  return fetchJson<{ canceled: boolean }>("/assistant/chat/cancel", {
+    method: "POST",
+    headers: withToken(token),
+    signal,
+    body: JSON.stringify({ request_id: requestId }),
+  });
 }
 
 

@@ -5,6 +5,7 @@ import {
   abortPlan,
   approvePlan,
   assistantChatStream,
+  cancelAssistantChat,
   deletePlan,
   executePlan,
   getAssistantHealth,
@@ -95,6 +96,8 @@ export function AssistantBubble({
   const [failedMessageIndex, setFailedMessageIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const activeRequest = useRef<{ controller: AbortController; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toolProgress, setToolProgress] = useState<AssistantToolProgress[]>([]);
   const toolProgressRef = useRef<AssistantToolProgress[]>([]);
@@ -214,6 +217,23 @@ export function AssistantBubble({
     }
   }, []);
 
+  const stopReply = useCallback(async () => {
+    const active = activeRequest.current;
+    if (!active || active.controller.signal.aborted) return;
+    setStopping(true);
+    setProgressLabel("Stopping…");
+    const cancelController = new AbortController();
+    const cancelTimeout = window.setTimeout(() => cancelController.abort(), 5000);
+    try {
+      await cancelAssistantChat(active.id, claim.token, cancelController.signal);
+    } catch {
+      setError("Gateway cancellation could not be confirmed.");
+    } finally {
+      window.clearTimeout(cancelTimeout);
+      active.controller.abort();
+    }
+  }, [claim.token]);
+
   useEffect(() => {
     // One probe on mount. If the gateway has no assistant this component then
     // costs nothing for the rest of the session.
@@ -245,6 +265,10 @@ export function AssistantBubble({
   const send = useCallback(async (resendText?: string, resendIndex?: number) => {
     const text = (resendText ?? draft).trim();
     if (!text || pending) return;
+    const controller = new AbortController();
+    const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+      (byte) => byte.toString(16).padStart(2, "0")).join("");
+    activeRequest.current = { controller, id: requestId };
     const retryFailed = resendIndex === failedMessageIndex && resendIndex === thread.length - 1;
     const next = [...(retryFailed ? thread.slice(0, -1) : thread),
       { role: "user" as const, content: text }];
@@ -252,6 +276,7 @@ export function AssistantBubble({
     setFailedMessageIndex(null);
     setDraft("");
     setPending(true);
+    setStopping(false);
     setError(null);
     toolProgressRef.current = [];
     setToolProgress([]);
@@ -266,6 +291,7 @@ export function AssistantBubble({
     };
 
     const onProgress = (event: AssistantProgressEvent) => {
+      if (controller.signal.aborted) return;
       if (event.type === "thinking") {
         setProgressLabel(
           toolProgressRef.current.length > 0 ? "Reviewing tool results…" : "Thinking…",
@@ -300,14 +326,17 @@ export function AssistantBubble({
         claim.token,
         onProgress,
         model,
+        controller.signal,
+        requestId,
       );
+      if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       // Fetch the steps of any plan it drafted so the operator sees what was
       // proposed *in the chat*. Best-effort: a failed fetch just omits the
       // inline preview rather than failing the turn.
       let steps: PlanStep[] | undefined;
       if (res.plan_id) {
         try {
-          const plan = await getPlan(res.plan_id);
+          const plan = await getPlan(res.plan_id, controller.signal);
           steps = plan.steps;
           // Seed the live card immediately — approvable without a reopen.
           setPlanStates((s) => ({ ...s, [plan.plan_id]: plan }));
@@ -315,6 +344,7 @@ export function AssistantBubble({
           /* preview is a nicety; the card degrades read-only without it */
         }
       }
+      if (controller.signal.aborted) throw new DOMException("Stopped", "AbortError");
       const tools = toolProgressRef.current;
       setThread((t) => [
         ...t,
@@ -334,6 +364,19 @@ export function AssistantBubble({
       setToolProgress([]);
       setProgressLabel(null);
     } catch (err) {
+      if (controller.signal.aborted) {
+        const tools = toolProgressRef.current.map((tool) =>
+          tool.status === "running" ? { ...tool, status: "canceled" as const } : tool,
+        );
+        setThread((t) => [...t, { role: "assistant", content: "Reply stopped.", tools }]);
+        // A draft may have been created just before cancellation. The regular
+        // poll will catch it too, but refresh now so it can be reviewed.
+        void listPlans().then(setAllPlans).catch(() => {});
+        toolProgressRef.current = [];
+        setToolProgress([]);
+        setProgressLabel(null);
+        return;
+      }
       // The turn failed, so no assistant message is appended — showing an
       // empty bubble would read as the assistant having said nothing rather
       // than as the request never landing.
@@ -360,7 +403,9 @@ export function AssistantBubble({
       ]);
       setProgressLabel(null);
     } finally {
+      if (activeRequest.current?.controller === controller) activeRequest.current = null;
       setPending(false);
+      setStopping(false);
     }
   }, [draft, pending, thread, failedMessageIndex, claim.token, model]);
 
@@ -532,7 +577,7 @@ export function AssistantBubble({
           <button
             type="button"
             onClick={clearThread}
-            disabled={thread.length === 0}
+            disabled={thread.length === 0 || pending}
             className="rounded border border-slate-300 px-2 py-1 text-[11px] font-medium text-ink-subtle transition hover:bg-slate-100 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
             aria-label="Clear the conversation"
             title="Clear the conversation"
@@ -682,13 +727,25 @@ export function AssistantBubble({
             }
             className="flex-1 resize-none rounded border border-slate-300 bg-white px-2 py-1 text-sm text-ink shadow-inner focus:border-purple-500 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
-          <button
-            type="submit"
-            disabled={pending || !draft.trim()}
-            className="self-stretch rounded bg-purple-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
-          >
-            Send
-          </button>
+          {pending ? (
+            <button
+              type="button"
+              onClick={() => void stopReply()}
+              disabled={stopping}
+              aria-label="Stop assistant reply"
+              className="self-stretch rounded bg-slate-700 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {stopping ? "Stopping…" : "Stop reply"}
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!draft.trim()}
+              className="self-stretch rounded bg-purple-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
+            >
+              Send
+            </button>
+          )}
         </div>
         {model && models.length > 1 ? (
           <label className="mt-1 flex items-center justify-center gap-1 text-[10px] text-ink-subtle dark:text-slate-500">
@@ -737,6 +794,8 @@ const TOOL_TONE: Record<AssistantToolProgress["status"], string> = {
     "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300",
   failed:
     "border-rose-400 bg-rose-100 text-rose-900 dark:border-rose-700 dark:bg-rose-950/60 dark:text-rose-200",
+  canceled:
+    "border-slate-300 bg-slate-100 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300",
 };
 
 function toolLabel(name: string): string {
@@ -760,7 +819,7 @@ function ToolPills({
             TOOL_TONE[tool.status]
           } ${tool.status === "running" ? "animate-pulse" : ""}`}
         >
-          {tool.status === "running" ? "↻" : tool.status === "succeeded" ? "✓" : "×"}{" "}
+          {tool.status === "running" ? "↻" : tool.status === "succeeded" ? "✓" : tool.status === "canceled" ? "■" : "×"}{" "}
           {toolLabel(tool.name)}
         </span>
       ))}
