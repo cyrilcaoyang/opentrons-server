@@ -14,6 +14,7 @@ from opentrons_server.gateway.plans import Plan
 from opentrons_server.gateway.plate_report import (
     build_plate_report,
     render_plate_report_html,
+    render_plate_report_xlsx,
     summarize_for_agent,
 )
 
@@ -110,3 +111,38 @@ def test_routes_serve_json_and_html_for_stored_plans():
         assert client.get("/plans/plate-report?plan_id=nope").status_code == 404
         assert client.get(f"/plans/plate-report?{ids}&density_g_per_ml=-1").status_code == 422
 
+
+
+def test_xlsx_is_a_valid_workbook_with_plate_heatmaps():
+    import io
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    data = render_plate_report_xlsx(build_plate_report(_plans(), density_g_per_ml=1.0))
+    z = zipfile.ZipFile(io.BytesIO(data))
+    for name in z.namelist():
+        if name.endswith((".xml", ".rels")):
+            ET.fromstring(z.read(name))  # every part is well-formed
+    ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    book = ET.fromstring(z.read("xl/workbook.xml"))
+    assert [s.get("name") for s in book.find("m:sheets", ns)] == ["Summary", "Mass", "Deviation", "Wells", "Weighings"]
+    mass = ET.fromstring(z.read("xl/worksheets/sheet2.xml"))
+    cells = {c.get("r"): c for c in mass.iter(f"{{{ns['m']}}}c")}
+    assert cells["E4"].find("m:v", ns).text == "0.1007"  # C4: row C is sheet row 4, column 4 is E
+    assert cells["M8"].find("m:v", ns) is None             # E12 never ran
+    assert mass.find("m:conditionalFormatting", ns).get("sqref") == "B2:M9"
+    weighings = ET.fromstring(z.read("xl/worksheets/sheet5.xml"))
+    assert len(weighings.findall(".//m:row", ns)) == 1 + 31
+
+
+def test_xlsx_route_is_an_attachment():
+    app = create_app(dry_run=True, auto_reconnect=False, enforce_claims=False)
+    plans = [Plan.model_validate(p) for p in _plans()]
+    with TestClient(app) as client:
+        for plan in plans:
+            app.state.plans._plans[plan.plan_id] = plan
+        resp = client.get("/plans/plate-report.xlsx?" + "&".join(f"plan_id={p.plan_id}" for p in plans))
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("application/vnd.openxmlformats")
+        assert resp.headers["content-disposition"].startswith('attachment; filename="')
+        assert resp.content[:2] == b"PK"

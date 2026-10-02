@@ -14,11 +14,14 @@ is computed only when the caller supplies a density.
 from __future__ import annotations
 
 import html
+import io
 import json
+import zipfile
 import math
 import re
 import statistics
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
+from xml.sax.saxutils import escape as _xml_escape
 
 ROWS = "ABCDEFGH"
 COLUMNS = list(range(1, 13))
@@ -209,8 +212,147 @@ def summarize_for_agent(report: Dict[str, Any]) -> Dict[str, Any]:
                   for name, c in report["wells"].items()},
         "unattributed_readings": len(report["unattributed_readings"]),
         "excluded_deliveries": len(report["excluded_deliveries"]),
-        "interactive_report": "The operator opens the interactive heatmap from the plan card's Plate report button.",
+        "interactive_report": ("The operator opens the interactive heatmap from the plan card's Plate report "
+                               "button and downloads the Excel workbook from its Spreadsheet button."),
     }
+
+
+def _col(n: int) -> str:
+    out = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        out = chr(65 + r) + out
+    return out
+
+
+def _cell(ref: str, value: Any, *, style: int = 0) -> str:
+    st = f' s="{style}"' if style else ""
+    if value is None or value == "":
+        return f'<c r="{ref}"{st}/>'
+    if isinstance(value, bool):
+        return f'<c r="{ref}" t="b"{st}><v>{int(value)}</v></c>'
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return f'<c r="{ref}"{st}><v>{value!r}</v></c>'
+    text = _xml_escape(str(value))
+    return f'<c r="{ref}" t="inlineStr"{st}><is><t xml:space="preserve">{text}</t></is></c>'
+
+
+def _sheet(rows: Sequence[Sequence[Any]], *, header_rows: int = 1, header_cols: int = 0,
+           heatmap: Optional[str] = None, diverging: bool = False, widths: Sequence[float] = ()) -> str:
+    body = []
+    for r, row in enumerate(rows, start=1):
+        cells = "".join(_cell(f"{_col(c)}{r}", v, style=1 if (r <= header_rows or c <= header_cols) else 0)
+                        for c, v in enumerate(row, start=1))
+        body.append(f'<row r="{r}">{cells}</row>')
+    cols = "".join(f'<col min="{i}" max="{i}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths, start=1))
+    cf = ""
+    if heatmap:
+        scale = ('<cfvo type="min"/><cfvo type="num" val="0"/><cfvo type="max"/>'
+                 '<color rgb="FF2563EB"/><color rgb="FFF1F5F9"/><color rgb="FFDC2626"/>') if diverging else (
+                 '<cfvo type="min"/><cfvo type="max"/><color rgb="FFEDE9FE"/><color rgb="FF6D28D9"/>')
+        cf = (f'<conditionalFormatting sqref="{heatmap}"><cfRule type="colorScale" priority="1">'
+              f'<colorScale>{scale}</colorScale></cfRule></conditionalFormatting>')
+    return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            + (f"<cols>{cols}</cols>" if cols else "")
+            + f'<sheetData>{"".join(body)}</sheetData>{cf}</worksheet>')
+
+
+def render_plate_report_xlsx(report: Dict[str, Any]) -> bytes:
+    """The report as an Excel workbook, standard library only.
+
+    Sheets: Summary, Mass (plate grid, colour-scale heatmap), Deviation (plate
+    grid, diverging), Wells (one row per well), Weighings (every reading, with
+    its reference). Opens in Excel, LibreOffice and Google Sheets.
+    """
+    wells, stats = report["wells"], report["stats"]
+    rows_l, cols_n = report["grid"]["rows"], report["grid"]["columns"]
+
+    def grid(key: str) -> List[List[Any]]:
+        out: List[List[Any]] = [[""] + list(cols_n)]
+        for r in rows_l:
+            out.append([r] + [wells.get(f"{r}{c}", {}).get(key) for c in cols_n])
+        return out
+
+    grid_ref = f"B2:{_col(len(cols_n) + 1)}{len(rows_l) + 1}"
+    summary: List[List[Any]] = [["Plate report", ""],
+                                ["Labware", report["labware"]],
+                                ["Density (g/mL)", report["density_g_per_ml"] if report["density_g_per_ml"] is not None else "not given"],
+                                ["", ""], ["Statistic", "Value"]]
+    for key, label in (("n", "Wells weighed"), ("mean_g", "Mean (g)"), ("median_g", "Median (g)"),
+                       ("sd_g", "SD (g)"), ("cv_pct", "CV (%)"), ("min_g", "Min (g)"), ("max_g", "Max (g)"),
+                       ("nominal_volume_ul", "Nominal volume (µL)"), ("mean_implied_volume_ul", "Mean implied volume (µL)")):
+        if stats.get(key) is not None:
+            summary.append([label, stats[key]])
+    summary += [["", ""], ["Plan", "Status"]]
+    for plan in report["plans"]:
+        summary.append([plan["plan_id"], f'{plan["status"]}, {plan["steps_ok"]}/{plan["steps"]} steps ok'
+                        + (f' — {plan["halt_reason"]}' if plan.get("halt_reason") else "")])
+    summary += [["", ""], ["Attribution", report["attribution"]],
+                ["Unattributed readings", len(report["unattributed_readings"])],
+                ["Deliveries to other labware", len(report["excluded_deliveries"])]]
+
+    well_cols = ["well", "status", "mass_g", "deviation_pct", "implied_volume_ul", "volume_ul",
+                 "stable", "reference", "repeat_weighings", "observed_at"]
+    well_rows: List[List[Any]] = [well_cols] + [[c.get(k) for k in well_cols] for c in wells.values()]
+    log_cols = ["plan_id", "step", "well", "labware", "reading_g", "reference_g", "reference",
+                "mass_g", "stable", "volume_ul", "observed_at"]
+    log_rows: List[List[Any]] = [log_cols]
+    for c in wells.values():
+        log_rows += [[w.get(k) for k in log_cols] for w in c["weighings"]]
+    log_rows += [[w.get(k) for k in log_cols] for w in report["unattributed_readings"]]
+
+    sheets = [
+        ("Summary", _sheet(summary, header_rows=1, header_cols=1, widths=(28, 60))),
+        ("Mass", _sheet(grid("mass_g"), header_cols=1, heatmap=grid_ref, widths=[5] + [9] * len(cols_n))),
+        ("Deviation", _sheet(grid("deviation_pct"), header_cols=1, heatmap=grid_ref, diverging=True,
+                             widths=[5] + [9] * len(cols_n))),
+        ("Wells", _sheet(well_rows, widths=(7, 20, 10, 12, 16, 11, 8, 14, 16, 30))),
+        ("Weighings", _sheet(log_rows, widths=(20, 6, 6, 8, 10, 11, 14, 10, 8, 10, 30))),
+    ]
+    ns = 'xmlns="http://schemas.openxmlformats.org/package/2006/relationships"'
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml",
+                   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                   '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                   '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                   '<Default Extension="xml" ContentType="application/xml"/>'
+                   '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+                   '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+                   + "".join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                             for i in range(1, len(sheets) + 1))
+                   + "</Types>")
+        z.writestr("_rels/.rels", f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships {ns}>'
+                   '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+                   "</Relationships>")
+        z.writestr("xl/workbook.xml",
+                   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                   '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                   'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+                   + "".join(f'<sheet name="{n}" sheetId="{i}" r:id="rId{i}"/>' for i, (n, _x) in enumerate(sheets, start=1))
+                   + "</sheets></workbook>")
+        z.writestr("xl/_rels/workbook.xml.rels",
+                   f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships {ns}>'
+                   + "".join(f'<Relationship Id="rId{i}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{i}.xml"/>'
+                             for i in range(1, len(sheets) + 1))
+                   + f'<Relationship Id="rId{len(sheets) + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                   "</Relationships>")
+        # Style 0: default. Style 1: bold header.
+        z.writestr("xl/styles.xml",
+                   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                   '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+                   '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+                   '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+                   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+                   '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+                   '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+                   '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+                   "</styleSheet>")
+        for i, (_n, xml) in enumerate(sheets, start=1):
+            z.writestr(f"xl/worksheets/sheet{i}.xml", xml)
+    return buf.getvalue()
 
 
 def render_plate_report_html(report: Dict[str, Any], *, title: str = "Plate report") -> str:
@@ -233,7 +375,7 @@ main{max-width:1100px;margin:0 auto;padding:16px}h1{font-size:18px;margin:0 0 2p
 .row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
 .stat{border:1px solid var(--line);border-radius:8px;padding:8px}.stat b{display:block;font-size:16px;font-variant-numeric:tabular-nums}.stat span{color:var(--sub);font-size:11px}
-select,button{font:inherit;padding:4px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+select,button,.btn{font:inherit;text-decoration:none;padding:4px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 .plate{overflow-x:auto}table.grid{border-collapse:separate;border-spacing:4px;margin:0 auto}
 .grid th{color:var(--sub);font-weight:500;font-size:11px;width:44px}
 .grid td{width:52px;height:40px;border-radius:50%;text-align:center;font-size:10px;font-variant-numeric:tabular-nums;cursor:pointer;border:2px solid transparent;transition:transform .08s}
@@ -250,7 +392,7 @@ table.list{width:100%;border-collapse:collapse;font-size:12px;font-variant-numer
 <div class="card stats" id="stats"></div>
 <div class="card">
  <div class="row" style="justify-content:space-between">
-  <div class="row"><label>Heatmap <select id="metric"></select></label><button id="csv">Download CSV</button></div>
+  <div class="row"><label>Heatmap <select id="metric"></select></label><button id="csv">Download CSV</button><a id="xlsx" class="btn">Download spreadsheet</a></div>
   <div class="legend"><span id="lo"></span><div class="bar" id="bar"></div><span id="hi"></span></div>
  </div>
  <div class="plate"><table class="grid" id="grid" aria-label="96-well plate heatmap"></table></div>
@@ -313,6 +455,9 @@ document.getElementById("csv").onclick=()=>{const h=["well","status","mass_g","d
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"}));a.download="plate-report.csv";a.click()};
 document.getElementById("meta").innerHTML=`Labware ${esc(R.labware)} · `+R.plans.map(p=>`${esc(p.plan_id)} (${esc(p.status)}, ${p.steps_ok}/${p.steps} steps)`).join(" + ");
 document.getElementById("notes").innerHTML=esc(R.attribution)+"."+(R.unattributed_readings.length?` <span class="warn">${R.unattributed_readings.length} reading(s) could not be attributed to a well.</span>`:"")+(R.excluded_deliveries.length?` ${R.excluded_deliveries.length} delivery(ies) to other labware excluded.`:"")+(R.density_g_per_ml?"":" No density given, so no implied volume is shown.");
+// Served by the gateway: the workbook sits beside this page with the same query.
+// Saved to disk, the page has no server to ask, so the link hides itself.
+const xl=document.getElementById("xlsx");if(location.protocol.startsWith("http")){xl.href="plate-report.xlsx"+location.search}else{xl.style.display="none"}
 sel.onchange=draw;stats();draw();list();
 </script></body></html>
 """

@@ -938,6 +938,16 @@ function ChatPlanCard({
             Plate report
           </a>
         )}
+        {live.results.some((r) => r.reading) && (
+          <a
+            href={plateReportUrl([live.plan_id], "xlsx")}
+            download
+            className="rounded px-2 py-0.5 text-[10px] font-medium text-purple-700 underline-offset-2 hover:bg-purple-100 hover:underline dark:text-purple-300 dark:hover:bg-purple-900/40"
+            title="Download this plan's balance results as an Excel workbook with plate heatmaps"
+          >
+            Spreadsheet
+          </a>
+        )}
       </div>
       <ol className="mb-1 flex flex-col gap-0.5">
         {live.steps.map((s, si) => {

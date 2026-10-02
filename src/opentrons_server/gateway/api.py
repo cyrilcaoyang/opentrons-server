@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -85,7 +86,7 @@ from .plate_state import PlateStateStore
 from .limits import OutOfEnvelope
 from .service import OT2Service, UnknownOutcomeError
 from .tip_state import TipStateStore, TipUnavailable
-from .plate_report import build_plate_report, render_plate_report_html
+from .plate_report import build_plate_report, render_plate_report_html, render_plate_report_xlsx
 
 
 UI_DIST_DIR = Path(__file__).resolve().parent.parent / "ui_dist"
@@ -1163,6 +1164,22 @@ def create_app(
         report = _plate_report(plan_id, labware, density_g_per_ml)
         title = f"{service.equipment_id} plate report"
         return HTMLResponse(render_plate_report_html(report, title=title))
+
+    @app.get("/plans/plate-report.xlsx", tags=["plans"])
+    def plate_report_xlsx(
+        plan_id: list[str] = Query(default=[]),
+        labware: Optional[str] = None,
+        density_g_per_ml: Optional[float] = None,
+    ) -> Response:
+        """The same report as an Excel workbook: summary, mass and deviation
+        plate grids with colour-scale heatmaps, per-well table, weighing log."""
+        report = _plate_report(plan_id, labware, density_g_per_ml)
+        name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{service.equipment_id}_plate_report_{'_'.join(plan_id)}")[:120]
+        return Response(
+            render_plate_report_xlsx(report),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'},
+        )
 
     @app.post("/plans", status_code=201, tags=["plans"])
     def create_plan(request: PlanCreateRequest, http_request: Request) -> dict[str, Any]:

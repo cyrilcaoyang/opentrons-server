@@ -337,6 +337,7 @@ aggregator status without an admin identity correctly reports false.
 | route | does |
 |---|---|
 | `GET /plans/plate-report?plan_id=…&plan_id=…` | per-well balance results of one or more plans on a 96-well grid, combined in the order given: `mass_g` (reading minus the balance reference), `deviation_pct`, `status` (`weighed`, `dispensed_unweighed`, `failed`, `not_run`), every weighing per well, and mean/SD/CV. Optional `labware` (default: first labware dispensed into) and `density_g_per_ml` (enables `implied_volume_ul`; never assumed). |
+| `GET /plans/plate-report.xlsx?plan_id=…` | the same report as an Excel workbook (attachment): Summary, Mass and Deviation plate grids with colour-scale heatmaps, a Wells table and the full Weighings log. Built with the standard library; opens in Excel, LibreOffice and Google Sheets. |
 | `GET /plans/plate-report.html?plan_id=…` | the same report as a self-contained interactive heatmap: metric switch, hover and pinned well details, sortable table, CSV download. No external requests. |
 
 A reading is attributed to the last `dispense` or located `blow_out` target

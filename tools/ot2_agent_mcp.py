@@ -86,6 +86,13 @@ class Gateway:
     def put(self, path: str, body: Any) -> Any:
         return self._call("PUT", path, json=body)
 
+    def get_bytes(self, path: str, params: Any = None) -> bytes:
+        resp = requests.get(f"{self.base_url}{path}", headers=self._headers,
+                            params=params, timeout=DEFAULT_TIMEOUT_S)
+        if not resp.ok:
+            raise RuntimeError(f"gateway {resp.status_code}: {resp.text[:500]}")
+        return resp.content
+
 
 def build_server(gateway: Gateway, *, instance: str) -> Any:
     mcp = _McpServer(f"ot2-{instance}")
@@ -187,6 +194,48 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
         """Every plan this gateway is holding, newest first. Use it to check
         whether the operator has approved or run something you proposed."""
         return gateway.get("/plans")
+
+    def _report_params(plan_ids: list[str], labware: str | None, density_g_per_ml: float | None) -> list:
+        params: list = [("plan_id", pid) for pid in plan_ids]
+        if labware:
+            params.append(("labware", labware))
+        if density_g_per_ml is not None:
+            params.append(("density_g_per_ml", density_g_per_ml))
+        return params
+
+    @mcp.tool()
+    def get_plate_report(plan_ids: list[str], labware: str | None = None,
+                         density_g_per_ml: float | None = None) -> dict:
+        """Balance results of one or more executed plans on a 96-well grid:
+        per-well mass (reading minus the balance reference), deviation from the
+        mean, status (weighed / dispensed_unweighed / failed / not_run), and
+        mean/SD/CV. List a run split across plans in run order. Pass a density
+        only if the operator gave one. Read-only."""
+        q = "&".join(f"{k}={requests.utils.quote(str(v))}" for k, v in _report_params(plan_ids, labware, density_g_per_ml))
+        return gateway.get(f"/plans/plate-report?{q}")
+
+    @mcp.tool()
+    def download_plate_spreadsheet(plan_ids: list[str], path: str, labware: str | None = None,
+                                   density_g_per_ml: float | None = None) -> dict:
+        """Save the plate report as an Excel workbook at `path` on this machine:
+        summary, mass and deviation plate grids with heatmap colouring, a
+        per-well table and the full weighing log. Read-only on the gateway."""
+        data = gateway.get_bytes("/plans/plate-report.xlsx",
+                                 params=_report_params(plan_ids, labware, density_g_per_ml))
+        out = os.path.abspath(os.path.expanduser(path))
+        if not out.lower().endswith(".xlsx"):
+            raise ValueError("path must end in .xlsx")
+        with open(out, "wb") as fh:
+            fh.write(data)
+        return {"path": out, "bytes": len(data)}
+
+    @mcp.tool()
+    def plate_report_url(plan_ids: list[str]) -> dict:
+        """Links to the interactive heatmap and the spreadsheet, for an operator
+        who can reach this gateway in a browser."""
+        q = "&".join(f"plan_id={requests.utils.quote(pid)}" for pid in plan_ids)
+        return {"html": f"{gateway.base_url}/plans/plate-report.html?{q}",
+                "xlsx": f"{gateway.base_url}/plans/plate-report.xlsx?{q}"}
 
     return mcp
 
