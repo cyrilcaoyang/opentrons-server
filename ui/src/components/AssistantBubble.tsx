@@ -13,6 +13,7 @@ import {
   listPlans,
 } from "../lib/api";
 import { moveWindow, resizeWindow } from "../lib/floating-window";
+import { AssistantMarkdown } from "../lib/assistant-markdown";
 import type { Corner, WindowRect } from "../lib/floating-window";
 import type { ClaimState } from "../lib/use-claim";
 import type {
@@ -645,7 +646,9 @@ export function AssistantBubble({
               {m.role === "assistant" && m.tools && m.tools.length > 0 && (
                 <ToolPills tools={m.tools} className="mb-1.5" />
               )}
-              <span className="whitespace-pre-wrap break-words">{m.content}</span>
+              {m.role === "assistant"
+                ? <AssistantMarkdown text={m.content} />
+                : <span className="whitespace-pre-wrap break-words">{m.content}</span>}
               {m.role === "user" && (
                 <button type="button" disabled={pending || !claim.held}
                   onClick={() => void send(m.content, i)}

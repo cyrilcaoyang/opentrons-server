@@ -14,6 +14,7 @@ import { AssemblyPicker } from "../src/components/AssemblyPicker";
 import { ManualPipettePanel } from "../src/components/ManualPipettePanel";
 import { JOG_STEPS, JOG_SPEEDS, validJogSettings, xyzText, copyText, jogLimitReason } from "../src/lib/manual-motion";
 import { moveWindow, resizeWindow } from "../src/lib/floating-window";
+import { AssistantMarkdown, parseBlocks } from "../src/lib/assistant-markdown";
 import { declaredMapFromDeck, pairModuleSlots } from "../src/lib/ot2-deck";
 import type { DeviceDeck, PlateAssembly, RobotModule } from "../src/lib/types";
 import rack from "../../.venv.test/Lib/site-packages/opentrons_shared_data/data/labware/definitions/2/opentrons_10_tuberack_falcon_4x50ml_6x15ml_conical/3.json";
@@ -26,6 +27,25 @@ function modelFor(definition: unknown) {
     isTiprack: geometry.isTiprack, tipRack: null, samples: null,
   }) };
 }
+
+test("assistant replies render light Markdown as text nodes only", () => {
+  const html = renderToStaticMarkup(
+    <AssistantMarkdown text={"Pairs: **A1↔H12**, then `tips.mark`.\n\n- first\n- second <b>x</b>\n\n1. one\n2) two\n\n## Done"} />,
+  );
+  assert.match(html, /<strong[^>]*>A1↔H12<\/strong>/);
+  assert.match(html, /<code[^>]*>tips.mark<\/code>/);
+  assert.match(html, /<ul[^>]*><li>first<\/li><li>second &lt;b&gt;x&lt;\/b&gt;<\/li><\/ul>/);
+  assert.match(html, /<ol[^>]*><li>one<\/li><li>two<\/li><\/ol>/);
+  assert.match(html, /<p class="font-semibold">Done<\/p>/);
+  assert.doesNotMatch(html, /<b>/);
+
+  // Underscores in labware names and asterisks in arithmetic are not emphasis.
+  const plain = renderToStaticMarkup(<AssistantMarkdown text="opentrons_96_tiprack_300ul holds 2*3*4 tips, *really*." />);
+  assert.doesNotMatch(plain, /<em>2|<em>3|<em>_/);
+  assert.match(plain, /<em>really<\/em>/);
+  assert.equal(parseBlocks("line one\nline two\n\nline three").length, 2);
+  assert.equal(renderToStaticMarkup(<AssistantMarkdown text="" />), "");
+});
 
 test("chat window moves inside the viewport and resizes from every corner", () => {
   const rect = { left: 300, top: 200, right: 760, bottom: 720 };

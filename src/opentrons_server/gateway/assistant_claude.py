@@ -50,7 +50,8 @@ def claude_code_authenticated(executable: str) -> bool:
     try:
         result = subprocess.run(
             [executable, "auth", "status", "--json"],
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=5, check=False,
             env=_subscription_env(),
         )
         status = json.loads(result.stdout)
@@ -76,13 +77,16 @@ def run_claude_code(
     ]
     # An empty working directory prevents the CLI from inheriting any gateway
     # checkout context. Credentials still belong to the service account.
+    # The CLI speaks UTF-8 on both pipes; without an explicit encoding Windows
+    # decodes with the ANSI code page and `↔` reaches the operator as `â†”`.
     payload = json.dumps(context, default=str)
     try:
         with tempfile.TemporaryDirectory(prefix="ot2-assistant-") as directory:
             if cancel_event is None:
                 result = subprocess.run(
                     command, input=payload, capture_output=True, text=True,
-                    timeout=timeout_s, cwd=directory, check=False,
+                    encoding="utf-8", errors="replace", timeout=timeout_s,
+                    cwd=directory, check=False,
                     env=_subscription_env(),
                 )
                 return_code, output = result.returncode, result.stdout
@@ -91,7 +95,8 @@ def run_claude_code(
                     raise InterruptedError("Claude Code reply stopped")
                 with subprocess.Popen(
                     command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, text=True, cwd=directory,
+                    stderr=subprocess.PIPE, text=True, encoding="utf-8",
+                    errors="replace", cwd=directory,
                     env=_subscription_env(),
                 ) as process:
                     deadline = time.monotonic() + timeout_s

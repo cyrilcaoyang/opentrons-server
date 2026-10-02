@@ -10,6 +10,7 @@ No network and no hardware — the OpenAI client is faked throughout.
 """
 
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -717,6 +718,46 @@ def test_claude_code_runs_without_builtin_tools_or_persisted_session(monkeypatch
     assert {"--safe-mode", "--strict-mcp-config", "--no-session-persistence"} <= set(captured["command"])
     assert captured["kwargs"]["input"] == '{"messages": []}'
     assert "ANTHROPIC_API_KEY" not in captured["kwargs"]["env"]
+
+
+def test_claude_code_pipes_are_utf8_on_every_platform(monkeypatch):
+    """Windows decodes subprocess text with the ANSI code page unless told
+    otherwise, which turned the CLI's UTF-8 `↔` into `â†”` for the operator."""
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["run"] = kwargs
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "structured_output": {"reply": "A1↔H12", "steps": []},
+        }))
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            captured["popen"] = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+        def communicate(self, **_kwargs):
+            return json.dumps({"structured_output": {"reply": "A1↔H12", "steps": []}}), ""
+
+    monkeypatch.setattr(claude_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(claude_mod.subprocess, "Popen", FakePopen)
+    assert claude_mod.run_claude_code("/opt/claude", "s", {"messages": []}, 5)["reply"] == "A1↔H12"
+    assert claude_mod.run_claude_code("/opt/claude", "s", {"messages": []}, 5, threading.Event())["reply"] == "A1↔H12"
+    claude_mod.claude_code_authenticated("/opt/claude")
+    for kwargs in captured.values():
+        assert kwargs["text"] is True
+        assert kwargs["encoding"] == "utf-8"
+        assert kwargs["errors"] == "replace"
 
 
 def test_claude_code_rejects_an_api_key_login(monkeypatch):
