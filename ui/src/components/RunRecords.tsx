@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getRunRecords, plateReportUrl, runRecordUrl, type RunRecord } from "../lib/api";
+import { elnOutcome, getRunRecords, plateReportUrl, runRecordUrl, type RunRecord } from "../lib/api";
 
 /**
  * Run records — every plan this gateway ran, read from the records it saves
@@ -19,11 +19,11 @@ const STATUS_TONE: Record<string, string> = {
   interrupted: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
 };
 
-const ELN_LABEL: Record<string, string> = {
-  running: "ELN: after the run ends",
-  pending: "ELN: waiting to send",
-  delivered: "ELN: filed",
-  local_only: "Kept on the robot only",
+const ELN_TONE: Record<string, string> = {
+  ok: "text-emerald-700 dark:text-emerald-400",
+  warn: "text-amber-700 dark:text-amber-400",
+  bad: "text-rose-700 dark:text-rose-400",
+  muted: "text-ink-subtle dark:text-slate-400",
 };
 
 function when(iso: string | null): string {
@@ -35,7 +35,10 @@ function when(iso: string | null): string {
 export function RunRecords() {
   const [records, setRecords] = useState<RunRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const running = records?.some((r) => r.status === "executing") ?? false;
+  // Poll fast while a run is going or its ELN outcome is still unknown.
+  const running = records?.some((r) => r.status === "executing" ||
+    r.delivery.state === "pending" || (r.delivery.state === "delivered" &&
+      !["filed", "held"].includes(r.delivery.eln?.state ?? ""))) ?? false;
   // One request at a time: a slow gateway must not let an older response
   // land after a newer one.
   const inFlight = useRef(false);
@@ -129,10 +132,9 @@ export function RunRecords() {
                 {(r.steps_unknown ?? 0) > 0 && ` · ${r.steps_unknown} unknown`}
               </span>
             </div>
-            <p className="mt-1 text-[11px] text-ink-subtle dark:text-slate-400">
+            <p className={`mt-1 text-[11px] ${ELN_TONE[elnOutcome(r).tone]}`}>
               {r.eln_project ? `${r.eln_project} — ` : ""}
-              {ELN_LABEL[r.delivery.state] ?? r.delivery.state}
-              {r.delivery.state === "pending" && r.delivery.last_error && ` (last try: ${r.delivery.last_error})`}
+              {elnOutcome(r).text}
             </p>
             {r.halt_reason && (
               <p className="mt-0.5 text-[11px] text-rose-700 dark:text-rose-400">{r.halt_reason}</p>

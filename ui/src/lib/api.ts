@@ -65,7 +65,45 @@ export interface RunRecord {
   steps_failed: number;
   steps_unknown?: number;
   readings?: number;
-  delivery: { state: string; last_error: string | null; delivered_at: string | null };
+  delivery: {
+    state: string;
+    last_error: string | null;
+    delivered_at: string | null;
+    /** What the central server did with it, once delivered: only "filed"
+     *  means the ELN has it; "held" carries the refusal reason. */
+    eln?: { state: string; last_error: string | null; experiment_id: string | null; check_error?: string };
+  };
+}
+
+/** One run record in full (for the chat card's ELN outcome). */
+export const getRunRecord = (planId: string) =>
+  fetchJson<RunRecord>(`/plans/results/${encodeURIComponent(planId)}`);
+
+/** ELN projects the signed-in user can file into — projects that exist in the
+ *  ELN *and* where they are member, PI or admin. Served by the dashboard on
+ *  this same edge origin (root /api, not this gateway), as the signed-in user. */
+export async function getElnProjects(): Promise<{ configured: boolean; projects: string[] }> {
+  const res = await fetch("/api/assistant/eln-projects", { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+/** The one-line truth about where a run's results are. */
+export function elnOutcome(r: RunRecord): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
+  const d = r.delivery;
+  if (d.state === "local_only") return { text: "Kept on the robot only", tone: "muted" };
+  if (d.state === "running") return { text: "ELN: after the run ends", tone: "muted" };
+  if (d.state === "pending") {
+    return { text: `ELN: sending${d.last_error ? ` (last try: ${d.last_error})` : ""}`, tone: "warn" };
+  }
+  if (d.state === "delivered") {
+    if (d.eln?.state === "filed") return { text: "ELN: filed", tone: "ok" };
+    if (d.eln?.state === "held") {
+      return { text: `ELN: held — ${d.eln.last_error ?? "refused by the ELN"}`, tone: "bad" };
+    }
+    return { text: "ELN: filing…", tone: "warn" };
+  }
+  return { text: d.state, tone: "muted" };
 }
 
 export const getRunRecords = (limit = 10) =>
