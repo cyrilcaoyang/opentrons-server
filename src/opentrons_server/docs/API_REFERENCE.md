@@ -242,7 +242,7 @@ provider key or an authenticated Claude Code CLI is configured.
 | method + path | gate | body | responses / notes |
 |---|---|---|---|
 | `GET /assistant/health` | open | — | `{configured, reason, model, key_source, env_file_searched}`. Never the key or provider URL. |
-| `POST /assistant/chat` | claim (+ identity when required) | `{messages: [{role: "user"\|"assistant", content}]}` — 1–40 messages, content ≤ 8000 chars | **503** when not configured; **502** on a provider failure; **423** without a claim |
+| `POST /assistant/chat` | claim (+ identity when required) | `{messages: [{role: "user"\|"assistant", content}]}` — at least one message, no length or count limit (the most recent part that fits `OT2_ASSISTANT_HISTORY_CHARS`, default 200000, goes to the model, newest always whole) | **503** when not configured; **502** on a provider failure; **423** without a claim |
 | `POST /assistant/chat/stream` | claim (+ identity when required) | same, with optional 32-character hex `request_id` for cancellation | `text/event-stream` of tool-boundary events (never model reasoning). Access is validated **before** the stream opens, so 401/403/423/503 keep their normal status; a provider failure after that arrives as a terminal `error` event. |
 | `POST /assistant/chat/cancel` | claim (+ identity when required) | `{request_id}` | Sets cancellation for the matching in-flight assistant turn. Returns `{canceled: boolean}`. It never stops robot motion or aborts an approved plan. |
 

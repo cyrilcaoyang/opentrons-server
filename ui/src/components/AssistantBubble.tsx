@@ -51,7 +51,7 @@ const STORAGE_KEY = "ot2-assistant-thread";
 // Session-scoped like the thread. Both gateways share the edge's origin, so a
 // saved pick is only honoured if this gateway still offers it.
 const MODEL_STORAGE_KEY = "ot2-assistant-model";
-const MAX_KEPT = 20;
+const MAX_KEPT = 200;
 const RESIZE_CORNERS = [
   { corner: "nw", position: "left-0 top-0", cursor: "cursor-nwse-resize", glyph: "↖", name: "top left" },
   { corner: "ne", position: "right-0 top-0", cursor: "cursor-nesw-resize", glyph: "↗", name: "top right" },

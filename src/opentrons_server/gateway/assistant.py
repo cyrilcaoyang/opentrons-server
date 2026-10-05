@@ -792,6 +792,9 @@ class Assistant:
     def chat_events(self, messages: List[Dict[str, str]]) -> Iterator[Dict[str, Any]]:
         """Run one turn and yield operator-safe progress events.
 
+        The conversation may be any length; ``fit_history`` sends the model
+        the most recent part that fits its context, newest message always.
+
         Model requests can take tens of seconds and a useful turn commonly
         needs several of them. Exposing the tool boundary lets the UI show
         truthful progress without streaming the model's private reasoning.
@@ -801,6 +804,7 @@ class Assistant:
         reason = self._config.unavailable_reason()
         if reason:
             raise AssistantDisabled(reason)
+        messages = fit_history(messages)
 
         if self._config.model == CLAUDE_CODE_MODEL:
             yield from self._chat_claude_events(messages)
@@ -966,9 +970,43 @@ class Assistant:
         raise RuntimeError("assistant turn ended without a completion")
 
 
+#: How much conversation text goes to the model per turn (characters; ~4 per
+#: token, so ~50k tokens), leaving room for the system prompt, live context
+#: and tool results.
+HISTORY_CHAR_BUDGET = int(os.environ.get("OT2_ASSISTANT_HISTORY_CHARS", "200000"))
+
+
+def fit_history(messages: List[Dict[str, str]], budget: Optional[int] = None) -> List[Dict[str, str]]:
+    """The most recent messages whose text fits ``budget``, oldest first.
+
+    The newest message is always kept whole, however long. When older ones
+    are left out, a note says so, so the model does not answer as if it had
+    seen the whole conversation.
+    """
+    budget = HISTORY_CHAR_BUDGET if budget is None else budget
+    kept: List[Dict[str, str]] = []
+    used = 0
+    for message in reversed(messages):
+        size = len(message.get("content") or "")
+        if kept and used + size > budget:
+            break
+        kept.append(message)
+        used += size
+    kept.reverse()
+    dropped = len(messages) - len(kept)
+    if dropped:
+        kept.insert(0, {"role": "user", "content": (
+            f"[{dropped} earlier message{'s' if dropped != 1 else ''} of this conversation "
+            "were left out to fit the model's context. Ask the operator if you need them.]")})
+    return kept
+
+
 class AssistantMessage(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(..., min_length=1, max_length=8000)
+    # No length cap: a long reply (a big plan) or a pasted protocol must never
+    # make the next turn fail. What reaches the model is fitted by
+    # fit_history() instead.
+    content: str = Field(..., min_length=1)
 
 
 class AssistantChatRequest(BaseModel):
@@ -980,7 +1018,7 @@ class AssistantChatRequest(BaseModel):
     depends on. Bounded so a long session cannot grow a request without limit.
     """
 
-    messages: List[AssistantMessage] = Field(..., min_length=1, max_length=40)
+    messages: List[AssistantMessage] = Field(..., min_length=1)
     # One of /assistant/health's ``models``; omitted means the configured
     # default. Anything else is refused with 422, never substituted.
     model: Optional[str] = Field(None, min_length=1, max_length=200)
