@@ -109,15 +109,17 @@ def test_status_never_shows_a_weight_and_the_reading_route_follows_the_rule(gate
     service = app.state.service
 
     class _Balance:
+        owner = pid  # taken by alice's run
+
         def snapshot(self):
             return {"configured": True, "model": "platebalanceV1", "last_operation": None,
                     "reading": {"value": 0.1234, "unit": "g", "stable": True,
                                 "observed_at": "2026-10-05T12:00:00Z"},
-                    "last_error": "frame b'0.1234 g'"}
+                    "reading_owner": self.owner,
+                    "last_error": "frame b'0.1234 g'", "error_owner": self.owner}
 
-    monkeypatch.setattr(service, "platebalance", _Balance())
-    monkeypatch.setattr(service, "_balance_placement_valid", lambda: True, raising=False)
-    service.balance_reading_plan = pid  # taken by alice's run
+    balance = _Balance()
+    monkeypatch.setattr(service, "platebalance", balance)
     public = service._public_balance_snapshot()
     assert "value" not in public["reading"] and public["reading"]["stable"] is True
     assert "0.1234" not in str(public)
@@ -125,7 +127,7 @@ def test_status_never_shows_a_weight_and_the_reading_route_follows_the_rule(gate
     assert client.get("/platebalance/reading", headers=_edge("carol@lab")).status_code == 403
     alice = client.get("/platebalance/reading", headers=_edge("alice@lab")).json()
     assert alice["reading"]["value"] == 0.1234
-    service.balance_reading_plan = None  # a manual read: anyone signed in
+    balance.owner = None  # a manual read: anyone signed in
     assert client.get("/platebalance/reading", headers=_edge("carol@lab")).json()["reading"]["value"] == 0.1234
 
 
@@ -152,3 +154,40 @@ def test_aborting_someone_elses_finished_run_does_not_reveal_it(gateway):
                         headers=carol).json()["claim_token"]
     view = client.post(f"/plans/{pid}/abort", headers={**carol, "X-Claim-Token": token}).json()
     assert view["redacted"] is True and "reading" not in str(view["results"])
+
+
+def test_a_bad_balance_frame_never_puts_its_digits_in_a_message():
+    from opentrons_server.gateway.platebalance import parse_weight
+
+    with pytest.raises(ValueError) as excinfo:
+        parse_weight("+  12.3456 g")  # cut off: no line ending
+    assert "12.3456" not in str(excinfo.value) and "gateway log" in str(excinfo.value)
+
+
+def test_the_balance_stamps_each_reading_with_the_run_that_took_it():
+    from unittest.mock import Mock
+
+    from opentrons_server.gateway.platebalance import PlateBalanceConfig, PlateBalanceV1
+
+    driver = Mock()
+    driver._weigh.return_value = (True, 0.5)
+    balance = PlateBalanceV1(PlateBalanceConfig(com_port="COM9"), driver_factory=lambda _c: driver)
+    balance.owner = "plan-A"
+    balance.execute("read")
+    balance.owner = None
+    snap = balance.snapshot()
+    assert snap["reading"]["value"] == 0.5 and snap["reading_owner"] == "plan-A"
+    driver._weigh.side_effect = ValueError("serial gone")
+    with pytest.raises(ValueError):
+        balance.execute("read")  # a failed manual read
+    snap = balance.snapshot()
+    assert snap["error_owner"] is None
+    assert snap["reading_owner"] == "plan-A"  # the old weight keeps its owner
+
+
+def test_the_assistant_hides_others_halt_reasons(gateway):
+    _client, pid, _draft, app = gateway
+    app.state.plans.get(pid).halt_reason = "balance frame unreadable at 0.1 g"
+    carol = Assistant(app.state.service, app.state.plans, config=None, reader=RunReader(user="carol@lab"))
+    listed = next(p for p in carol._tools()["list_plans"]({}) if p["plan_id"] == pid)
+    assert "0.1" not in str(listed["halt_reason"])

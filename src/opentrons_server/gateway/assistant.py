@@ -42,7 +42,7 @@ from .robot_profile import PROFILE, IS_FLEX
 from .documentation import action_catalog, equipment_documentation
 from .assistant_claude import claude_code_authenticated, run_claude_code
 from .plate_report import build_plate_report, summarize_for_agent
-from .run_access import RunReader, redact_plan_view
+from .run_access import RESTRICTED, RunReader, redact_plan_view
 
 logger = logging.getLogger(__name__)
 
@@ -616,7 +616,8 @@ class Assistant:
                     "created_at": plan.created_at.isoformat(),
                     "created_by": plan.created_by,
                     "actions": [step.action for step in plan.steps],
-                    "halt_reason": plan.halt_reason,
+                    "halt_reason": (plan.halt_reason if self._reader.can_read_plan(plan)
+                                    else (RESTRICTED if plan.halt_reason else None)),
                     "results": [
                         {"step": index + 1, "action": result.action,
                          "outcome": result.outcome,

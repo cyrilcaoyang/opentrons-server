@@ -384,8 +384,7 @@ class OT2Service:
         # and the executor whose per-step saves feed them.
         self.plan_results: Optional[Any] = None
         self.plan_executor: Optional[Any] = None
-        # The plan that took the balance's latest reading (None: manual read).
-        self.balance_reading_plan: Optional[str] = None
+
         self.last_error: Optional[ErrorInfo] = None
         self._dry_run_lights_on = False
         # Cached deck-light state. Refreshed off the request path (background
@@ -1533,14 +1532,14 @@ class OT2Service:
             if not self.simulation:
                 result.clear()
                 result.update(balance.execute(action, request=request, cancelled=lambda: self._stop_latched))
+        # The run on whose behalf this reading or error is taken, stamped by
+        # the balance as each is stored (run_access.py). None: a manual read.
+        automation = self.claims.automation()
+        balance.owner = automation["plan_id"] if automation else None
         try:
             self._run_action(f"platebalance.{action}", execute, idempotent=action == "read")
         finally:
-            # Which run the balance's latest reading or error belongs to, so
-            # /status can withhold it and /platebalance/reading can apply that
-            # run's access rule (run_access.py). None: a manual read.
-            automation = self.claims.automation()
-            self.balance_reading_plan = automation["plan_id"] if automation else None
+            balance.owner = None
         return result
 
     def _public_balance_snapshot(self) -> Dict[str, Any]:
@@ -1553,8 +1552,10 @@ class OT2Service:
         if isinstance(reading, dict):
             snapshot["reading"] = {k: v for k, v in reading.items() if k != "value"}
             snapshot["reading"]["value_at"] = "/platebalance/reading"
-        if self.balance_reading_plan and snapshot.get("last_error"):
+        if snapshot.get("error_owner") and snapshot.get("last_error"):
             snapshot["last_error"] = "Balance error during a run (details at /platebalance/reading)"
+        snapshot.pop("reading_owner", None)
+        snapshot.pop("error_owner", None)
         return snapshot
 
     def pipette_position(self, request: PipettePositionRequest) -> PipettePositionResponse:
