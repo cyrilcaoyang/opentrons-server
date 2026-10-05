@@ -69,12 +69,12 @@ export function RunRecords() {
   }, [running]);
 
   if (error && !records) {
-    return <p className="text-xs text-rose-700 dark:text-rose-400">Run records unavailable: {error}</p>;
+    return <p className="text-xs text-rose-700 dark:text-rose-400">Runs unavailable: {error}</p>;
   }
-  if (!records) return <p className="text-xs text-ink-subtle dark:text-slate-400">Loading run records…</p>;
+  if (!records) return <p className="text-xs text-ink-subtle dark:text-slate-400">Loading runs…</p>;
   if (records.length === 0) {
     return error ? (
-      <p role="alert" className="text-xs text-rose-700 dark:text-rose-400">Could not refresh run records ({error}).</p>
+      <p role="alert" className="text-xs text-rose-700 dark:text-rose-400">Could not refresh runs ({error}).</p>
     ) : (
       <p className="text-xs text-ink-subtle dark:text-slate-400">No plans have run on this gateway yet.</p>
     );
@@ -84,7 +84,7 @@ export function RunRecords() {
     <>
     {error && (
       <p role="alert" className="mb-2 text-xs text-rose-700 dark:text-rose-400">
-        Could not refresh run records ({error}); what is shown may be out of date.
+        Could not refresh runs ({error}); what is shown may be out of date.
       </p>
     )}
     <ul className="flex flex-col gap-2">
