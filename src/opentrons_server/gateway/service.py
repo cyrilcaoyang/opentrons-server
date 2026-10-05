@@ -380,6 +380,8 @@ class OT2Service:
         # history DB. A no-op unless OT2_INGEST_URL is set, and never emitted in
         # dry run — a simulation must not enter the lab's history as real work.
         self.events = events if events is not None else EventsExporter.from_env()
+        # Set by create_app: finished plans' saved results (plan_results.py).
+        self.plan_results: Optional[Any] = None
         self.last_error: Optional[ErrorInfo] = None
         self._dry_run_lights_on = False
         # Cached deck-light state. Refreshed off the request path (background
@@ -3217,6 +3219,8 @@ class OT2Service:
         claimed_by = self.claims.current()
         if claimed_by is not None:
             details["claimed_by"] = claimed_by.model_dump(mode="json")
+        if self.plan_results is not None:
+            details["plan_results"] = self.plan_results.summary()
         automation = self.claims.automation()
         if automation is not None:
             # An approved plan holds the device: who approved it, how far it

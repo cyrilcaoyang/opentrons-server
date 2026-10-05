@@ -71,7 +71,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from .advanced import ADVANCED_ACTIONS
 from .platebalance import PlateBalanceReferenceRequest, PlateBalanceRequest
@@ -98,11 +98,10 @@ from .models import (
 # How long an approval stays good *to start* the plan. Short on purpose: it is
 # a standing permission to move a robot, and the operator who granted it is
 # expected to be watching. Once execution has started, the approval covers the
-# whole run for as long as the approving claim session stays live — a 225-step
-# balance plan halted mid-run at exactly this many seconds on 2026-10-02 when
-# the window was also checked before every step. The claim-session binding
-# (rule 2 above) is the guard during a run: the claim lapses within its own
-# short TTL once the panel stops heartbeating, and the next step then halts.
+# whole run — a 225-step balance plan halted mid-run at exactly this many
+# seconds on 2026-10-02 when the window was also checked before every step.
+# During a run the plan holds the claim itself (rule 2 above); it halts on a
+# cleared claim, a revoked approval, a failed or refused step, or a stop.
 APPROVAL_TTL_S = 600.0
 
 
@@ -332,6 +331,9 @@ class Plan(BaseModel):
     # Set when a plan stops early, so the operator sees why without digging
     # through per-step results.
     halt_reason: Optional[str] = None
+    # The ELN project the approver chose for this plan's results; None keeps
+    # them on the gateway only (see plan_results.py).
+    eln_project: Optional[str] = None
 
     @property
     def non_idempotent_actions(self) -> List[str]:
@@ -368,6 +370,8 @@ class PlanApproveRequest(BaseModel):
     """
 
     step_hash: str
+    # ELN project (title) to file the results under once the plan ends.
+    eln_project: Optional[str] = Field(default=None, min_length=1, max_length=200)
 
 
 def compute_step_hash(steps: Sequence[PlanStep]) -> str:
@@ -455,6 +459,7 @@ class PlanStore:
         plan.results = [StepResult(action=s.action) for s in steps]
         plan.status = "draft"
         plan.approval = None
+        plan.eln_project = None
         return plan
 
     # -- the gate ----------------------------------------------------------
@@ -466,6 +471,7 @@ class PlanStore:
         *,
         step_hash: str,
         claimed_by: Optional[ClaimedBy],
+        eln_project: Optional[str] = None,
     ) -> Plan:
         """Record a human's approval of one exact step list.
 
@@ -496,6 +502,7 @@ class PlanStore:
             expires_at=now + timedelta(seconds=APPROVAL_TTL_S),
         )
         plan.status = "approved"
+        plan.eln_project = eln_project.strip() if eln_project and eln_project.strip() else None
         return plan
 
     @_synchronized

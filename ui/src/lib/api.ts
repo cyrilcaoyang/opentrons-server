@@ -376,13 +376,19 @@ export function approvePlan(
   planId: string,
   stepHash: string,
   token: string | null,
+  elnProject: string | null = null,
 ): Promise<Plan> {
   return fetchJson<Plan>(`/plans/${encodeURIComponent(planId)}/approve`, {
     method: "POST",
     headers: withToken(token),
-    body: JSON.stringify({ step_hash: stepHash }),
+    body: JSON.stringify({ step_hash: stepHash, ...(elnProject ? { eln_project: elnProject } : {}) }),
   });
 }
+
+/** The signed-in user and their ELN projects, as the auth edge reports them.
+ *  Empty when the edge does not forward projects; the picker then takes a
+ *  typed project title, which the central server checks before filing. */
+export const getMe = () => fetchJson<{ user: string | null; projects: string[] }>("/me");
 
 export function executePlan(planId: string, token: string | null): Promise<Plan> {
   return fetchJson<Plan>(`/plans/${encodeURIComponent(planId)}/execute`, {

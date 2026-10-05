@@ -1,0 +1,263 @@
+"""Durable results of finished plans, and their delivery to the lab's ELN.
+
+Plans live in memory and die with the process (see ``plans.py``), which is
+right for the *permission* they carry but wrong for what they *measured*: until
+this module, the balance weights of a 483-step run existed only in the
+in-memory plan record, so a gateway restart or a dismissed card lost them.
+
+When a plan ends, :meth:`PlanResultsStore.save` writes one JSON bundle per plan
+to ``OT2_PLAN_RESULTS_DIR`` (default: ``ot2_plan_results/`` beside the tip-state
+file, so each gateway keeps its own). The bundle is the record of what ran:
+the full plan with every step's outcome and reading, who approved it, and the
+per-well plate report when the plan weighed anything.
+
+**Delivery.** A plan approved with an ELN project is also queued for the
+central server, which files it in BitacoraDB as an unformatted Experiment for
+the approver to curate. The gateway never writes the ELN itself: that needs
+the ELN's edge secret and an asserted identity, which stay on the central host.
+Delivery is a retrying outbox, not the best-effort events exporter, because
+these are results rather than telemetry: a bundle stays ``pending`` on disk
+until the central server acknowledges it, across restarts. Disabled unless
+``OT2_RESULTS_URL`` is set; a dry-run gateway never delivers, so a simulation
+cannot enter the lab's record.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+from .plate_report import build_plate_report
+
+logger = logging.getLogger(__name__)
+
+SCHEMA = "ot2.plan_results.v1"
+
+# Delivery states, as stored in a bundle's ``delivery.state``.
+LOCAL_ONLY = "local_only"  # no ELN project chosen, or delivery not configured
+PENDING = "pending"
+DELIVERED = "delivered"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class PlanResultsStore:
+    """One JSON file per finished plan, plus an optional delivery worker.
+
+    ``transport`` is injectable for tests: a callable taking the payload dict
+    and returning the central server's acknowledgement (a dict), raising on any
+    failure. The default POSTs JSON with ``urllib``.
+    """
+
+    def __init__(
+        self,
+        directory: Path | str,
+        *,
+        device_id: str,
+        results_url: Optional[str] = None,
+        results_token: Optional[str] = None,
+        simulation: bool = False,
+        retry_interval_s: float = 60.0,
+        timeout_s: float = 15.0,
+        transport: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        start_worker: bool = True,
+    ) -> None:
+        self.directory = Path(directory)
+        self.device_id = device_id
+        self.results_url = (results_url or "").strip() or None
+        self._token = (results_token or "").strip() or None
+        self.simulation = simulation
+        self._retry_interval_s = retry_interval_s
+        self._timeout_s = timeout_s
+        self._transport = transport or self._default_transport
+        self._lock = threading.RLock()
+        self._wake = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        # Plan ids still waiting for the central server, seeded from disk so an
+        # outbox survives restarts; /status reports its size.
+        self._pending: set[str] = set()
+        if self.directory.exists():
+            for path in self.directory.glob("*.json"):
+                bundle = json.loads(path.read_text(encoding="utf-8"))
+                if (bundle.get("delivery") or {}).get("state") == PENDING:
+                    self._pending.add(bundle["plan_id"])
+        if self.delivery_enabled and start_worker:
+            self._thread = threading.Thread(target=self._worker, name="ot2-plan-results", daemon=True)
+            self._thread.start()
+
+    @classmethod
+    def from_env(cls, *, default_dir: Path, device_id: str, simulation: bool,
+                 environ: Optional[dict] = None) -> "PlanResultsStore":
+        env = os.environ if environ is None else environ
+        return cls(
+            env.get("OT2_PLAN_RESULTS_DIR") or default_dir,
+            device_id=device_id,
+            results_url=env.get("OT2_RESULTS_URL"),
+            results_token=env.get("OT2_RESULTS_TOKEN"),
+            simulation=simulation,
+        )
+
+    @property
+    def delivery_enabled(self) -> bool:
+        return self.results_url is not None and not self.simulation
+
+    # -- writing ---------------------------------------------------------------
+
+    def save(self, plan: Any, *, approved_by: Optional[str], equipment_id: str,
+             gateway_version: str) -> Dict[str, Any]:
+        """Write the bundle for a plan that has ended; queue it for the ELN when
+        it was approved with a project and delivery is configured."""
+        record = plan.model_dump(mode="json")
+        results = record.get("results") or []
+        started = [r["started_at"] for r in results if r.get("started_at")]
+        finished = [r["finished_at"] for r in results if r.get("finished_at")]
+        outcomes = [r.get("outcome") for r in results]
+        report: Optional[Dict[str, Any]] = None
+        report_error: Optional[str] = None
+        if any(r.get("reading") for r in results):
+            try:
+                report = build_plate_report([record])
+            except ValueError as exc:
+                # Recorded, not hidden: the readings are still in `plan`.
+                report_error = str(exc)
+        eln_project = record.get("eln_project")
+        state = PENDING if (eln_project and self.delivery_enabled) else LOCAL_ONLY
+        bundle = {
+            "schema": SCHEMA,
+            "plan_id": record["plan_id"],
+            "device_id": self.device_id,
+            "equipment_id": equipment_id,
+            "gateway_version": gateway_version,
+            "simulation": self.simulation,
+            "approved_by": approved_by,
+            "proposed_by": record.get("created_by"),
+            "eln_project": eln_project,
+            "status": record.get("status"),
+            "halt_reason": record.get("halt_reason"),
+            "started_at": min(started) if started else None,
+            "finished_at": max(finished) if finished else None,
+            "saved_at": _now(),
+            "steps_total": len(results),
+            "steps_ok": outcomes.count("ok"),
+            "steps_failed": outcomes.count("failed"),
+            "steps_skipped": outcomes.count("skipped"),
+            "plate_report": report,
+            "plate_report_error": report_error,
+            "plan": record,
+            "delivery": {"state": state, "attempts": 0, "last_error": None,
+                         "delivered_at": None, "receipt": None},
+        }
+        self._write(bundle)
+        if state == PENDING:
+            with self._lock:
+                self._pending.add(bundle["plan_id"])
+            self._wake.set()
+        return bundle
+
+    def summary(self) -> Dict[str, Any]:
+        """What /status shows: whether results reach the ELN, and how many are
+        still waiting — an outbox that only grows is a broken link."""
+        with self._lock:
+            return {"delivery_enabled": self.delivery_enabled, "pending": len(self._pending)}
+
+    def _path(self, plan_id: str) -> Path:
+        if not plan_id or any(c in plan_id for c in "/\\.:"):
+            raise ValueError(f"invalid plan id {plan_id!r}")
+        return self.directory / f"{plan_id}.json"
+
+    def _write(self, bundle: Dict[str, Any]) -> None:
+        with self._lock:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            path = self._path(bundle["plan_id"])
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(bundle, indent=1), encoding="utf-8")
+            os.replace(tmp, path)
+
+    # -- reading ---------------------------------------------------------------
+
+    def get(self, plan_id: str) -> Optional[Dict[str, Any]]:
+        path = self._path(plan_id)
+        with self._lock:
+            if not path.exists():
+                return None
+            return json.loads(path.read_text(encoding="utf-8"))
+
+    def list(self) -> List[Dict[str, Any]]:
+        """Summaries, newest first — without the plan record and report."""
+        with self._lock:
+            if not self.directory.exists():
+                return []
+            bundles = [json.loads(p.read_text(encoding="utf-8"))
+                       for p in self.directory.glob("*.json")]
+        bundles.sort(key=lambda b: b.get("saved_at") or "", reverse=True)
+        return [{k: v for k, v in b.items() if k not in {"plan", "plate_report"}}
+                for b in bundles]
+
+    # -- delivery --------------------------------------------------------------
+
+    def deliver_pending(self) -> int:
+        """One pass over the outbox. Returns how many bundles were delivered."""
+        if not self.delivery_enabled:
+            return 0
+        delivered = 0
+        with self._lock:
+            pending = sorted(self._pending)
+        for plan_id in pending:
+            bundle = self.get(plan_id)
+            if bundle is None or (bundle.get("delivery") or {}).get("state") != PENDING:
+                with self._lock:
+                    self._pending.discard(plan_id)
+                continue
+            payload = {k: v for k, v in bundle.items() if k != "delivery"}
+            delivery = bundle["delivery"]
+            delivery["attempts"] += 1
+            try:
+                receipt = self._transport(payload)
+            except Exception as exc:  # recorded on the bundle and retried
+                delivery["last_error"] = str(exc)
+                if delivery["attempts"] == 1 or delivery["attempts"] % 10 == 0:
+                    logger.warning("plan %s results not delivered (attempt %d): %s",
+                                   bundle["plan_id"], delivery["attempts"], exc)
+            else:
+                delivery.update(state=DELIVERED, last_error=None, delivered_at=_now(),
+                                receipt=receipt)
+                delivered += 1
+            self._write(bundle)
+            if delivery["state"] == DELIVERED:
+                with self._lock:
+                    self._pending.discard(plan_id)
+        return delivered
+
+    def _worker(self) -> None:
+        while True:
+            self._wake.wait(self._retry_interval_s)
+            self._wake.clear()
+            try:
+                self.deliver_pending()
+            except Exception:  # never let the outbox thread die silently
+                logger.exception("plan results delivery pass failed")
+
+    def _default_transport(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        headers = {"Content-Type": "application/json"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        request = urllib.request.Request(
+            self.results_url, data=json.dumps(payload).encode("utf-8"),
+            headers=headers, method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
+                body = response.read().decode("utf-8") or "{}"
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise RuntimeError(f"HTTP {exc.code} from results endpoint: {detail}") from exc
+        return json.loads(body)

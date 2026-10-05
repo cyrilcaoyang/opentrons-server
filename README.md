@@ -1109,6 +1109,32 @@ Never emitted in dry run — a simulation must not enter the lab's history as
 real work. Delivery is best-effort: a bounded queue and a daemon thread, so an
 unreachable dashboard drops rows rather than stalling the control path.
 
+### Plan results (`OT2_PLAN_RESULTS_DIR`, `OT2_RESULTS_URL`)
+
+Every plan that ends — executed, failed or aborted — is saved as one JSON
+bundle: the full plan record with each step's outcome and reading, approver,
+proposer, and the per-well plate report when it weighed anything. Plans
+themselves stay in memory; the bundle is what survives a restart (a 483-step
+run's 192 weights once existed only in memory). Read them at
+`GET /plans/results` and `GET /plans/results/{plan_id}`.
+
+```
+OT2_PLAN_RESULTS_DIR=C:\SDL_State\ot2-complexation\ot2_plan_results   # default: beside the tip-state file
+OT2_RESULTS_URL=http://<dashboard-host>:8001/api/ingest/plan-results      # optional: deliver for the ELN
+OT2_RESULTS_TOKEN=<this device's token in PLAN_RESULTS_DEVICE_TOKENS>
+```
+
+When the approver picks an **ELN project** on the approval card, the bundle is
+also queued for the central server, which files it in BitacoraDB as an
+`UNFORMATTED` Experiment under the approver's name (ac-organic-lab
+`plan_results.py`). Delivery is a retrying outbox, not the best-effort events
+exporter: a bundle stays `pending` on disk until the central server confirms it
+journaled it, across restarts; `/status` → `details.plan_results.pending`
+counts what is waiting. No project, no delivery URL, or a dry run: the bundle
+stays on the gateway only. The project picker lists the user's projects from
+the edge (`GET /me`); without them it takes a typed title, which the central
+server checks against the roster before filing.
+
 ## Robot reachability
 
 The gateway's session state machine only moves when a command fails, so on its

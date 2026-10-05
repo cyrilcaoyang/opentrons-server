@@ -272,6 +272,9 @@ export interface Plan {
    *  operator approval of one ad-hoc step list. */
   approval: StepApproval | null;
   halt_reason: string | null;
+  /** ELN project chosen at approval; the results are filed there once the
+   *  plan ends. Null keeps them on the gateway only. */
+  eln_project?: string | null;
   /** Steps that cannot be safely repeated after a transport loss. */
   non_idempotent_actions: string[];
   /** Whether the gateway would run this right now... */

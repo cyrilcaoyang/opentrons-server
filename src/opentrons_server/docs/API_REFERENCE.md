@@ -62,6 +62,7 @@ Top level: `protocol_version`, `equipment_id`, `equipment_name`,
 
 | method + path | body | responses |
 |---|---|---|
+| `GET /me` | — | `{user, projects}` from the auth edge's headers, for the approval card's ELN project picker. Both empty on a direct request (no edge secret). |
 | `GET /labware` | — | `{definitions: [...]}` grid summaries for the deck-declare picker. Empty when `opentrons-shared-data` is not installed. |
 | `GET /labware/{load_name}` | — | one full Opentrons definition; **404** for an unknown name *or* a missing `opentrons-shared-data` |
 | `POST /labware/assemblies/preview` | `{schema_version: 1, kind: "plate_on_riser" \| "filter_stack", riser_height_mm: 0 \| 5, top: {plate_id, definition}, collector?: {plate_id, definition}, nesting_overlap_mm: number}` | Validated assembly, compiled `definition`, `top_origin_z_mm`, `total_height_mm`; **422** on unsupported geometry. Pure computation: no robot I/O, persistence or claim required. |
@@ -224,8 +225,10 @@ Plans live in memory and die with the process. Errors map as: `PlanNotFound`
 | `POST /plans` | open (identity when `OT2_REQUIRE_LOGIN`) | `{steps: [{action, args}], created_by?, notes?}` | **201** the draft plan view. Never touches the robot. **422** on an unknown action, bad args, or an empty step list. |
 | `GET /plans/{plan_id}` | open | — | **404** when unknown |
 | `PUT /plans/{plan_id}/steps` | open (identity when `OT2_REQUIRE_LOGIN`) | `{steps}` | replaces the steps, recomputes `step_hash`, resets to `draft` and **voids any approval**. **409** for an `executing`/terminal plan; **422** on bad steps |
-| `POST /plans/{plan_id}/approve` | claim | `{step_hash}` | the human gate. **409** when the hash does not match what was displayed, or the plan is not a draft; **423** with no live claim. Approval expires after **600 s** and records the claim's owner + session. Emits `plan_approved`. |
+| `POST /plans/{plan_id}/approve` | claim | `{step_hash, eln_project?}` | the human gate. **409** when the hash does not match what was displayed, or the plan is not a draft; **423** with no live claim. Approval expires after **600 s** and records the claim's owner + session. `eln_project` (a project title) files the results in the ELN when the plan ends; omit to keep them on the gateway. Emits `plan_approved`. |
 | `POST /plans/{plan_id}/execute` | claim | — | runs one step at a time, re-checking `allowed_actions` before each. On start the claim passes to the plan (`claimed_by.owner` = `automation (approved by <owner>)`, progress in `details.automation`) until it ends; the approving page may close. **423** when the live claim is a different owner/session than the approver; **409** when not approved or the approval expired. Fail-fast: first failure halts, remaining steps are `skipped`, `halt_reason` is set. Emits `plan_executed`. |
+| `GET /plans/results` | — | — | finished plans' saved bundles, newest first (status, approver, `eln_project`, `delivery.state`: `local_only` / `pending` / `delivered`). On disk, so they survive restarts. |
+| `GET /plans/results/{plan_id}` | — | — | one bundle: full plan record, `plate_report`, delivery. **404** when none was saved. |
 | `POST /plans/{plan_id}/abort` | claim, or any signed-in caller while a plan holds the device | — | operator stop; pending steps become `skipped`. Terminal plans are returned untouched. |
 | `DELETE /plans/{plan_id}` | claim | — | **204**. Only `executed` / `failed` / `aborted` plans — anything else is **409** ("abort it instead"), and a plan with a command still in flight is **409** too. |
 

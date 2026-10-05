@@ -185,3 +185,4 @@ ui/node_modules/
 
 # Persistent operator stop latch (per gateway)
 ot2_stop_state.json
+ot2_plan_results/

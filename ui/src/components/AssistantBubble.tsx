@@ -9,6 +9,7 @@ import {
   deletePlan,
   executePlan,
   getAssistantHealth,
+  getMe,
   getPlan,
   listPlans,
   plateReportUrl,
@@ -111,6 +112,13 @@ export function AssistantBubble({
   const [planStates, setPlanStates] = useState<Record<string, Plan | "gone">>({});
   const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [planBusy, setPlanBusy] = useState<string | null>(null);
+  // The signed-in user's ELN projects, for the approval card's picker.
+  const [elnProjects, setElnProjects] = useState<string[]>([]);
+  useEffect(() => {
+    getMe().then((me) => setElnProjects(me.projects)).catch(() => {
+      /* no list: the card falls back to a typed project title */
+    });
+  }, []);
   const endRef = useRef<HTMLDivElement | null>(null);
 
   const refreshPlan = useCallback(async (planId: string) => {
@@ -616,7 +624,8 @@ export function AssistantBubble({
                 <p className="text-[11px] text-ink-subtle dark:text-slate-400">From {plan.created_by}</p>
                 <ChatPlanCard planId={plan.plan_id} live={plan} busy={planBusy === plan.plan_id}
                   claimHeld={claim.held}
-                  onApprove={(hash) => void runPlanAction(plan.plan_id, () => approvePlan(plan.plan_id, hash, claim.token))}
+                  elnProjects={elnProjects}
+                  onApprove={(hash, project) => void runPlanAction(plan.plan_id, () => approvePlan(plan.plan_id, hash, claim.token, project))}
                   onRun={() => void runPlanAction(plan.plan_id, () => executePlan(plan.plan_id, claim.token))}
                   onDiscard={() => void runPlanAction(plan.plan_id, () => abortPlan(plan.plan_id, claim.token))}
                   onDismiss={() => void dismissPlan(plan.plan_id)} />
@@ -665,9 +674,10 @@ export function AssistantBubble({
                   previewSteps={m.steps}
                   busy={planBusy === m.planId}
                   claimHeld={claim.held}
-                  onApprove={(hash) =>
+                  elnProjects={elnProjects}
+                  onApprove={(hash, project) =>
                     void runPlanAction(m.planId!, () =>
-                      approvePlan(m.planId!, hash, claim.token),
+                      approvePlan(m.planId!, hash, claim.token, project),
                     )
                   }
                   onRun={() =>
@@ -862,11 +872,14 @@ function stepLine(s: PlanStep): string {
  * same review property the gateway enforces. Without live state (fetch failed,
  * gateway restarted) the card degrades to the read-only preview.
  */
+const ELN_PROJECT_KEY = "ot2.assistant.elnProject";
+
 function ChatPlanCard({
   live,
   previewSteps,
   busy,
   claimHeld,
+  elnProjects,
   onApprove,
   onRun,
   onDiscard,
@@ -877,11 +890,30 @@ function ChatPlanCard({
   previewSteps?: PlanStep[];
   busy: boolean;
   claimHeld: boolean;
-  onApprove: (stepHash: string) => void;
+  elnProjects: string[];
+  onApprove: (stepHash: string, elnProject: string | null) => void;
   onRun: () => void;
   onDiscard: () => void;
   onDismiss: () => void;
 }) {
+  // Where this plan's results are filed. Remembered per browser, since the
+  // same person usually files a run of plans in one project.
+  const [elnProject, setElnProject] = useState<string>(() => {
+    try {
+      return localStorage.getItem(ELN_PROJECT_KEY) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  const approve = (stepHash: string) => {
+    const project = elnProject.trim() || null;
+    try {
+      localStorage.setItem(ELN_PROJECT_KEY, project ?? "");
+    } catch {
+      /* private mode: the choice just isn't remembered */
+    }
+    onApprove(stepHash, project);
+  };
   if (live === "gone") {
     return (
       <p className="mt-1.5 text-[10px] italic text-ink-subtle dark:text-slate-500">
@@ -997,6 +1029,38 @@ function ChatPlanCard({
           {live.blocked_reason}
         </p>
       )}
+      {live.status === "draft" ? (
+        <label className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink dark:text-slate-200">
+          Results to ELN project
+          {elnProjects.length > 0 ? (
+            <select
+              value={elnProjects.includes(elnProject) ? elnProject : ""}
+              disabled={!claimHeld || busy}
+              onChange={(e) => setElnProject(e.target.value)}
+              className="rounded border border-purple-300 bg-white px-1 py-0.5 text-[11px] dark:border-purple-700 dark:bg-slate-800"
+            >
+              <option value="">None (keep on robot only)</option>
+              {elnProjects.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={elnProject}
+              disabled={!claimHeld || busy}
+              onChange={(e) => setElnProject(e.target.value)}
+              placeholder="project title, or blank to keep on robot only"
+              className="min-w-[14rem] flex-1 rounded border border-purple-300 bg-white px-1 py-0.5 text-[11px] dark:border-purple-700 dark:bg-slate-800"
+            />
+          )}
+        </label>
+      ) : (
+        <p className="mb-1 text-[10px] text-ink-subtle dark:text-slate-400">
+          {live.eln_project
+            ? <>Results go to ELN project <span className="font-semibold">{live.eln_project}</span> as an unformatted run when the plan ends.</>
+            : "Results are kept on the robot only (no ELN project chosen)."}
+        </p>
+      )}
       {!claimHeld && live.status === "draft" && (
         <p className="mb-1 text-[10px] text-amber-700 dark:text-amber-500">
           Take control of the device to approve.
@@ -1009,7 +1073,7 @@ function ChatPlanCard({
             disabled={!claimHeld || busy}
             // Approves the hash of the steps rendered above — never a
             // re-fetch-and-approve, so a plan that moved gets a 409.
-            onClick={() => onApprove(live.step_hash)}
+            onClick={() => approve(live.step_hash)}
             className={`${actionButton} bg-purple-600 hover:bg-purple-700`}
           >
             Approve these {live.steps.length} steps
