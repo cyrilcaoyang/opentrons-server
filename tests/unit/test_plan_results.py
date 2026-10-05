@@ -177,15 +177,58 @@ def test_a_run_cut_off_by_a_restart_is_recovered_as_interrupted(tmp_path):
     store.save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
                         gateway_version="0.4.0")
 
+    # This process wrote it, so it is live here: never closed out.
+    assert store.recover() == []
+    _from_a_dead_process(store, "p1")
+
     reopened = _store(tmp_path, results_url="http://central/x", transport=lambda p: {"ok": True})
     assert reopened.recover() == ["p1"]
     bundle = reopened.get("p1")
-    assert bundle["status"] == "interrupted" and "restarted" in bundle["halt_reason"]
+    assert bundle["status"] == "interrupted" and "never completed" in bundle["halt_reason"]
     assert [r["outcome"] for r in bundle["plan"]["results"]] == ["ok", "unknown", "skipped"]
     assert bundle["steps_unknown"] == 1 and bundle["steps_skipped"] == 1
     # Like any ended run with a project, it goes to the ELN.
     assert bundle["delivery"]["state"] == PENDING
     assert reopened.recover() == []  # only once
+
+
+def _from_a_dead_process(store, plan_id):
+    """Rewrite a record's writer as a process that no longer exists."""
+    import json as _json
+
+    path = store._path(plan_id)
+    bundle = _json.loads(path.read_text())
+    bundle["writer"] = {"token": "gone", "pid": 2 ** 22 + 7, "host": bundle["writer"]["host"]}
+    path.write_text(_json.dumps(bundle))
+
+
+def test_a_record_still_written_by_another_live_process_is_left_alone(tmp_path):
+    import json as _json
+    import os
+
+    store = _store(tmp_path)
+    plan = _plan("live-elsewhere")
+    plan.status = "executing"
+    store.save_progress(plan, approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    path = store._path("live-elsewhere")
+    bundle = _json.loads(path.read_text())
+    bundle["writer"] = {"token": "other", "pid": os.getppid(), "host": bundle["writer"]["host"]}
+    path.write_text(_json.dumps(bundle))
+    assert store.recover() == []
+    assert store.get("live-elsewhere")["delivery"]["state"] == "running"
+
+
+def test_a_delivery_retry_does_not_make_an_old_record_look_recent(tmp_path):
+    import time
+
+    store = _store(tmp_path, results_url="http://central/x", transport=lambda p: {"ok": True})
+    store.save(_plan("old"), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    time.sleep(0.05)
+    store.save(_plan("new", eln_project=None), approved_by="ada@lab", equipment_id="e",
+               gateway_version="v")
+    time.sleep(0.05)
+    assert store.deliver_pending() == 1  # rewrites "old"
+    assert [b["plan_id"] for b in store.list(limit=1)] == ["new"]
 
 
 def test_list_returns_the_newest_records_first_and_honours_the_limit(tmp_path):
@@ -231,7 +274,7 @@ def test_the_executor_reports_each_step_as_it_starts_and_ends():
     ]
 
 
-def test_a_failing_record_write_never_halts_the_robot():
+def test_a_run_that_cannot_be_recorded_stops_before_its_next_step():
     from unittest.mock import Mock
 
     from opentrons_server.gateway.claims import ClaimManager
@@ -244,15 +287,25 @@ def test_a_failing_record_write_never_halts_the_robot():
     service.allowed_actions.return_value = ["lights.set"]
     claim = ClaimedBy(session_id="s", owner="ada@lab",
                       expires_at=datetime.now(timezone.utc).replace(year=2099))
-    plan = store.create([PlanStep(action="lights.set", args={"on": True})], created_by="agent")
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = store.create([PlanStep(action="lights.set", args={"on": True}),
+                         PlanStep(action="plate.unload", args={})], created_by="agent")
     store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=claim)
     executor = PlanExecutor(service, store)
+    calls = []
 
-    def disk_full(_snap):
-        raise OSError("disk full")
+    def fails_after_step_one(_snap):
+        calls.append(1)
+        if len(calls) > 3:  # run start, step 1 start, step 1 end succeed
+            raise OSError("disk full")
 
-    executor.on_progress = disk_full
-    assert executor.execute(plan.plan_id, claimed_by=claim).status == "executed"
+    executor.on_progress = fails_after_step_one
+    done = executor.execute(plan.plan_id, claimed_by=claim)
+    assert done.status == "failed"
+    assert "disk full" in done.halt_reason and "nothing runs unrecorded" in done.halt_reason
+    service.set_lights.assert_called_once()
+    service.unload_plate.assert_not_called()  # its start could not be recorded
+    assert done.results[1].outcome == "skipped" and done.results[1].started_at is None
     assert "disk full" in executor.progress_error
 
 
@@ -276,8 +329,10 @@ def test_a_restart_mid_run_is_recorded_when_the_gateway_comes_back(tmp_path, mon
     plan.status = "executing"
     plan.results[1].finished_at = None
     plan.results[1].outcome = "pending"
-    _store(tmp_path).save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
-                                   gateway_version="0.4.0")
+    earlier = _store(tmp_path)
+    earlier.save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
+                          gateway_version="0.4.0")
+    _from_a_dead_process(earlier, "cut-off")
     client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
     record = client.get("/plans/results/cut-off").json()
     assert record["status"] == "interrupted"

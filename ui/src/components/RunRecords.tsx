@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getRunRecords, plateReportUrl, runRecordUrl, type RunRecord } from "../lib/api";
 
@@ -36,17 +36,26 @@ export function RunRecords() {
   const [records, setRecords] = useState<RunRecord[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const running = records?.some((r) => r.status === "executing") ?? false;
+  // One request at a time: a slow gateway must not let an older response
+  // land after a newer one.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
-    const load = () =>
+    const load = () => {
+      if (inFlight.current) return;
+      inFlight.current = true;
       getRunRecords(10)
         .then((rows) => {
           if (!active) return;
           setRecords(rows);
           setError(null);
         })
-        .catch((e: unknown) => active && setError(e instanceof Error ? e.message : String(e)));
+        .catch((e: unknown) => active && setError(e instanceof Error ? e.message : String(e)))
+        .finally(() => {
+          inFlight.current = false;
+        });
+    };
     void load();
     // Fast while a run is going, so steps and readings appear as they land.
     const timer = setInterval(load, running ? 3000 : 15000);
@@ -65,6 +74,12 @@ export function RunRecords() {
   }
 
   return (
+    <>
+    {error && (
+      <p role="alert" className="mb-2 text-xs text-rose-700 dark:text-rose-400">
+        Could not refresh run records ({error}); what is shown may be out of date.
+      </p>
+    )}
     <ul className="flex flex-col gap-2">
       {records.map((r) => {
         const pct = r.steps_total ? Math.round((100 * r.steps_done) / r.steps_total) : 0;
@@ -122,5 +137,6 @@ export function RunRecords() {
         );
       })}
     </ul>
+    </>
   );
 }
