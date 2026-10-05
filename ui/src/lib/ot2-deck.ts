@@ -480,6 +480,32 @@ export function claimedByFromStatus(status: Status): StatusClaimedBy | null {
   };
 }
 
+/** The approved plan holding the device claim, from `details.automation`.
+ *  Present only while a plan runs unattended under the `automation` owner. */
+export interface StatusAutomation {
+  plan_id: string;
+  approved_by: string;
+  started_at: string;
+  step: number;
+  total_steps: number;
+  action: string | null;
+}
+
+export function automationFromStatus(status: Status): StatusAutomation | null {
+  const raw = status.details?.["automation"];
+  if (!raw || typeof raw !== "object") return null;
+  const a = raw as Partial<StatusAutomation>;
+  if (typeof a.plan_id !== "string") return null;
+  return {
+    plan_id: a.plan_id,
+    approved_by: typeof a.approved_by === "string" ? a.approved_by : "unknown",
+    started_at: typeof a.started_at === "string" ? a.started_at : "",
+    step: typeof a.step === "number" ? a.step : 0,
+    total_steps: typeof a.total_steps === "number" ? a.total_steps : 0,
+    action: typeof a.action === "string" ? a.action : null,
+  };
+}
+
 /** Robot probe info from `details.robot` (gateway HTTP-probe cache). */
 export interface RobotInfo {
   robot_name?: string;

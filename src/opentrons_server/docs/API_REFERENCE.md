@@ -91,7 +91,7 @@ All return `CommandResponse` `{ok, message, state}` on 200 unless noted.
 | `POST /control/home` | — | **409** on failure |
 | `POST /control/pause` | — | → `PAUSED` / `degraded`; during a command it is honoured when that command ends (`details.pause_requested: true` until then) and an executing plan waits at its next step |
 | `POST /control/resume` | — | leaves `PAUSED` |
-| `POST /control/stop` | — | **software** stop of this gateway's HTTP run — not a hardware e-stop. Stays reachable while a command is in flight. Success only after stopped readback; latches until `shutdown` + `startup`. **409** when the transport is SSH, there is no session, the robot is under external control, or a stop is already in progress. |
+| `POST /control/stop` | — | Like `pause` / `resume`, open to any signed-in, control-capable caller while a plan holds the device as automation. **software** stop of this gateway's HTTP run — not a hardware e-stop. Stays reachable while a command is in flight. Success only after stopped readback; latches until `shutdown` + `startup`. **409** when the transport is SSH, there is no session, the robot is under external control, or a stop is already in progress. |
 | `POST /control/reconcile` | optional raw snapshot object, or no body | acknowledges `unknown_outcome`, or an `error` that still has a live session, and returns to `ready`. **409** while a stop is latched. |
 
 ## Control — motion and liquid handling (claim)
@@ -225,8 +225,8 @@ Plans live in memory and die with the process. Errors map as: `PlanNotFound`
 | `GET /plans/{plan_id}` | open | — | **404** when unknown |
 | `PUT /plans/{plan_id}/steps` | open (identity when `OT2_REQUIRE_LOGIN`) | `{steps}` | replaces the steps, recomputes `step_hash`, resets to `draft` and **voids any approval**. **409** for an `executing`/terminal plan; **422** on bad steps |
 | `POST /plans/{plan_id}/approve` | claim | `{step_hash}` | the human gate. **409** when the hash does not match what was displayed, or the plan is not a draft; **423** with no live claim. Approval expires after **600 s** and records the claim's owner + session. Emits `plan_approved`. |
-| `POST /plans/{plan_id}/execute` | claim | — | runs one step at a time, re-checking `allowed_actions` before each. **423** when the live claim is a different owner/session than the approver; **409** when not approved or the approval expired. Fail-fast: first failure halts, remaining steps are `skipped`, `halt_reason` is set. Emits `plan_executed`. |
-| `POST /plans/{plan_id}/abort` | claim | — | operator stop; pending steps become `skipped`. Terminal plans are returned untouched. |
+| `POST /plans/{plan_id}/execute` | claim | — | runs one step at a time, re-checking `allowed_actions` before each. On start the claim passes to the plan (`claimed_by.owner` = `automation (approved by <owner>)`, progress in `details.automation`) until it ends; the approving page may close. **423** when the live claim is a different owner/session than the approver; **409** when not approved or the approval expired. Fail-fast: first failure halts, remaining steps are `skipped`, `halt_reason` is set. Emits `plan_executed`. |
+| `POST /plans/{plan_id}/abort` | claim, or any signed-in caller while a plan holds the device | — | operator stop; pending steps become `skipped`. Terminal plans are returned untouched. |
 | `DELETE /plans/{plan_id}` | claim | — | **204**. Only `executed` / `failed` / `aborted` plans — anything else is **409** ("abort it instead"), and a plan with a command still in flight is **409** too. |
 
 ## Assistant — optional in-page chat

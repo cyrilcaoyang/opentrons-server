@@ -37,11 +37,14 @@ The three rules that make an approval mean something:
    step after approval changes the hash and silently voids the approval
    (:meth:`PlanStore.replace_steps`). An agent cannot get approval for a
    harmless plan and then swap the steps.
-2. **Approval requires a live claim, and execution requires the *same*
-   claim session.** The claim is held by the operator's browser, and its TTL
-   only refreshes while that page is heartbeating. So "a human approved
-   this" degrades correctly into "a human is still present": if they walk away
-   and the claim lapses, the approval dies with it.
+2. **Approval requires a live claim, and starting execution requires the
+   *same* claim session.** The claim is held by the operator's browser, and
+   its TTL only refreshes while that page is heartbeating: an approval whose
+   operator walked away before pressing Run dies with their claim. Once the
+   run starts, the claim passes to the plan itself (an ``automation`` owner,
+   :meth:`ClaimManager.hand_to_plan`) and the plan runs to completion, error
+   or stop whether or not the page stays open. Anyone signed in may stop,
+   pause or abort it meanwhile; nobody else can take control.
 3. **Nothing here can approve or start itself.** :meth:`PlanStore.approve`
    takes a ``ClaimedBy`` — an identity the caller cannot mint — and the API
    layer only ever passes one obtained from a real claim. Both ``approve``
@@ -72,6 +75,7 @@ from pydantic import BaseModel, ValidationError
 
 from .advanced import ADVANCED_ACTIONS
 from .platebalance import PlateBalanceReferenceRequest, PlateBalanceRequest
+from .claims import plan_session_id
 from .models import (
     ClaimedBy,
     DeckDeclareRequest,
@@ -575,7 +579,18 @@ class PlanExecutor:
             plan = self._store.check_executable(plan_id, claimed_by=claimed_by)
             plan.status = "executing"
             plan.halt_reason = None
+            # From here the plan, not the approving browser, holds the device:
+            # closing the page no longer halts the run. Released however the
+            # run ends.
+            self._service.claims.hand_to_plan(
+                plan.plan_id, approved_by=plan.approval.owner, total_steps=len(plan.steps)
+            )
+        try:
+            return self._run(plan)
+        finally:
+            self._service.claims.release_plan(plan.plan_id)
 
+    def _run(self, plan: Plan) -> Plan:
         for index, step in enumerate(plan.steps):
             if not self._wait_while_paused(plan):
                 return plan
@@ -590,6 +605,7 @@ class PlanExecutor:
                     self._halt(plan, index, str(exc))
                     return plan
                 result.started_at = datetime.now(timezone.utc)
+                self._service.claims.plan_progress(plan.plan_id, step=index + 1, action=step.action)
             # Do not hold the registry lock during I/O: abort must remain
             # available. A command already started keeps its actual outcome.
             try:
@@ -671,20 +687,23 @@ class PlanExecutor:
             time.sleep(0.2)
 
     def _assert_live_approval(self, plan: Plan) -> None:
-        """Before each step: the approval still exists and its claim is live.
+        """Before each step: the approval still exists and the plan still
+        holds the claim it was handed at start.
 
-        The approval's start window is not re-checked here. It was enforced by
-        ``check_executable`` when execution began; applying it per step killed
-        any plan that ran longer than the window. A revoked approval (cleared
-        by abort, revise, or stop) still halts at the next step.
+        The approving operator's own claim is not re-checked: it was enforced by
+        ``check_executable`` when execution began, and the plan has held the
+        device since, so a closed page or a sleeping laptop does not halt it.
+        The approval's start window is not re-checked either; applying it per
+        step killed any plan that ran longer than the window. A revoked
+        approval (cleared by abort, revise, or stop) still halts at the next
+        step, as does a plan claim that was cleared.
         """
         auth = plan.approval
         if auth is None:
             raise PlanStateError("approval revoked; review remaining work before continuing")
         live = self._service.claims.current()
-        if (live is None or live.expires_at <= datetime.now(timezone.utc)
-                or live.session_id != auth.session_id or live.owner != auth.owner):
-            raise ApprovalRequiresClaim("approving operator no longer holds a live claim")
+        if live is None or live.session_id != plan_session_id(plan.plan_id):
+            raise ApprovalRequiresClaim("the plan no longer holds the device claim")
 
     def _assert_allowed(self, step: PlanStep) -> None:
         """Layer-3 re-check against the device's own live answer.

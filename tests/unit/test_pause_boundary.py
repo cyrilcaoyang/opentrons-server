@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from opentrons_server.gateway.claims import ClaimManager
 from opentrons_server.gateway.deck import DeckDeclarationStore
 from opentrons_server.gateway.plans import PlanExecutor, PlanStep, PlanStore
 from opentrons_server.gateway.plate_state import PlateStateStore
@@ -139,7 +140,7 @@ def _approved_plan(store: PlanStore, *actions: str):
 def _executor_service(state: str):
     service = Mock()
     service.state = SimpleNamespace(value=state)
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     return service
 

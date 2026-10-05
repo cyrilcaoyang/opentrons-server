@@ -3217,6 +3217,12 @@ class OT2Service:
         claimed_by = self.claims.current()
         if claimed_by is not None:
             details["claimed_by"] = claimed_by.model_dump(mode="json")
+        automation = self.claims.automation()
+        if automation is not None:
+            # An approved plan holds the device: who approved it, how far it
+            # has got. What every other viewer needs to see that the robot is
+            # busy with unattended work, and who to ask about it.
+            details["automation"] = automation
 
         return EquipmentStatus(
             # Explicit: the shared model defaults to "1.0" (the honest reading
