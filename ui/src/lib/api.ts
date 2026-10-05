@@ -101,6 +101,9 @@ export function elnOutcome(r: RunRecord): { text: string; tone: "ok" | "warn" | 
     if (d.eln?.state === "held") {
       return { text: `ELN: held — ${d.eln.last_error ?? "refused by the ELN"}`, tone: "bad" };
     }
+    if (d.eln?.check_error) {
+      return { text: `ELN: filing status unavailable (${d.eln.check_error})`, tone: "warn" };
+    }
     return { text: "ELN: filing…", tone: "warn" };
   }
   return { text: d.state, tone: "muted" };

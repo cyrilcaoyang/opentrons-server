@@ -119,13 +119,20 @@ export function AssistantBubble({
   // No free text: a typed name the ELN does not have is only ever refused.
   const [elnProjects, setElnProjects] = useState<ElnProjects>({ status: "loading", projects: [] });
   useEffect(() => {
-    getElnProjects()
-      .then((r) => setElnProjects(r.configured
-        ? { status: "ready", projects: r.projects }
-        : { status: "unconfigured", projects: [] }))
-      .catch((e: unknown) => setElnProjects({
-        status: "error", projects: [], error: e instanceof Error ? e.message : String(e),
-      }));
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = () =>
+      getElnProjects()
+        .then((r) => active && setElnProjects(r.configured
+          ? { status: "ready", projects: r.projects }
+          : { status: "unconfigured", projects: [] }))
+        .catch((e: unknown) => {
+          if (!active) return;
+          setElnProjects({ status: "error", projects: [], error: e instanceof Error ? e.message : String(e) });
+          timer = setTimeout(load, 30000); // transient failures heal on their own
+        });
+    void load();
+    return () => { active = false; if (timer) clearTimeout(timer); };
   }, []);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -1098,7 +1105,10 @@ function ChatPlanCard({
             <span className="text-amber-700 dark:text-amber-400">the ELN is not connected on the dashboard</span>
           )}
           {elnProjects.status === "error" && (
-            <span className="text-amber-700 dark:text-amber-400">could not load your ELN projects ({elnProjects.error}); results stay on the robot</span>
+            <span className="text-amber-700 dark:text-amber-400">
+              could not load your ELN projects ({elnProjects.error}); results stay on the robot.
+              Open this panel through the lab dashboard (http://100.64.254.6/ot2/…) to choose one.
+            </span>
           )}
         </label>
       ) : (

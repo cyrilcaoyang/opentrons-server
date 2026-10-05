@@ -29,6 +29,7 @@ import logging
 import os
 import socket
 import tempfile
+import time
 import threading
 import uuid
 import urllib.error
@@ -57,6 +58,9 @@ ELN_FILED = "filed"
 ELN_HELD = "held"  # refused: not a member, project missing, rejected row
 _ELN_TERMINAL = frozenset({ELN_FILED, ELN_HELD})
 _FILING_POLL_S = 10.0
+# A held bundle can still be filed later (someone creates the project, or a
+# human refiles it centrally); it is re-checked at this slower pace.
+_HELD_RECHECK_S = 300.0
 
 #: The run status a bundle carries when its record was never completed.
 INTERRUPTED = "interrupted"
@@ -169,15 +173,20 @@ class PlanResultsStore:
         # Delivered bundles whose ELN outcome is not known yet (incl. ones
         # delivered before outcomes were tracked).
         self._awaiting: set[str] = set()
+        self._held: set[str] = set()
+        self._held_checked_at = time.monotonic()
         if self.directory.exists():
             for path in self.directory.glob("*.json"):
                 bundle = json.loads(path.read_text(encoding="utf-8"))
                 delivery = bundle.get("delivery") or {}
                 if delivery.get("state") == PENDING:
                     self._pending.add(bundle["plan_id"])
-                elif (delivery.get("state") == DELIVERED
-                      and (delivery.get("eln") or {}).get("state") not in _ELN_TERMINAL):
-                    self._awaiting.add(bundle["plan_id"])
+                elif delivery.get("state") == DELIVERED:
+                    eln_state = (delivery.get("eln") or {}).get("state")
+                    if eln_state == ELN_HELD:
+                        self._held.add(bundle["plan_id"])
+                    elif eln_state != ELN_FILED:
+                        self._awaiting.add(bundle["plan_id"])
         if self.delivery_enabled and start_worker:
             self._thread = threading.Thread(target=self._worker, name="ot2-plan-results", daemon=True)
             self._thread.start()
@@ -421,8 +430,12 @@ class PlanResultsStore:
         if not self.delivery_enabled:
             return 0
         settled = 0
+        now = time.monotonic()
         with self._lock:
             awaiting = sorted(self._awaiting)
+            if self._held and now - self._held_checked_at >= _HELD_RECHECK_S:
+                awaiting += sorted(self._held - self._awaiting)
+                self._held_checked_at = now
         for plan_id in awaiting:
             bundle = self.get(plan_id)
             if bundle is None:
@@ -447,10 +460,16 @@ class PlanResultsStore:
                 eln.pop("check_error", None)
             delivery["eln"] = eln
             self._write(bundle)
-            if eln["state"] in _ELN_TERMINAL:
-                settled += 1
-                with self._lock:
+            with self._lock:
+                if eln["state"] == ELN_FILED:
                     self._awaiting.discard(plan_id)
+                    self._held.discard(plan_id)
+                    settled += 1
+                elif eln["state"] == ELN_HELD:
+                    if plan_id in self._awaiting:
+                        settled += 1
+                    self._awaiting.discard(plan_id)
+                    self._held.add(plan_id)
         return settled
 
     def _worker(self) -> None:
