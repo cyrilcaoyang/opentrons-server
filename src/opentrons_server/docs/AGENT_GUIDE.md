@@ -314,10 +314,17 @@ not survive a restart, so an approval must not either.
    Claim-gated. The hash must match what the reviewer was shown; a mismatch is
    **409**. The approval records the claim's owner and session; execution
    must start within **600 s**. A started plan is not cut off by that window:
-   it halts only if the approving claim session lapses, the approval is
-   revoked, a step fails, or the device refuses the next step.
+   it halts only if the approval is revoked, its claim is cleared, a step
+   fails, or the device refuses the next step.
 4. **`POST /plans/{plan_id}/execute`** — claim-gated, and the live claim must
-   be the *same owner and session* that approved. Runs one step at a time,
+   be the *same owner and session* that approved. On start the claim passes
+   to the plan itself: `details.claimed_by.owner` becomes
+   `automation (approved by <owner>)` and `details.automation` carries
+   `{plan_id, approved_by, started_at, step, total_steps, action}`. The plan
+   then runs to completion, failure or stop whether or not the approving page
+   stays open; nobody can claim or take over the device meanwhile, and
+   `stop` / `pause` / `resume` / `abort` are open to any signed-in,
+   control-capable caller. The claim is released when the plan ends. Runs one step at a time,
    re-checking `allowed_actions` before **every** step, so a plan approved
    against a ready robot cannot fire into one that has since faulted or been
    seized. Fail-fast: the first refusal or error halts the plan, marks the

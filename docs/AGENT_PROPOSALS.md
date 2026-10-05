@@ -39,8 +39,10 @@ Three properties, each with a test named after it in `tests/unit/test_plans.py`:
    stays alive while the operator's page heartbeats, so "a human approved
    this" decays into "a human is still here". A different tab is a different
    session and must re-review. An approval must be *started* within 10 minutes
-   and is spent on use; once running, the plan continues for as long as the
-   approving claim session stays live, however long it takes.
+   and is spent on use. Once running, the plan holds the claim itself as
+   `automation (approved by <owner>)` and continues until it completes, fails
+   or is stopped, whether or not the approving page stays open; anyone signed
+   in can stop, pause or abort it, and nobody can take control meanwhile.
 3. **`allowed_actions` is re-checked live before every step.** A plan approved
    against a ready robot cannot fire into one that has since faulted, paused,
    or been seized by an external run. The first refusal halts the plan and

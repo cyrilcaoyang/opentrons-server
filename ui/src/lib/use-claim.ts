@@ -97,7 +97,10 @@ export function useClaim(owner: string) {
           if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
             tokenRef.current = null;
             stopHeartbeat();
-            setState({ ...IDLE, error: "Claim lost — the gateway expired or forgot it. Take control again." });
+            // Also what the approving page sees once its plan starts: the
+            // plan takes the claim over as automation, and the panel's
+            // banner says so.
+            setState({ ...IDLE, error: "This page no longer holds control — a running plan took it over, or the gateway expired or forgot the claim. Take control again once the device is free." });
           }
           // Transient network failures: keep trying until the TTL decides.
         }

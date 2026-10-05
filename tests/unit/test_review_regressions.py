@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from opentrons_server.gateway.api import create_app
 from opentrons_server.gateway.assistant import Assistant
-from opentrons_server.gateway.models import ClaimedBy
+from opentrons_server.gateway.claims import ClaimManager
+from opentrons_server.gateway.models import ClaimedBy, ClaimRequest
 from opentrons_server.gateway.plans import PlanExecutor, PlanStep, PlanStore
 from opentrons_server.gateway.service import OT2Service, OT2ServiceState
 
@@ -62,7 +63,7 @@ def approved_plan():
     plan = store.create([PlanStep(action="lights.set", args={"on": True}), PlanStep(action="plate.unload", args={})], created_by="assistant")
     store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=claim)
     service = Mock()
-    service.claims.current.return_value = claim
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     return store, claim, plan, service
 
@@ -78,7 +79,7 @@ def test_abort_during_first_step_prevents_later_steps_and_preserves_abort():
 
 def test_lost_claim_between_plan_steps_blocks_the_next_step():
     store, claim, plan, service = approved_plan()
-    service.set_lights.side_effect = lambda _: setattr(service.claims.current, "return_value", None)
+    service.set_lights.side_effect = lambda _: service.claims.force_clear()
     result = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=claim)
     assert result.status == "failed"
     service.unload_plate.assert_not_called()
@@ -121,9 +122,14 @@ def test_running_plan_cannot_be_executed_twice_revised_or_deleted():
     service.unload_plate.assert_not_called()
 
 
-def test_owner_change_with_same_session_id_invalidates_plan_approval():
+def test_a_different_claim_holder_mid_run_halts_the_plan():
     store, claim, plan, service = approved_plan()
-    service.set_lights.side_effect = lambda _: setattr(service.claims.current, "return_value", claim.model_copy(update={"owner": "bob"}))
+
+    def seize(_):
+        service.claims.force_clear()
+        service.claims.acquire(ClaimRequest(owner="bob", session_id="one", ttl_s=30))
+
+    service.set_lights.side_effect = seize
     assert PlanExecutor(service, store).execute(plan.plan_id, claimed_by=claim).status == "failed"
     service.unload_plate.assert_not_called()
 

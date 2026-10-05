@@ -170,6 +170,15 @@ the prebuilt static bundle ships inside the package (`src/opentrons_server/ui_di
   `ot2-gateway-ui`, so it means any UI tab. The field is additive and
   defaults false, so spec-shaped `lab-skills` / dashboard bodies are unchanged
   and never take over by accident.
+- **Running plans hold the device themselves.** When an approved plan starts,
+  the claim passes from the operator's page to the plan, shown as
+  `automation (approved by <owner>)` with progress in `details.automation` and
+  a violet banner on every panel. The plan runs until it completes, fails or
+  is stopped — a closed tab, a sleeping laptop or a background tab no longer
+  halts it (they did: browsers throttle background timers, and a 483-step plan
+  halted at step 43 on 2026-10-05). Nobody can claim or take over meanwhile;
+  STOP, PAUSE, play and plan abort are open to anyone signed in. The claim is
+  released when the plan ends.
 - **Labware catalog:** the deck-declare picker merges the authored catalog with
   `GET /labware`, a read-only summary of the official Opentrons definitions.
   That endpoint is populated when the optional extra is installed:

@@ -16,7 +16,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from opentrons_server.gateway.api import create_app
-from opentrons_server.gateway.models import ClaimedBy
+from opentrons_server.gateway.claims import ClaimManager
+from opentrons_server.gateway.models import ClaimedBy, ClaimRequest
 from opentrons_server.gateway.platebalance import BalanceReferenceTimeout
 from opentrons_server.gateway.plans import (
     PLAN_ACTIONS,
@@ -233,7 +234,7 @@ def test_a_running_plan_outlives_the_approval_start_window():
     approval, because the start window was checked before every step."""
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     plan = _approved(store, "lights.set", "plate.unload")
 
@@ -247,24 +248,68 @@ def test_a_running_plan_outlives_the_approval_start_window():
     service.unload_plate.assert_called_once()
 
 
-def test_a_running_plan_still_halts_when_its_claim_session_goes():
+def test_a_running_plan_holds_the_claim_itself_and_outlives_the_operator_page():
+    """Live halts 2026-10-05: a 483-step plan stopped at step 43 because the
+    approving browser stopped heartbeating (background tab). Once started, the
+    plan holds the claim as automation; the operator's page is irrelevant."""
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
+    operator = service.claims.acquire(ClaimRequest(owner="ada@lab", session_id="sess-1", ttl_s=5))
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     plan = _approved(store, "lights.set", "plate.unload")
-    service.set_lights.side_effect = lambda _on: setattr(
-        service.claims.current, "return_value", None)  # panel closed, claim lapsed
+    seen = {}
+
+    def during_first_step(_on):
+        held = service.claims.current()
+        seen["owner"] = held.owner
+        seen["automation"] = service.claims.automation()
+        # The operator's page is gone: its token no longer works, and its
+        # claim's deadline is long past.
+        seen["operator_token_valid"] = service.claims.validate(operator.claim_token)
+        service.claims._expires_at = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+    service.set_lights.side_effect = during_first_step
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+
+    assert done.status == "executed"
+    service.unload_plate.assert_called_once()
+    assert seen["owner"] == "automation (approved by ada@lab)"
+    assert seen["automation"]["plan_id"] == plan.plan_id
+    assert seen["automation"]["step"] == 1 and seen["automation"]["total_steps"] == 2
+    assert seen["operator_token_valid"] is False
+    assert service.claims.current() is None  # released when the run ends
+
+
+def test_a_running_plan_halts_when_its_claim_is_cleared():
+    store = PlanStore()
+    service = Mock()
+    service.claims = ClaimManager()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = _approved(store, "lights.set", "plate.unload")
+    service.set_lights.side_effect = lambda _on: service.claims.force_clear()
     done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
     assert done.status == "failed"
-    assert "no longer holds a live claim" in done.halt_reason
+    assert "no longer holds the device claim" in done.halt_reason
     service.unload_plate.assert_not_called()
+
+
+def test_a_failed_plan_releases_its_claim():
+    store = PlanStore()
+    service = Mock()
+    service.claims = ClaimManager()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    plan = _approved(store, "lights.set", "plate.unload")
+    service.set_lights.side_effect = RuntimeError("robot fault")
+    done = PlanExecutor(service, store).execute(plan.plan_id, claimed_by=_claimed_by())
+    assert done.status == "failed"
+    assert service.claims.current() is None
 
 
 def test_a_running_plan_halts_when_its_approval_is_revoked():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     plan = _approved(store, "lights.set", "plate.unload")
     service.set_lights.side_effect = lambda _on: setattr(plan, "approval", None)
@@ -306,7 +351,7 @@ def _approved(store: PlanStore, *actions: str):
 def test_executes_every_step_in_order_then_spends_the_approval():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     plan = _approved(store, "lights.set", "plate.unload")
 
@@ -325,7 +370,7 @@ def test_executes_every_step_in_order_then_spends_the_approval():
 def test_balance_read_result_is_attached_to_its_plan_step():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["platebalance.read"]
     reading = {"value": 1.2345, "unit": "g", "stable": True,
                "observed_at": "2026-10-02T00:00:00+00:00"}
@@ -350,7 +395,7 @@ def test_balance_read_result_is_attached_to_its_plan_step():
 def test_balance_reference_plan_reports_result(action, outcome):
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = [f"platebalance.{action}"]
     operation = {"action": action, "outcome": outcome,
                  "at": "2026-10-02T00:00:00+00:00"}
@@ -371,7 +416,7 @@ def test_balance_reference_plan_reports_result(action, outcome):
 def test_balance_reference_failure_skips_later_steps_without_retry():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["platebalance.zero", "platebalance.read"]
     service.platebalance_action.side_effect = OSError("outcome unknown")
     plan = store.create([PlanStep(action="platebalance.zero", args={}),
@@ -388,7 +433,7 @@ def test_balance_reference_failure_skips_later_steps_without_retry():
 def test_unverified_tare_halts_before_next_plan_step():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["platebalance.tare", "delay"]
     service.platebalance_action.side_effect = BalanceReferenceTimeout(
         "Tare sent, but stable zero was not observed within 30 s")
@@ -407,7 +452,7 @@ def test_unverified_tare_halts_before_next_plan_step():
 def test_balance_read_without_a_live_measurement_fails_the_plan():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["platebalance.read", "plate.unload"]
     service.platebalance_action.return_value = {"reading": None, "simulation": False}
     plan = store.create([PlanStep(action="platebalance.read", args={}),
@@ -427,7 +472,7 @@ def test_a_step_the_device_now_refuses_halts_the_plan():
     fire into one that has since faulted or been seized by an external run."""
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set"]  # plate.unload withdrawn
     plan = _approved(store, "lights.set", "plate.unload")
 
@@ -443,7 +488,7 @@ def test_a_step_the_device_now_refuses_halts_the_plan():
 def test_stop_between_steps_or_after_final_ack_prevents_plan_success(final_step):
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service._stop_latched = False
     service.allowed_actions.side_effect = lambda: (["stop", "shutdown"] if service._stop_latched else ["lights.set", "plate.unload"])
     service.set_lights.side_effect = lambda _: setattr(service, "_stop_latched", True)
@@ -459,7 +504,7 @@ def test_a_failing_step_halts_and_skips_the_rest():
     sequence assume the earlier ones happened."""
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     service.allowed_actions.return_value = ["lights.set", "plate.unload"]
     service.set_lights.side_effect = RuntimeError("robot said no")
     plan = _approved(store, "lights.set", "plate.unload")
@@ -475,7 +520,7 @@ def test_a_failing_step_halts_and_skips_the_rest():
 def test_execute_refuses_an_unapproved_plan_without_touching_the_device():
     store = PlanStore()
     service = Mock()
-    service.claims.current.return_value = _claimed_by()
+    service.claims = ClaimManager()
     plan = store.create(_steps("lights.set"), created_by="agent")
 
     with pytest.raises(PlanStateError):
@@ -717,3 +762,40 @@ def test_a_halted_plan_still_records_why(monkeypatch):
     assert done["status"] == "failed"
     assert done["outcomes"] == ["skipped"]
     assert "move_to" in done["halt_reason"]
+
+
+def test_while_a_plan_runs_anyone_signed_in_can_interrupt_but_nobody_can_take_over():
+    """The plan holds the device as automation: its token is nobody's, so
+    stop/pause/resume/abort are open to any control-capable caller, every
+    other control write is refused, and no one can claim over it."""
+    app = create_app(dry_run=True, enforce_claims=True, ui=False)
+    client = TestClient(app)
+    plan = _propose(client)
+    app.state.service.claims.hand_to_plan(plan["plan_id"], approved_by="ada@lab", total_steps=1)
+
+    status = client.get("/status").json()["details"]
+    assert status["claimed_by"]["owner"] == "automation (approved by ada@lab)"
+    assert status["automation"]["plan_id"] == plan["plan_id"]
+    assert status["automation"]["approved_by"] == "ada@lab"
+
+    assert client.post("/control/pause").status_code == 200
+    assert client.post("/control/resume").status_code == 200
+    assert client.post("/control/home").status_code == 423
+    assert client.post("/control/claim", json=CLAIM).status_code == 409
+    assert client.post("/control/claim", json={**CLAIM, "takeover": True}).status_code == 409
+    assert client.post(f"/plans/{plan['plan_id']}/abort").status_code == 200
+
+    app.state.service.claims.release_plan(plan["plan_id"])
+    assert "automation" not in client.get("/status").json()["details"]
+    assert client.post("/control/pause").status_code == 423
+
+
+def test_interrupting_automation_still_refuses_propose_only_credentials():
+    app = create_app(dry_run=True, enforce_claims=True, ui=False, require_login=True,
+                     api_keys={"workflow": "full-test-key"},
+                     proposer_keys={"assistant": "draft-test-key"})
+    client = TestClient(app)
+    app.state.service.claims.hand_to_plan("p1", approved_by="ada@lab", total_steps=1)
+    assert client.post("/control/pause").status_code == 401
+    assert client.post("/control/pause", headers={"X-Api-Key": "draft-test-key"}).status_code == 403
+    assert client.post("/control/pause", headers={"X-Api-Key": "full-test-key"}).status_code == 200

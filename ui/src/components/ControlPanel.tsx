@@ -28,6 +28,7 @@ import { declarationPayload, moduleDeclarationPayload, unassignedModules } from 
 import type { useClaim } from "../lib/use-claim";
 import {
   buildSlotView,
+  automationFromStatus,
   claimedByFromStatus,
   declaredMapFromDeck,
   deviceDeckFromStatus,
@@ -528,6 +529,10 @@ export function ControlPanel({
   const claimedBy = claimedByFromStatus(status);
   const robot = robotInfoFromStatus(status);
   const claimedByMe = claimedBy != null && claimedBy.session_id === claim.sessionId;
+  // An approved plan holding the device. Nobody holds its claim token, so
+  // the gateway opens stop / pause / resume to anyone signed in meanwhile.
+  const automation = automationFromStatus(status);
+  const canInterrupt = !locked || automation != null;
 
   const components = status.components ?? {};
   const pipLeft = components["pipette_left"];
@@ -680,8 +685,20 @@ export function ControlPanel({
     runControl("drop_tip", () => postDropTip(token, mount, true));
   }
 
+  /** stop / pause / resume: also open, without the claim, while a plan runs
+   *  unattended. */
+  function runInterrupt(name: string, fn: () => Promise<unknown>) {
+    if (!canInterrupt || pending) return;
+    setActionError(null);
+    setPending(true);
+    fn()
+      .then(() => refetch())
+      .catch((e: unknown) => reportError(e, name))
+      .finally(() => setPending(false));
+  }
+
   function stopRun() {
-    if (locked || stopping) return;
+    if (!canInterrupt || stopping) return;
     setStopping(true);
     postStop(token)
       .then(() => refetch())
@@ -717,6 +734,7 @@ export function ControlPanel({
   }
 
   const controlHint = locked ? "Take control first (claim the device)" : undefined;
+  const interruptHint = canInterrupt ? undefined : controlHint;
 
   return (
     <div className="flex flex-col gap-4">
@@ -839,7 +857,35 @@ export function ControlPanel({
       )}
 
 
-      {claimedBy && !claimedByMe && (
+      {automation ? (
+        <div
+          role="status"
+          className="flex flex-col gap-1.5 rounded-md border-2 border-violet-500 bg-violet-50 px-4 py-2.5 text-sm text-violet-950 dark:border-violet-500 dark:bg-violet-950/40 dark:text-violet-100"
+        >
+          <p>
+            <span className="font-semibold">Running unattended — held by automation.</span>{" "}
+            Plan <span className="font-mono">{automation.plan_id.slice(0, 8)}</span>, approved by{" "}
+            <span className="font-semibold">{automation.approved_by}</span>
+            {automation.started_at && (
+              <>, started {new Date(automation.started_at).toLocaleTimeString()}</>
+            )}
+            . Step {automation.step} of {automation.total_steps}
+            {automation.action && <> (<span className="font-mono">{automation.action}</span>)</>}.
+          </p>
+          {automation.total_steps > 0 && (
+            <div className="h-1.5 w-full overflow-hidden rounded bg-violet-200 dark:bg-violet-900" aria-hidden>
+              <div
+                className="h-full bg-violet-600 dark:bg-violet-400"
+                style={{ width: `${Math.min(100, (100 * automation.step) / automation.total_steps)}%` }}
+              />
+            </div>
+          )}
+          <p className="text-xs">
+            It runs until it finishes, fails or is stopped — closing a browser does not stop it.
+            Anyone signed in can PAUSE or STOP it below; no one can take control until it ends.
+          </p>
+        </div>
+      ) : claimedBy && !claimedByMe && (
         <p className="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-xs text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
           Controlled by <span className="font-semibold">{claimedBy.owner}</span>
           {claimedBy.expires_at && (
@@ -991,7 +1037,7 @@ export function ControlPanel({
                 button goes primary so the way out is the only thing lit. */}
             <TileButton
               onClick={stopRun}
-              disabled={locked || stopping || !allowedActions.includes("stop")}
+              disabled={!canInterrupt || stopping || !allowedActions.includes("stop")}
               variant="stop"
               ariaLabel="Stop this robot run"
               title="Software stop over HTTP. Requires inspection and a fresh session; cannot replace a physical emergency stop."
@@ -999,11 +1045,11 @@ export function ControlPanel({
               {stopping ? "STOPPING…" : "STOP"}
             </TileButton>
             <TileButton
-              onClick={() => runControl("pause", () => postPause(token))}
-              disabled={locked || pending || pausePending || !allowedActions.includes("pause")}
+              onClick={() => runInterrupt("pause", () => postPause(token))}
+              disabled={!canInterrupt || pending || pausePending || !allowedActions.includes("pause")}
               ariaLabel="Pause the running protocol"
               title={
-                controlHint ??
+                interruptHint ??
                 (pausePending
                   ? "Pausing: the running command finishes first"
                   : allowedActions.includes("pause")
@@ -1016,12 +1062,12 @@ export function ControlPanel({
               PAUSE
             </TileButton>
             <TileButton
-              onClick={() => runControl("resume", () => postResume(token))}
-              disabled={locked || pending || !allowedActions.includes("resume")}
+              onClick={() => runInterrupt("resume", () => postResume(token))}
+              disabled={!canInterrupt || pending || !allowedActions.includes("resume")}
               variant={isPaused ? "primary" : "default"}
               ariaLabel="Resume the paused protocol"
               title={
-                controlHint ??
+                interruptHint ??
                 (isPaused
                   ? "Paused — click to resume"
                   : pausePending

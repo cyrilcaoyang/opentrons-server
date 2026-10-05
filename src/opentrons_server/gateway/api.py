@@ -491,6 +491,22 @@ def create_app(
             },
         )
 
+    def require_claim_or_automation(
+        request: Request,
+        x_claim_token: Optional[str] = Header(default=None, alias="X-Claim-Token"),
+    ) -> None:
+        """The claim gate for *interrupting* the device: stop, pause, resume,
+        abort. While an approved plan holds the claim (``automation``), nobody
+        holds its token, so these are open to any signed-in, control-capable
+        caller instead — a run nobody is watching must stay stoppable from any
+        panel. Everything else stays behind :func:`require_claim`."""
+        if enforce_claims and service.claims.automation() is not None:
+            _require_identity(request)
+            if _resolve_identity(request)[1]:
+                raise HTTPException(status_code=403, detail="propose-only credentials cannot control equipment")
+            return
+        require_claim(request, x_claim_token)
+
     @app.get("/", response_model=ProbeResponse, tags=["spec"])
     def probe() -> ProbeResponse:
         return ProbeResponse(
@@ -658,7 +674,7 @@ def create_app(
             raise HTTPException(status_code=409, detail=str(exc))
 
     @app.post("/control/stop", response_model=CommandResponse, tags=["control"])
-    def stop(_claim: None = Depends(require_claim)) -> CommandResponse:
+    def stop(_claim: None = Depends(require_claim_or_automation)) -> CommandResponse:
         """Software stop of this gateway's HTTP run; not a hardware emergency stop.
 
         Returns success only after stopped readback. Requires operator inspection
@@ -667,7 +683,7 @@ def create_app(
         return _run_non_idempotent(service.stop, "Run stopped; inspect before restarting")
 
     @app.post("/control/pause", response_model=CommandResponse, tags=["control"])
-    def pause(_claim: None = Depends(require_claim)) -> CommandResponse:
+    def pause(_claim: None = Depends(require_claim_or_automation)) -> CommandResponse:
         try:
             service.pause()
         except RuntimeError as exc:
@@ -679,7 +695,7 @@ def create_app(
         )
 
     @app.post("/control/resume", response_model=CommandResponse, tags=["control"])
-    def resume(_claim: None = Depends(require_claim)) -> CommandResponse:
+    def resume(_claim: None = Depends(require_claim_or_automation)) -> CommandResponse:
         try:
             service.resume()
         except RuntimeError as exc:
@@ -1315,8 +1331,9 @@ def create_app(
         return _plan_view(plan)
 
     @app.post("/plans/{plan_id}/abort", tags=["plans"])
-    def abort_plan(plan_id: str, _claim: None = Depends(require_claim)) -> dict[str, Any]:
-        """Operator stop. Claim-gated so only the person at the device can do it."""
+    def abort_plan(plan_id: str, _claim: None = Depends(require_claim_or_automation)) -> dict[str, Any]:
+        """Operator stop. Claim-gated so only the person at the device can do
+        it — or, while a plan runs unattended, anyone signed in."""
         try:
             return _plan_view(plans.abort(plan_id, reason="aborted by operator"))
         except PlanError as exc:
