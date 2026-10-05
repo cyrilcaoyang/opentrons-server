@@ -11,10 +11,10 @@ from fastapi.testclient import TestClient
 
 from opentrons_server.gateway.api import create_app
 from opentrons_server.gateway.plan_patterns import (
-    MAX_EXPANDED_STEPS, ForEachWell, PatternError, expand, resolve_wells, summarize,
+    MAX_EXPANDED_STEPS, ForEachWell, PatternError, WellGrid, expand, resolve_wells, summarize,
 )
 
-GRID_96 = (8, 12)
+GRID_96 = WellGrid(rows=8, columns=12)
 
 
 def _grid(name):
@@ -107,8 +107,48 @@ def test_the_summary_is_derived_from_the_expanded_steps():
     assert summary["per_well"][1]["template_location"] == "2/{well}"
     assert summary["per_well"][1]["first_location"] == "2/A1"
     assert summary["tip_pickups"] == 1 and summary["tip_drops"] == 1  # one tip across all wells, visibly
-    assert summary["overrides"] == {"H12": ["asp"]}
+    assert summary["overrides"] == {"H12": {"asp": {"volume_ul": 50}}}
     assert summary["total_steps"] == 2 + 96 * 3 and summary["pipettes"] == ["left"]
+
+
+def test_review_fixes_overrides_cannot_swap_in_a_multichannel_head_and_braces_are_strict():
+    channels = {"left": 1, "right": 8}
+    spec = _spec(overrides={"A1": {"disp": {"pipette": "right"}}})
+    with pytest.raises(PatternError, match="multi-channel"):
+        expand(spec, grid_for=_grid, channels_for=channels.__getitem__)
+    for bad in ("{Well}", "{sample1}", "{{well}}", "well {"):
+        with pytest.raises(PatternError, match="placeholder|braces"):
+            expand(_spec(steps=[{"action": "comment", "args": {"message": bad}}]),
+                   grid_for=_grid, channels_for=lambda p: 1)
+
+
+def test_a_sparse_custom_labware_checks_exact_wells_and_lists_run_as_listed():
+    sparse = WellGrid(rows=2, columns=2, wells=frozenset({"A1", "B2"}))
+    assert resolve_wells(_spec(wells=["B2", "A1"]), sparse) == ["B2", "A1"]
+    with pytest.raises(PatternError, match="does not exist"):
+        resolve_wells(_spec(wells=["A2"]), sparse)
+    with pytest.raises(PatternError, match="does not have: B1, A2"):
+        resolve_wells(_spec(wells="A1:B2"), sparse)
+    steps, pattern = expand(_spec(wells=["B2", "A1"]), grid_for=_grid, channels_for=lambda p: 1)
+    assert summarize(pattern, steps)["order"] == "as listed"
+
+
+def test_labware_grid_prefers_the_recipe_nickname_and_reads_definition_wells():
+    from types import SimpleNamespace
+
+    from opentrons_server.gateway.service import OT2Service
+
+    service = OT2Service.__new__(OT2Service)
+    plate = SimpleNamespace(rows=2, columns=2, definition={"wells": {"A1": {}, "B2": {}}})
+    other = SimpleNamespace(rows=8, columns=12, definition=None)
+    deck = SimpleNamespace(slots={"2": SimpleNamespace(labware=other), "3": SimpleNamespace(labware=plate)})
+    service._build_deck_state = lambda: deck
+    service._nickname_to_slot = lambda: {"2": "3"}  # a recipe nickname "2" lives in slot 3
+    grid = service.labware_grid("2")
+    assert (grid.rows, grid.columns, grid.wells) == (2, 2, frozenset({"A1", "B2"}))
+    service._nickname_to_slot = lambda: {}
+    assert service.labware_grid("2").wells is None and service.labware_grid("2").rows == 8
+    assert service.labware_grid("9") is None
 
 
 # ── through the API and the assistant ──────────────────────────────────

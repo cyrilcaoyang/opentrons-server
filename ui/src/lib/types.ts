@@ -294,7 +294,7 @@ export interface PatternSummary {
   well_count: number;
   wells_first: string[];
   wells_last: string[];
-  order: "column" | "row" | null;
+  order: "column" | "row" | "as listed" | null;
   pipettes: string[];
   per_well: {
     action: string;
@@ -311,7 +311,7 @@ export interface PatternSummary {
   tip_drops: number;
   balance_reads: number;
   balance_tares: number;
-  overrides: Record<string, string[]>;
+  overrides: Record<string, Record<string, Record<string, unknown>>>;
   total_steps: number;
 }
 

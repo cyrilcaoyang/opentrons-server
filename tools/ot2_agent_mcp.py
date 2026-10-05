@@ -174,6 +174,8 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
         cannot approve or run it — say so plainly rather than implying the
         work is underway.
         """
+        if for_each_well is not None and steps:
+            return {"error": "give either steps or for_each_well, not both"}
         body: dict = {"created_by": "agent:hermes", "notes": notes}
         if for_each_well is not None:
             body.update(for_each_well=for_each_well, prelude=prelude or [], epilogue=epilogue or [])

@@ -81,9 +81,22 @@ class ForEachWell(BaseModel):
         return self
 
 
-#: ``(rows, columns)`` of a labware's grid, or None when the gateway does not
-#: know it (not declared / not loaded).
-GridFor = Callable[[str], Optional[Tuple[int, int]]]
+#: A labware's wells as the gateway knows them: ``(rows, columns)`` and, when
+#: the definition lists its wells (custom labware can be sparse), the exact
+#: set of well names; None when the labware is not declared / not loaded.
+class WellGrid(BaseModel):
+    rows: int
+    columns: int
+    wells: Optional[frozenset[str]] = None
+
+    def has(self, well: str) -> bool:
+        if self.wells is not None:
+            return well in self.wells
+        m = _WELL.match(well)
+        return bool(m) and _row_index(m[1]) < self.rows and int(m[2]) <= self.columns
+
+
+GridFor = Callable[[str], Optional[WellGrid]]
 ChannelsFor = Callable[[str], int]
 
 
@@ -104,8 +117,10 @@ def _row_index(label: str) -> int:
     return n - 1
 
 
-def resolve_wells(spec: ForEachWell, grid: Tuple[int, int]) -> List[str]:
-    rows, columns = grid
+def resolve_wells(spec: ForEachWell, grid: WellGrid | Tuple[int, int]) -> List[str]:
+    if isinstance(grid, tuple):
+        grid = WellGrid(rows=grid[0], columns=grid[1])
+    rows, columns = grid.rows, grid.columns
     if isinstance(spec.wells, str):
         start, end = spec.wells.split(":")
         r0, c0 = _row_index(_WELL.match(start)[1]), int(_WELL.match(start)[2])
@@ -120,12 +135,16 @@ def resolve_wells(spec: ForEachWell, grid: Tuple[int, int]) -> List[str]:
             wells = [f"{_row_label(r)}{c}" for c in range(c0, c1 + 1) for r in range(r0, r1 + 1)]
         else:
             wells = [f"{_row_label(r)}{c}" for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)]
+        missing = [w for w in wells if not grid.has(w)]
+        if missing:
+            raise PatternError(
+                f"well range {spec.wells!r} covers wells labware {spec.labware_nickname!r} "
+                f"does not have: {', '.join(missing[:6])}{'…' if len(missing) > 6 else ''}")
         return wells
     wells = list(spec.wells)
     seen = set()
     for well in wells:
-        m = _WELL.match(well)
-        if _row_index(m[1]) >= rows or int(m[2]) > columns:
+        if not grid.has(well):
             raise PatternError(
                 f"well {well!r} does not exist on labware {spec.labware_nickname!r} "
                 f"({rows} rows x {columns} columns)")
@@ -153,7 +172,13 @@ def _substitute(value: Any, vars: Dict[str, Any], where: str) -> Any:
         if m[1] not in vars:
             raise PatternError(f"{where}: unknown placeholder {{{m[1]}}}")
         return str(vars[m[1]])
-    return _PLACEHOLDER.sub(repl, value)
+    out = _PLACEHOLDER.sub(repl, value)
+    if "{" in out or "}" in out:
+        # {Well}, {sample1}, {{well}}: braces are reserved for placeholders,
+        # and anything they leave behind would reach the robot as text.
+        raise PatternError(f"{where}: {value!r} has braces that are not a known placeholder "
+                           "(" + ", ".join("{" + k + "}" for k in _KNOWN) + ")")
+    return out
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -182,12 +207,6 @@ def expand(
             f"labware {spec.labware_nickname!r} is not declared or loaded, so its wells cannot "
             "be checked; declare the deck first")
     wells = resolve_wells(spec, grid)
-    for step in spec.steps:
-        pipette = step.args.get("pipette")
-        if isinstance(pipette, str) and channels_for(pipette) != 1:
-            raise PatternError(
-                f"template step {step.action!r} uses {pipette!r}, a multi-channel pipette; "
-                "for_each_well is single-channel only (a multi-channel pick takes a column)")
     ids = {s.id for s in spec.steps if s.id}
     for well, per_step in spec.overrides.items():
         if well not in wells:
@@ -209,6 +228,14 @@ def expand(
             override = spec.overrides.get(well, {}).get(step.id or "", None)
             if override:
                 args = _deep_merge(args, _substitute(override, vars, f"override {well}/{step.id}"))
+            # On the final arguments, so an override cannot swap in a
+            # multi-channel head after the template passed.
+            pipette = args.get("pipette")
+            if isinstance(pipette, str) and channels_for(pipette) != 1:
+                raise PatternError(
+                    f"well {well}, step {step.action!r} uses {pipette!r}, a multi-channel "
+                    "pipette; for_each_well is single-channel only (a multi-channel pick "
+                    "takes a column)")
             steps.append({"action": step.action, "args": args})
     steps.extend(copy.deepcopy(dict(s)) for s in epilogue)
     pattern = {
@@ -276,7 +303,8 @@ def summarize(pattern: Dict[str, Any], steps: Sequence[Any]) -> Dict[str, Any]:
         "well_count": len(wells),
         "wells_first": wells[:4],
         "wells_last": wells[-2:] if len(wells) > 4 else [],
-        "order": spec.get("order"),
+        # An explicit list has no walk order: it runs as listed.
+        "order": spec.get("order") if isinstance(spec.get("wells"), str) else "as listed",
         "pipettes": pipettes,
         "per_well": actions,
         "prelude": [s["action"] for s in pattern.get("prelude") or []],
@@ -285,6 +313,9 @@ def summarize(pattern: Dict[str, Any], steps: Sequence[Any]) -> Dict[str, Any]:
         "tip_drops": counts["drop_tip"],
         "balance_reads": counts["platebalance.read"],
         "balance_tares": counts["platebalance.tare"] + counts["platebalance.zero"],
-        "overrides": {well: sorted(per.keys()) for well, per in overrides.items()},
+        # The exceptions with what they change, so the reviewer need not open
+        # the collapsed list to see them.
+        "overrides": {well: {step_id: args for step_id, args in per.items()}
+                      for well, per in overrides.items()},
         "total_steps": len(flat),
     }
