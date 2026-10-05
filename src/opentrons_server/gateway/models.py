@@ -346,6 +346,22 @@ class TipRequest(StrictRequest):
     force: bool = False
 
 
+class DropTipRequest(TipRequest):
+    # The operator asserting a tip is on the head when the robot's run has no
+    # record of one (a run started after a stop or restart begins tipless; the
+    # OT-2 cannot sense tips). Homes the mount's Z, travels at that height to
+    # the fixed trash, and ejects with the tip end above the rim. Fixed trash
+    # only; OT-2 over HTTP only. Afterwards the head is recorded as bare.
+    force_drop: bool = Field(
+        default=False,
+        description=(
+            "Drop into the fixed trash even though the robot's run has no record "
+            "of a tip: home this mount's Z, travel high to the trash, eject. Only "
+            "with no labware_nickname/position. The operator has seen the tip on the head."
+        ),
+    )
+
+
 class TipsResetRequest(StrictRequest):
     """(Re)register a tip rack with every tip fresh — a physical rack swap.
 

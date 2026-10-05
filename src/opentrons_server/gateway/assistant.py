@@ -154,7 +154,9 @@ Compare `details.mounted_tips` (the gateway's ledger) with \
 `details.snapshot.pipettes.<mount>.has_tip` (the robot's own belief) when \
 present. If the robot reports a tip the ledger does not, propose `drop_tip` \
 with only the pipette before any `pick_up_tip`; it clears the robot's record \
-even when the head is bare.
+even when the head is bare. If the ledger shows a tip the robot does not (a \
+run after a stop starts with none) and the operator says a tip is on the head, \
+propose `drop_tip` with `force_drop: true` and only the pipette; never assume it.
 3. Use the exact argument names from `list_actions`; unknown keys are \
 rejected. Address labware by `labware_nickname`: the observed run nickname or ID \
 from status, else the declared deck slot. The setup recipe is not authoritative. Address pipettes by the \

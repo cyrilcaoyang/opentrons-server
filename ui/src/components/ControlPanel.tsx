@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  ApiError,
   getLabStoreDefinition,
   getLabStoreList,
   getLabwareList,
@@ -468,6 +469,9 @@ export function ControlPanel({
   useEffect(() => { setRefillConfirm(null); }, [selectedSlot]);
   // Whether "clear all declared intent" is awaiting its confirmation.
   const [clearAllConfirm, setClearAllConfirm] = useState(false);
+  // The mount whose drop the gateway refused because the robot's run has no
+  // record of a tip — offered a force drop once the operator has looked.
+  const [forceDropOffer, setForceDropOffer] = useState<"left" | "right" | null>(null);
 
   // Controls unlock when this browser session holds the device claim.
   const locked = !claim.held;
@@ -649,6 +653,31 @@ export function ControlPanel({
       .then(() => refetch())
       .catch((e: unknown) => reportError(e, name))
       .finally(() => setPending(false));
+  }
+
+  function dropTip(mount: "left" | "right") {
+    if (locked || pending) return;
+    setActionError(null);
+    setForceDropOffer(null);
+    setPending(true);
+    postDropTip(token, mount)
+      .then(() => refetch())
+      .catch((e: unknown) => {
+        // 412 with robot_reports_tip=false: the run believes the head bare
+        // (a run started after a stop does). Only the operator can say a tip
+        // is there, so the force drop is offered, never taken.
+        if (e instanceof ApiError && e.status === 412
+          && (e.body as { robot_reports_tip?: unknown } | null)?.robot_reports_tip === false) {
+          setForceDropOffer(mount);
+        }
+        reportError(e, "drop_tip");
+      })
+      .finally(() => setPending(false));
+  }
+
+  function forceDrop(mount: "left" | "right") {
+    setForceDropOffer(null);
+    runControl("drop_tip", () => postDropTip(token, mount, true));
   }
 
   function stopRun() {
@@ -1045,7 +1074,7 @@ export function ControlPanel({
               .map((mount, _i, attached) => (
                 <TileButton
                   key={mount}
-                  onClick={() => runControl("drop_tip", () => postDropTip(token, mount))}
+                  onClick={() => dropTip(mount)}
                   disabled={locked || pending || !allowedActions.includes("drop_tip")}
                   title={
                     controlHint ??
@@ -1057,6 +1086,29 @@ export function ControlPanel({
                   {attached.length > 1 ? `DROP TIP ${mount === "left" ? "L" : "R"}` : "DROP TIP"}
                 </TileButton>
               ))}
+            {forceDropOffer && (
+              <div className="flex basis-full flex-wrap items-center gap-2 rounded border border-amber-400 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                <span>
+                  The robot&apos;s run has no record of a tip on {forceDropOffer}. Is a tip on the head?
+                  Force drop homes Z, travels high to the trash and ejects; the head is then recorded bare.
+                </span>
+                <button
+                  type="button"
+                  disabled={locked || pending || !allowedActions.includes("drop_tip")}
+                  onClick={() => forceDrop(forceDropOffer)}
+                  className="rounded border border-amber-600 px-1.5 py-0.5 font-semibold hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-amber-900/40"
+                >
+                  Yes, force drop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForceDropOffer(null)}
+                  className="text-ink-subtle underline dark:text-slate-400"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
 
 

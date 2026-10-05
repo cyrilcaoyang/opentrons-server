@@ -245,7 +245,7 @@ body* (never wrapped in `{"detail": ...}`) and never touch `last_error`:
 |---|---|---|
 | tip unavailable | `pick_up_tip` against a tracked rack | `{detail, rack, well, tip_status, requested_sample_id, retry_after_s}`, plus `held_by` when the tip is on a pipette, and `channels` / `covered_wells` / `blocking_well` for a multi-channel pick |
 | out of envelope | `aspirate` / `dispense` / `mix` volume vs the *attached* pipette | `{detail, pipette, requested_ul, max_ul, min_ul, retry_after_s}` |
-| tip-state conflict | `pick_up_tip` when the **robot** reports a tip already on the head; `drop_tip` when it reports none | the tip-unavailable body plus `robot_reports_tip`; `detail` names the recovery |
+| tip-state conflict | `pick_up_tip` when the **robot** reports a tip already on the head; `drop_tip` when it reports none (unless `force_drop`) | the tip-unavailable body plus `robot_reports_tip`; `detail` names the recovery |
 
 `tip_status` is `new`, `empty`, `on_pipette`, or the sample id the tip already
 touched. `force: true` overrides the contamination guard **only** — never the
@@ -263,8 +263,14 @@ tip is on while the ledger shows none. The robot's belief is what its own
 the robot reports a tip the operator cannot see: propose `drop_tip` with only
 the pipette — the head goes to the fixed trash and the robot's record clears
 even if the head is bare — then the pick. When the robot reports *no* tip but
-the ledger shows one, the drop would be refused by the robot; the operator
-removes any tip by hand and releases the record with `tips.mark`.
+the ledger shows one — every run started after a stop or restart begins
+believing the heads bare, since the OT-2 cannot sense tips — a plain drop is
+refused. If the operator confirms a tip is on the head, propose `drop_tip` with
+`{"pipette": ..., "force_drop": true}`: it homes that mount's Z, travels at that
+height to the fixed trash, ejects with the tip end above the rim, and records
+the head bare (OT-2 over HTTP only; fixed trash only). If the head is bare,
+release the record with `tips.mark` instead. Never propose `force_drop` without
+the operator having seen the tip.
 
 The static half of the same envelope is enforced by the request schemas
 (`Field(ge=, le=)`) and comes back as **422** — well offsets bounded to

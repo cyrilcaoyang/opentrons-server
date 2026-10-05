@@ -1244,6 +1244,16 @@ transports:
   a restart — and `drop_tip` is refused when it believes none is. The body
   names the fix: `drop_tip` with only the pipette clears the robot's record
   even on a bare head; `tips.mark` clears the gateway's.
+- **Force drop for a tip the robot's run does not know.** A run started after
+  a stop or restart believes every head bare (the OT-2 has no tip sensor), so a
+  tip left on by a stopped run cannot be dropped normally. `drop_tip` with
+  `force_drop: true` and no location homes that mount's Z, travels at that
+  height to the fixed-trash area, positions the tip end 10 mm above the rim
+  (tip length from the mounted rack's definition, else the pipette's standard
+  tip) and ejects with `dropTipInPlace`, none of which checks the run's tip
+  record on OT-2 hardware. On success the mount is released and the head
+  recorded bare. The panel offers it after a 412 with `robot_reports_tip:
+  false`, behind an operator confirmation. OT-2 over HTTP only.
 - **A drop into a tracked rack well is a relocation, not a disposal.** The
   destination wells take the tip and its history — the sample it last touched,
   `"new"` for a tip that never touched liquid (so it stays available), or

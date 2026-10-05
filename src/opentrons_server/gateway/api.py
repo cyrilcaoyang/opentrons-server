@@ -37,6 +37,7 @@ from .models import (
     LightsRequest,
     LiquidMoveRequest,
     DispenseRequest,
+    DropTipRequest,
     LoadedPlate,
     MoveLabwareRequest,
     MoveToRequest,
@@ -737,7 +738,7 @@ def create_app(
         return _run_non_idempotent(lambda: service.pick_up_tip(request), "Tip picked up")
 
     @app.post("/control/drop-tip", response_model=CommandResponse, tags=["control"])
-    def drop_tip(request: TipRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
+    def drop_tip(request: DropTipRequest, _claim: None = Depends(require_claim)) -> CommandResponse:
         return _run_non_idempotent(lambda: service.drop_tip(request), "Tip dropped")
 
     @app.post("/control/aspirate", response_model=CommandResponse, tags=["control"])

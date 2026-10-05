@@ -311,6 +311,7 @@ class RunEngineCommands:
         addressable_area_name: str,
         *,
         alternate_drop_location: bool = True,
+        offset: Optional[Dict[str, float]] = None,
     ) -> Command:
         """Position over a deck *area* (e.g. the OT-2 fixed trash) for a drop.
 
@@ -319,15 +320,17 @@ class RunEngineCommands:
         is exactly how the protocol API drops tips into it (API 2.16+).
         ``alternate_drop_location`` mirrors the protocol API's default of
         scattering drop positions so tips do not pile into one spot.
+        ``offset`` moves the critical point off the area's top center; the
+        engine ignores it while ``alternate_drop_location`` is on.
         """
-        return (
-            "moveToAddressableAreaForDropTip",
-            {
-                "pipetteId": pipette_id,
-                "addressableAreaName": addressable_area_name,
-                "alternateDropLocation": alternate_drop_location,
-            },
-        )
+        params: Dict[str, Any] = {
+            "pipetteId": pipette_id,
+            "addressableAreaName": addressable_area_name,
+            "alternateDropLocation": alternate_drop_location,
+        }
+        if offset is not None:
+            params["offset"] = offset
+        return "moveToAddressableAreaForDropTip", params
 
     @staticmethod
     def blow_out(
