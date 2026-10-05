@@ -68,7 +68,7 @@ from .assistant import (
     env_file_candidates,
 )
 from ..version import __version__ as GATEWAY_VERSION
-from .plan_results import PlanResultsStore
+from .plan_results import InvalidPlanId, PlanResultsStore
 from .plans import (
     ApprovalRequiresClaim,
     Plan,
@@ -1184,7 +1184,7 @@ def create_app(
                 missing = exc
             try:
                 bundle = plan_results.get(pid)
-            except ValueError:
+            except InvalidPlanId:
                 bundle = None
             if bundle is None:
                 raise HTTPException(status_code=_plan_error_status(missing), detail=str(missing))
@@ -1220,7 +1220,7 @@ def create_app(
         """One saved bundle: the full plan record, its plate report, delivery."""
         try:
             bundle = plan_results.get(plan_id)
-        except ValueError as exc:
+        except InvalidPlanId as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         if bundle is None:
             raise HTTPException(status_code=404, detail=f"no saved results for plan {plan_id}")

@@ -27,7 +27,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import socket
+import tempfile
 import threading
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -46,12 +49,36 @@ PENDING = "pending"
 DELIVERED = "delivered"
 RUNNING = "running"  # the plan is still executing; never delivered in this state
 
-#: The run status a bundle carries when the gateway restarted mid-run.
+#: The run status a bundle carries when its record was never completed.
 INTERRUPTED = "interrupted"
 _INTERRUPTED_REASON = (
-    "The gateway restarted during this run. The step that was in progress has an "
-    "unknown outcome; later steps were not run. Inspect the robot before continuing."
+    "This run's record was never completed: the gateway stopped (restart or crash) "
+    "or could not write the final record. The step in progress at the last saved "
+    "point has an unknown outcome; no later step was started (the executor stops "
+    "before any step it cannot record). Inspect the robot before continuing."
 )
+
+#: Identifies this process as a record's writer, so recover() never closes out
+#: a run that is still executing here (or in another live process on this host).
+_WRITER = {"token": uuid.uuid4().hex, "pid": os.getpid(), "host": socket.gethostname()}
+
+
+class InvalidPlanId(ValueError):
+    pass
+
+
+def _writer_alive(writer: Any) -> bool:
+    if not isinstance(writer, dict):
+        return False
+    if writer.get("token") == _WRITER["token"]:
+        return True
+    if writer.get("host") != _WRITER["host"] or not isinstance(writer.get("pid"), int):
+        return False
+    try:
+        os.kill(writer["pid"], 0)
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _now() -> str:
@@ -153,12 +180,19 @@ class PlanResultsStore:
             bundle = json.loads(path.read_text(encoding="utf-8"))
             if (bundle.get("delivery") or {}).get("state") != RUNNING:
                 continue
+            if _writer_alive(bundle.get("writer")):
+                # Still being written by a live process: not ours to close out.
+                if (bundle.get("writer") or {}).get("token") != _WRITER["token"]:
+                    logger.warning("plan %s is running in another live process (pid %s); "
+                                   "two gateways share %s", bundle["plan_id"],
+                                   bundle["writer"].get("pid"), self.directory)
+                continue
             record = bundle.get("plan") or {}
             for result in record.get("results") or []:
                 if result.get("outcome") == "pending":
                     if result.get("started_at") and not result.get("finished_at"):
                         result["outcome"] = "unknown"
-                        result["message"] = "In progress when the gateway restarted; outcome unknown"
+                        result["message"] = "In progress at the last saved point; outcome unknown"
                     else:
                         result["outcome"] = "skipped"
             record["status"] = INTERRUPTED
@@ -207,6 +241,7 @@ class PlanResultsStore:
             "started_at": min(started) if started else None,
             "finished_at": max(finished) if finished else None,
             "saved_at": _now(),
+            "writer": dict(_WRITER),
             "steps_total": len(results),
             "steps_ok": outcomes.count("ok"),
             "steps_failed": outcomes.count("failed"),
@@ -237,16 +272,27 @@ class PlanResultsStore:
 
     def _path(self, plan_id: str) -> Path:
         if not plan_id or any(c in plan_id for c in "/\\.:"):
-            raise ValueError(f"invalid plan id {plan_id!r}")
+            raise InvalidPlanId(f"invalid plan id {plan_id!r}")
         return self.directory / f"{plan_id}.json"
 
     def _write(self, bundle: Dict[str, Any]) -> None:
         with self._lock:
             self.directory.mkdir(parents=True, exist_ok=True)
             path = self._path(bundle["plan_id"])
-            tmp = path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(bundle, indent=1), encoding="utf-8")
-            os.replace(tmp, path)
+            # A unique temp file per write: two stores on one directory (two
+            # apps in a test process) must not interleave on a shared name.
+            fd, tmp = tempfile.mkstemp(prefix=f".{path.stem}.", suffix=".tmp", dir=self.directory)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps(bundle, indent=1))
+                os.replace(tmp, path)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
+            # The file time is the record's own save time, so a delivery retry
+            # rewriting an old record does not make it look recent to list().
+            stamp = datetime.fromisoformat(bundle["saved_at"]).timestamp()
+            os.utime(path, (stamp, stamp))
 
     # -- reading ---------------------------------------------------------------
 

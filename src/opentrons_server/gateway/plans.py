@@ -584,23 +584,32 @@ class PlanExecutor:
         # Called with a snapshot of the running plan when it starts and as each
         # step starts and ends (plan_results.save_progress): the run record on
         # disk follows the run, so it can be watched live and survives a
-        # restart. A failure here is surfaced, never allowed to halt a robot
-        # mid-plate; the readings are still in memory and the final save
-        # tries again.
+        # restart. If a save fails the plan stops before its next step —
+        # never mid-step — so no step ever runs unrecorded, and a recovered
+        # record's "not started" is true.
         self.on_progress: Optional[Callable[[Plan], None]] = None
         self.progress_error: Optional[str] = None
 
-    def _report_progress(self, plan: Plan) -> None:
+    def _report_progress(self, plan: Plan) -> bool:
         if self.on_progress is None:
-            return
+            return True
         with self._store._lock:
             snapshot = plan.model_copy(deep=True)
         try:
             self.on_progress(snapshot)
-            self.progress_error = None
-        except Exception as exc:  # surfaced in /status, logged; see above
+        except Exception as exc:  # surfaced in /status and as the halt reason
             self.progress_error = f"run record not saved: {exc}"
             logger.exception("plan %s: run record not saved", plan.plan_id)
+            return False
+        self.progress_error = None
+        return True
+
+    def _halt_unrecorded(self, plan: Plan, from_index: int) -> None:
+        with self._store._lock:
+            if plan.status == "executing":
+                self._halt(plan, from_index,
+                           f"{self.progress_error}; stopped before the next step so "
+                           "nothing runs unrecorded")
 
     def execute(self, plan_id: str, *, claimed_by: Optional[ClaimedBy]) -> Plan:
         # Validation and reservation must be one transaction: concurrent
@@ -615,8 +624,10 @@ class PlanExecutor:
             self._service.claims.hand_to_plan(
                 plan.plan_id, approved_by=plan.approval.owner, total_steps=len(plan.steps)
             )
-        self._report_progress(plan)
         try:
+            if not self._report_progress(plan):
+                self._halt_unrecorded(plan, 0)
+                return plan
             return self._run(plan)
         finally:
             self._service.claims.release_plan(plan.plan_id)
@@ -637,7 +648,12 @@ class PlanExecutor:
                     return plan
                 result.started_at = datetime.now(timezone.utc)
                 self._service.claims.plan_progress(plan.plan_id, step=index + 1, action=step.action)
-            self._report_progress(plan)
+            if not self._report_progress(plan):
+                # The start could not be recorded: do not send this step.
+                with self._store._lock:
+                    result.started_at = None
+                self._halt_unrecorded(plan, index)
+                return plan
             # Do not hold the registry lock during I/O: abort must remain
             # available. A command already started keeps its actual outcome.
             try:
@@ -690,7 +706,9 @@ class PlanExecutor:
                 result.finished_at = datetime.now(timezone.utc)
                 if plan.status != "executing":
                     return plan
-            self._report_progress(plan)
+            if not self._report_progress(plan):
+                self._halt_unrecorded(plan, index + 1)
+                return plan
 
         with self._store._lock:
             if plan.status != "executing":
