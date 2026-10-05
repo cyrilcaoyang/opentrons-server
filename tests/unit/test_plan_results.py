@@ -65,7 +65,7 @@ def test_queues_for_the_eln_and_retries_until_acknowledged(tmp_path):
 
     store = _store(tmp_path, results_url="http://central/api/ingest/plan-results", transport=flaky)
     store.save(_plan(), approved_by="ada@lab", equipment_id="ot2_complexation", gateway_version="0.4.0")
-    assert store.summary() == {"delivery_enabled": True, "pending": 1}
+    assert store.summary() == {"delivery_enabled": True, "pending": 1, "filing": 0}
 
     assert store.deliver_pending() == 0
     first = store.get("p1")["delivery"]
@@ -136,7 +136,7 @@ def test_approve_records_the_project_and_execute_saves_the_results(tmp_path, mon
     assert full["plan"]["status"] == "executed"
     assert client.get("/plans/results/nope").status_code == 404
     assert client.get("/status").json()["details"]["plan_results"] == {
-        "delivery_enabled": False, "pending": 0}
+        "delivery_enabled": False, "pending": 0, "filing": 0}
 
 
 def test_me_reports_identity_and_projects_only_through_the_edge():
@@ -383,3 +383,71 @@ def test_a_file_time_failure_never_reports_a_saved_record_as_lost(tmp_path, monk
     store = _store(tmp_path)
     store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
     assert store.get("p1")["plan_id"] == "p1"
+
+
+# ── what the ELN did with it (2026-10-05: "filed" was shown for a held run) ──
+
+
+def test_delivered_is_not_filed_until_the_central_server_says_so(tmp_path):
+    central = {"state": "pending", "last_error": None, "experiment_id": None}
+    store = _store(tmp_path, results_url="http://central/api/ingest/plan-results",
+                   transport=lambda p: {"status": "accepted"},
+                   status_transport=lambda pid: dict(central))
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    store.deliver_pending()
+    assert store.get("p1")["delivery"]["eln"]["state"] == "filing"
+    assert store.check_filing() == 0
+    assert store.summary()["filing"] == 1
+
+    central.update(state="held", last_error="project 'basf-solubility' does not exist")
+    assert store.check_filing() == 1
+    eln = store.get("p1")["delivery"]["eln"]
+    assert eln["state"] == "held" and "does not exist" in eln["last_error"]
+    assert store.summary()["filing"] == 0
+
+
+def test_a_filed_run_carries_its_experiment(tmp_path):
+    store = _store(tmp_path, results_url="http://central/x", transport=lambda p: {"ok": True},
+                   status_transport=lambda pid: {"state": "filed", "experiment_id": "exp-1"})
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    store.deliver_pending()
+    store.check_filing()
+    assert store.get("p1")["delivery"]["eln"] == {
+        "state": "filed", "last_error": None, "experiment_id": "exp-1",
+        "checked_at": store.get("p1")["delivery"]["eln"]["checked_at"]}
+
+
+def test_runs_delivered_before_outcomes_were_tracked_are_checked_on_start(tmp_path):
+    import json as _json
+
+    store = _store(tmp_path)
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    path = store._path("p1")
+    bundle = _json.loads(path.read_text())
+    bundle["delivery"] = {"state": "delivered", "attempts": 1, "last_error": None,
+                          "delivered_at": "2026-10-05T17:11:13Z", "receipt": {"status": "accepted"}}
+    path.write_text(_json.dumps(bundle))
+    reopened = _store(tmp_path, results_url="http://central/x", transport=lambda p: {},
+                      status_transport=lambda pid: {"state": "held", "last_error": "missing"})
+    assert reopened.summary()["filing"] == 1
+    assert reopened.check_filing() == 1
+    assert reopened.get("p1")["delivery"]["eln"]["state"] == "held"
+
+
+def test_a_failed_status_check_is_recorded_and_retried(tmp_path):
+    calls = []
+
+    def flaky(pid):
+        calls.append(pid)
+        if len(calls) == 1:
+            raise RuntimeError("central down")
+        return {"state": "filed"}
+
+    store = _store(tmp_path, results_url="http://central/x", transport=lambda p: {},
+                   status_transport=flaky)
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    store.deliver_pending()
+    assert store.check_filing() == 0
+    assert "central down" in store.get("p1")["delivery"]["eln"]["check_error"]
+    assert store.check_filing() == 1
+    assert "check_error" not in store.get("p1")["delivery"]["eln"]

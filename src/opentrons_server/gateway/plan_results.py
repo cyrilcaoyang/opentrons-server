@@ -49,6 +49,15 @@ PENDING = "pending"
 DELIVERED = "delivered"
 RUNNING = "running"  # the plan is still executing; never delivered in this state
 
+# What the central server did with a delivered bundle (``delivery.eln.state``).
+# "delivered" only ever meant "journaled there"; these say whether the ELN
+# actually has it.
+ELN_FILING = "filing"  # accepted centrally, not filed yet (or not yet checked)
+ELN_FILED = "filed"
+ELN_HELD = "held"  # refused: not a member, project missing, rejected row
+_ELN_TERMINAL = frozenset({ELN_FILED, ELN_HELD})
+_FILING_POLL_S = 10.0
+
 #: The run status a bundle carries when its record was never completed.
 INTERRUPTED = "interrupted"
 _INTERRUPTED_REASON = (
@@ -139,6 +148,7 @@ class PlanResultsStore:
         retry_interval_s: float = 60.0,
         timeout_s: float = 15.0,
         transport: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        status_transport: Optional[Callable[[str], Dict[str, Any]]] = None,
         start_worker: bool = True,
     ) -> None:
         self.directory = Path(directory)
@@ -149,17 +159,25 @@ class PlanResultsStore:
         self._retry_interval_s = retry_interval_s
         self._timeout_s = timeout_s
         self._transport = transport or self._default_transport
+        self._status_transport = status_transport or self._default_status_transport
         self._lock = threading.RLock()
         self._wake = threading.Event()
         self._thread: Optional[threading.Thread] = None
         # Plan ids still waiting for the central server, seeded from disk so an
         # outbox survives restarts; /status reports its size.
         self._pending: set[str] = set()
+        # Delivered bundles whose ELN outcome is not known yet (incl. ones
+        # delivered before outcomes were tracked).
+        self._awaiting: set[str] = set()
         if self.directory.exists():
             for path in self.directory.glob("*.json"):
                 bundle = json.loads(path.read_text(encoding="utf-8"))
-                if (bundle.get("delivery") or {}).get("state") == PENDING:
+                delivery = bundle.get("delivery") or {}
+                if delivery.get("state") == PENDING:
                     self._pending.add(bundle["plan_id"])
+                elif (delivery.get("state") == DELIVERED
+                      and (delivery.get("eln") or {}).get("state") not in _ELN_TERMINAL):
+                    self._awaiting.add(bundle["plan_id"])
         if self.delivery_enabled and start_worker:
             self._thread = threading.Thread(target=self._worker, name="ot2-plan-results", daemon=True)
             self._thread.start()
@@ -303,7 +321,8 @@ class PlanResultsStore:
         """What /status shows: whether results reach the ELN, and how many are
         still waiting — an outbox that only grows is a broken link."""
         with self._lock:
-            return {"delivery_enabled": self.delivery_enabled, "pending": len(self._pending)}
+            return {"delivery_enabled": self.delivery_enabled, "pending": len(self._pending),
+                    "filing": len(self._awaiting)}
 
     def _path(self, plan_id: str) -> Path:
         if not plan_id or any(c in plan_id for c in "/\\.:"):
@@ -384,22 +403,80 @@ class PlanResultsStore:
                                    bundle["plan_id"], delivery["attempts"], exc)
             else:
                 delivery.update(state=DELIVERED, last_error=None, delivered_at=_now(),
-                                receipt=receipt)
+                                receipt=receipt,
+                                eln={"state": ELN_FILING, "last_error": None,
+                                     "experiment_id": None, "checked_at": None})
                 delivered += 1
             self._write(bundle)
             if delivery["state"] == DELIVERED:
                 with self._lock:
                     self._pending.discard(plan_id)
+                    self._awaiting.add(plan_id)
         return delivered
+
+    def check_filing(self) -> int:
+        """Ask the central server what became of delivered bundles; record
+        ``filed`` or ``held`` (with its reason) on each. Returns how many
+        reached an outcome."""
+        if not self.delivery_enabled:
+            return 0
+        settled = 0
+        with self._lock:
+            awaiting = sorted(self._awaiting)
+        for plan_id in awaiting:
+            bundle = self.get(plan_id)
+            if bundle is None:
+                with self._lock:
+                    self._awaiting.discard(plan_id)
+                continue
+            delivery = bundle["delivery"]
+            eln = dict(delivery.get("eln") or {"state": ELN_FILING, "last_error": None,
+                                                "experiment_id": None})
+            try:
+                status = self._status_transport(plan_id)
+            except Exception as exc:  # recorded and retried
+                eln["checked_at"] = _now()
+                eln["check_error"] = str(exc)[:300]
+            else:
+                central = status.get("state")
+                eln["state"] = (ELN_FILED if central == "filed"
+                                else ELN_HELD if central == "held" else ELN_FILING)
+                eln["last_error"] = status.get("last_error")
+                eln["experiment_id"] = status.get("experiment_id")
+                eln["checked_at"] = _now()
+                eln.pop("check_error", None)
+            delivery["eln"] = eln
+            self._write(bundle)
+            if eln["state"] in _ELN_TERMINAL:
+                settled += 1
+                with self._lock:
+                    self._awaiting.discard(plan_id)
+        return settled
 
     def _worker(self) -> None:
         while True:
-            self._wake.wait(self._retry_interval_s)
+            # Quick while something is being filed, so the panel shows the
+            # outcome within seconds; the normal retry cadence otherwise.
+            with self._lock:
+                wait = _FILING_POLL_S if self._awaiting else self._retry_interval_s
+            self._wake.wait(wait)
             self._wake.clear()
             try:
                 self.deliver_pending()
+                self.check_filing()
             except Exception:  # never let the outbox thread die silently
                 logger.exception("plan results delivery pass failed")
+
+    def _default_status_transport(self, plan_id: str) -> Dict[str, Any]:
+        url = f"{self.results_url.rstrip('/')}/{self.device_id}/{plan_id}"
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else {}
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=self._timeout_s) as response:
+                return json.loads(response.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:300]
+            raise RuntimeError(f"HTTP {exc.code} from results status: {detail}") from exc
 
     def _default_transport(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         headers = {"Content-Type": "application/json"}

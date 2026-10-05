@@ -9,7 +9,9 @@ import {
   deletePlan,
   executePlan,
   getAssistantHealth,
-  getMe,
+  elnOutcome,
+  getElnProjects,
+  getRunRecord,
   getPlan,
   listPlans,
   plateReportUrl,
@@ -112,12 +114,18 @@ export function AssistantBubble({
   const [planStates, setPlanStates] = useState<Record<string, Plan | "gone">>({});
   const [allPlans, setAllPlans] = useState<Plan[]>([]);
   const [planBusy, setPlanBusy] = useState<string | null>(null);
-  // The signed-in user's ELN projects, for the approval card's picker.
-  const [elnProjects, setElnProjects] = useState<string[]>([]);
+  // ELN projects the signed-in user can actually file into (they exist in
+  // the ELN and the user has standing there), for the approval card's picker.
+  // No free text: a typed name the ELN does not have is only ever refused.
+  const [elnProjects, setElnProjects] = useState<ElnProjects>({ status: "loading", projects: [] });
   useEffect(() => {
-    getMe().then((me) => setElnProjects(me.projects)).catch(() => {
-      /* no list: the card falls back to a typed project title */
-    });
+    getElnProjects()
+      .then((r) => setElnProjects(r.configured
+        ? { status: "ready", projects: r.projects }
+        : { status: "unconfigured", projects: [] }))
+      .catch((e: unknown) => setElnProjects({
+        status: "error", projects: [], error: e instanceof Error ? e.message : String(e),
+      }));
   }, []);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -874,6 +882,43 @@ function stepLine(s: PlanStep): string {
  */
 const ELN_PROJECT_KEY = "ot2.assistant.elnProject";
 
+interface ElnProjects {
+  status: "loading" | "ready" | "unconfigured" | "error";
+  projects: string[];
+  error?: string;
+}
+
+/** After a plan ends, where its results actually are: polled from the run
+ *  record until the ELN has filed or held it. */
+function ElnOutcomeLine({ planId }: { planId: string }) {
+  const [line, setLine] = useState<{ text: string; tone: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const record = await getRunRecord(planId);
+        if (!active) return;
+        const outcome = elnOutcome(record);
+        setLine(outcome);
+        const settled = record.delivery.state === "local_only" ||
+          (record.delivery.state === "delivered" && ["filed", "held"].includes(record.delivery.eln?.state ?? ""));
+        if (!settled) timer = setTimeout(load, 5000);
+      } catch {
+        if (active) timer = setTimeout(load, 10000);
+      }
+    };
+    void load();
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [planId]);
+  if (!line) return null;
+  const tone = line.tone === "ok" ? "text-emerald-700 dark:text-emerald-400"
+    : line.tone === "bad" ? "text-rose-700 dark:text-rose-400"
+    : line.tone === "warn" ? "text-amber-700 dark:text-amber-400"
+    : "text-ink-subtle dark:text-slate-400";
+  return <p className={`mb-1 text-[10px] font-medium ${tone}`}>{line.text}</p>;
+}
+
 function ChatPlanCard({
   live,
   previewSteps,
@@ -890,7 +935,7 @@ function ChatPlanCard({
   previewSteps?: PlanStep[];
   busy: boolean;
   claimHeld: boolean;
-  elnProjects: string[];
+  elnProjects: ElnProjects;
   onApprove: (stepHash: string, elnProject: string | null) => void;
   onRun: () => void;
   onDiscard: () => void;
@@ -906,7 +951,9 @@ function ChatPlanCard({
     }
   });
   const approve = (stepHash: string) => {
-    const project = elnProject.trim() || null;
+    // Only a project the picker offered: a remembered choice the user can no
+    // longer file into falls back to "none" rather than being sent anyway.
+    const project = elnProjects.projects.includes(elnProject) ? elnProject : null;
     try {
       localStorage.setItem(ELN_PROJECT_KEY, project ?? "");
     } catch {
@@ -1032,34 +1079,37 @@ function ChatPlanCard({
       {live.status === "draft" ? (
         <label className="mb-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink dark:text-slate-200">
           Results to ELN project
-          {elnProjects.length > 0 ? (
-            <select
-              value={elnProjects.includes(elnProject) ? elnProject : ""}
-              disabled={!claimHeld || busy}
-              onChange={(e) => setElnProject(e.target.value)}
-              className="rounded border border-purple-300 bg-white px-1 py-0.5 text-[11px] dark:border-purple-700 dark:bg-slate-800"
-            >
-              <option value="">None (keep on robot only)</option>
-              {elnProjects.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              value={elnProject}
-              disabled={!claimHeld || busy}
-              onChange={(e) => setElnProject(e.target.value)}
-              placeholder="project title, or blank to keep on robot only"
-              className="min-w-[14rem] flex-1 rounded border border-purple-300 bg-white px-1 py-0.5 text-[11px] dark:border-purple-700 dark:bg-slate-800"
-            />
+          <select
+            value={elnProjects.projects.includes(elnProject) ? elnProject : ""}
+            disabled={!claimHeld || busy || elnProjects.projects.length === 0}
+            onChange={(e) => setElnProject(e.target.value)}
+            className="rounded border border-purple-300 bg-white px-1 py-0.5 text-[11px] dark:border-purple-700 dark:bg-slate-800"
+          >
+            <option value="">None (keep on robot only)</option>
+            {elnProjects.projects.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          {elnProjects.status === "loading" && <span className="text-ink-subtle dark:text-slate-400">loading your projects…</span>}
+          {elnProjects.status === "ready" && elnProjects.projects.length === 0 && (
+            <span className="text-ink-subtle dark:text-slate-400">no ELN projects you can file into</span>
+          )}
+          {elnProjects.status === "unconfigured" && (
+            <span className="text-amber-700 dark:text-amber-400">the ELN is not connected on the dashboard</span>
+          )}
+          {elnProjects.status === "error" && (
+            <span className="text-amber-700 dark:text-amber-400">could not load your ELN projects ({elnProjects.error}); results stay on the robot</span>
           )}
         </label>
       ) : (
-        <p className="mb-1 text-[10px] text-ink-subtle dark:text-slate-400">
-          {live.eln_project
-            ? <>Results go to ELN project <span className="font-semibold">{live.eln_project}</span> as an unformatted run when the plan ends.</>
-            : "Results are kept on the robot only (no ELN project chosen)."}
-        </p>
+        <>
+          <p className="mb-1 text-[10px] text-ink-subtle dark:text-slate-400">
+            {live.eln_project
+              ? <>Results go to ELN project <span className="font-semibold">{live.eln_project}</span> as an unformatted run when the plan ends.</>
+              : "Results are kept on the robot only (no ELN project chosen)."}
+          </p>
+          {["executed", "failed", "aborted"].includes(live.status) && <ElnOutcomeLine planId={live.plan_id} />}
+        </>
       )}
       {!claimHeld && live.status === "draft" && (
         <p className="mb-1 text-[10px] text-amber-700 dark:text-amber-500">
