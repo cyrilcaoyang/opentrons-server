@@ -454,10 +454,13 @@ def test_chat_is_503_when_unconfigured(monkeypatch, enforce_claims):
     assert "API key" in resp.json()["detail"]
 
 
-def test_message_history_is_bounded():
+def test_message_history_is_not_capped_but_must_not_be_empty():
+    """No length limit on a conversation (decided 2026-10-05): a long one
+    passes validation — here it reaches "assistant not configured" (503) —
+    and fit_history trims what the model sees. Empty is still refused."""
     client = TestClient(create_app(dry_run=True, enforce_claims=False, ui=False))
-    too_many = {"messages": [{"role": "user", "content": "x"} for _ in range(41)]}
-    assert client.post("/assistant/chat", json=too_many).status_code == 422
+    many = {"messages": [{"role": "user", "content": "x" * 9000} for _ in range(41)]}
+    assert client.post("/assistant/chat", json=many).status_code != 422
     assert client.post("/assistant/chat", json={"messages": []}).status_code == 422
 
 
@@ -937,3 +940,30 @@ def test_plate_report_tool_reads_plan_records_only():
     assert service.method_calls == []  # no robot or gateway call at all
     context = assistant._plate_reports_for_context()
     assert {r["plan_id"] for r in context} == {"gS0maKvThQsH_p2S", "C5B-GLbrcj7Q6rII"}
+
+
+# ── conversation length (2026-10-05: "messages.7.content: String should have
+#    at most 8000 characters" broke every turn after one long reply) ──────
+
+
+def test_a_long_message_and_a_long_conversation_are_accepted():
+    from opentrons_server.gateway.assistant import AssistantChatRequest
+
+    long_reply = "x" * 50_000
+    messages = [{"role": "user", "content": "q"}, {"role": "assistant", "content": long_reply}] * 40
+    request = AssistantChatRequest(messages=messages + [{"role": "user", "content": "next?"}])
+    assert len(request.messages) == 81
+
+
+def test_fit_history_keeps_the_newest_and_says_what_it_left_out():
+    from opentrons_server.gateway.assistant import fit_history
+
+    history = [{"role": "user", "content": "a" * 100}, {"role": "assistant", "content": "b" * 100},
+               {"role": "user", "content": "c" * 100}]
+    assert fit_history(history, budget=1000) == history  # all fit: unchanged
+    fitted = fit_history(history, budget=250)
+    assert [m["content"][:1] for m in fitted[1:]] == ["b", "c"]
+    assert "1 earlier message" in fitted[0]["content"]
+    huge = [{"role": "user", "content": "old"}, {"role": "user", "content": "z" * 10_000}]
+    fitted = fit_history(huge, budget=100)
+    assert fitted[-1]["content"] == "z" * 10_000  # the newest is kept whole
