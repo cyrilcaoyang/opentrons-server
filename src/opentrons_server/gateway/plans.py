@@ -78,6 +78,7 @@ from .models import (
     LightsRequest,
     LiquidMoveRequest,
     DispenseRequest,
+    DropTipRequest,
     MoveLabwareRequest,
     MoveToRequest,
     PlateLoadRequest,
@@ -150,7 +151,7 @@ PLAN_ACTIONS: Dict[str, ActionSpec] = {
     "pick_up_tip": ActionSpec(TipRequest, False, lambda svc, a: svc.pick_up_tip(a)),
     "aspirate": ActionSpec(LiquidMoveRequest, False, lambda svc, a: svc.aspirate(a)),
     "dispense": ActionSpec(DispenseRequest, False, lambda svc, a: svc.dispense(a)),
-    "drop_tip": ActionSpec(TipRequest, False, lambda svc, a: svc.drop_tip(a)),
+    "drop_tip": ActionSpec(DropTipRequest, False, lambda svc, a: svc.drop_tip(a)),
     "move_labware": ActionSpec(
         MoveLabwareRequest, False, lambda svc, a: svc.move_labware(a)
     ),

@@ -596,6 +596,44 @@ class OT2HttpControl:
         self._tip_origin.pop(pip_name, None)
         self._volumes[pip_name] = 0.0
 
+    def force_drop_tip(self, pip_name: str, *, tip_clearance_mm: float) -> None:
+        """Drop a tip the run engine has no record of into the fixed trash.
+
+        A run started after a stop or a restart believes every head is bare
+        (the OT-2 has no tip sensor), so it plans heights for the nozzle while
+        a real tip hangs below it. Three commands, none of which checks the
+        engine's tip record on OT-2 hardware:
+
+        1. home this mount's Z — the arc to the trash then travels at that
+           height, since the planner never descends below the move's origin;
+        2. ``moveToAddressableAreaForDropTip`` at the area's top center, raised
+           by ``tip_clearance_mm`` so the tip end, not the nozzle, clears the rim;
+        3. ``dropTipInPlace`` — the plunger eject.
+
+        The caller passes 0 clearance when the engine already accounts for the
+        tip. Registered-trash *labware* servers are not supported.
+        """
+        if self._trash_area is None:
+            raise RuntimeError(
+                "force drop needs the fixed trash registered as an addressable area "
+                "(this robot-server models it as labware)"
+            )
+        pipette_id = self._pipette_id(pip_name)
+        mount = self._pipette_mount(pip_name)
+        self.client.execute(RunEngineCommands.home(axes=[_MOUNT_Z_AXIS[mount]]))
+        self.client.execute(
+            RunEngineCommands.move_to_addressable_area_for_drop_tip(
+                pipette_id,
+                self._trash_area,
+                alternate_drop_location=False,
+                offset={"x": 0.0, "y": 0.0, "z": float(tip_clearance_mm)},
+            )
+        )
+        self.client.execute(RunEngineCommands.drop_tip_in_place(pipette_id))
+        self._pending = None
+        self._tip_origin.pop(pip_name, None)
+        self._volumes[pip_name] = 0.0
+
     def return_tip(self, pip_name: str, *, home_after: Optional[bool] = None) -> None:
         """Return the tip to the well it was picked from. Emulated: the run
         engine has no returnTip command, so this drops into the tracked origin

@@ -221,6 +221,81 @@ def test_http_pick_refused_when_the_engine_reports_a_tip(fake_http):
     assert fake_http.commands == before
 
 
+def test_http_force_drop_clears_a_tip_the_run_does_not_know(fake_http):
+    """Live on ot2_complexation 2026-10-04: a stop mid-plan left a tip on the
+    head, the fresh session's run believed the head bare, and the plain drop
+    was refused 412. force_drop homes Z, travels high to the fixed trash with
+    the tip end above the rim, ejects, and records the head bare."""
+    from opentrons_server.gateway.models import DropTipRequest, TipMount
+    from opentrons_server.gateway.tip_state import EMPTY, ON_PIPETTE, TipUnavailable
+
+    service = _http_service_with_pipette(fake_http)
+    service.tips.register_rack("7")
+    service.tips.set_statuses("7", ["A3"], ON_PIPETTE)
+    service.tips.set_mount(TipMount(
+        pipette="p300", rack="7", well="A3", wells=["A3"], picked_at="2026-10-04T23:01:05Z",
+    ))
+    fake_http.current_state = {"tipStates": {"p300": {"hasTip": False}}}
+
+    with pytest.raises(TipUnavailable) as excinfo:
+        service.drop_tip(DropTipRequest(pipette="p300"))
+    assert "force_drop" in excinfo.value.body["detail"]
+
+    before = len(fake_http.commands)
+    service.drop_tip(DropTipRequest(pipette="p300", force_drop=True))
+
+    home, move, drop = fake_http.commands[before:]
+    assert home == ("home", {"axes": ["rightZ"]})
+    assert move[0] == "moveToAddressableAreaForDropTip"
+    assert move[1]["addressableAreaName"] == "fixedTrash"
+    assert move[1]["alternateDropLocation"] is False
+    assert move[1]["offset"] == {"x": 0.0, "y": 0.0, "z": pytest.approx(59.3 + 10.0)}
+    assert drop == ("dropTipInPlace", {"pipetteId": "p300"})
+    assert service.tips.get_mount("p300") is None
+    assert service.tips.status("7", "A3") == EMPTY
+    assert service.state == OT2ServiceState.READY
+
+
+def test_http_force_drop_adds_no_clearance_when_the_run_knows_the_tip(fake_http):
+    from opentrons_server.gateway.models import DropTipRequest
+
+    service = _http_service_with_pipette(fake_http)
+    fake_http.current_state = {"tipStates": {"p300": {"hasTip": True}}}
+    service.drop_tip(DropTipRequest(pipette="p300", force_drop=True))
+    move = next(c for c in fake_http.commands if c[0] == "moveToAddressableAreaForDropTip")
+    assert move[1]["offset"]["z"] == 0.0
+
+
+def test_http_force_drop_takes_the_tip_length_from_the_mounted_rack(fake_http):
+    from types import SimpleNamespace
+
+    from opentrons_server.gateway.models import DropTipRequest, TipMount
+
+    service = _http_service_with_pipette(fake_http)
+    service.tips.set_mount(TipMount(
+        pipette="p300", rack="7", well="A3", wells=["A3"], picked_at="2026-10-04T23:01:05Z",
+    ))
+    rack = SimpleNamespace(definition=None, load_name="opentrons_96_tiprack_20ul")
+    service._build_deck_state = lambda: SimpleNamespace(slots={"7": SimpleNamespace(labware=rack)})
+
+    service.drop_tip(DropTipRequest(pipette="p300", force_drop=True))
+
+    move = next(c for c in fake_http.commands if c[0] == "moveToAddressableAreaForDropTip")
+    assert move[1]["offset"]["z"] == pytest.approx(39.2 + 10.0)  # the rack, not the p300 default
+
+
+def test_http_force_drop_only_targets_the_fixed_trash(fake_http):
+    from opentrons_server.gateway.models import DropTipRequest
+
+    service = _http_service_with_pipette(fake_http)
+    before = list(fake_http.commands)
+    with pytest.raises(ValueError, match="fixed trash"):
+        service.drop_tip(
+            DropTipRequest(pipette="p300", labware_nickname="tips", position="A1", force_drop=True)
+        )
+    assert fake_http.commands == before
+
+
 def test_http_snapshot_carries_the_engines_tip_belief(fake_http):
     service = _http_service_with_pipette(fake_http)
     fake_http.get_run = lambda: {

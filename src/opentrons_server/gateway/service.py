@@ -67,6 +67,7 @@ from .models import (
     TipMount,
     WellSample,
 )
+from .labware import standard_definition
 from .limits import OutOfEnvelope, check_volume
 from .plate_state import PlateStateStore
 from .tip_state import (
@@ -157,6 +158,10 @@ _OFFLINE_SAFE_ACTIONS = frozenset(
 # pickup bottoms out, per bench feedback 2026-08-12; override per-deployment
 # if a rack geometry needs it.
 _TIP_RESEAT_BOTTOM_MM = float(os.getenv("OT2_TIP_RESEAT_BOTTOM_MM", "10"))
+# Force drop: the tip end stops this far above the fixed-trash rim. Tip length
+# comes from the mounted rack's definition, else the pipette's standard tip.
+_FORCE_DROP_RIM_CLEARANCE_MM = 10.0
+_STANDARD_TIP_LENGTH_MM = ((20.0, 39.2), (300.0, 59.3), (1000.0, 88.0))
 
 # Where an aspirate / dispense goes when the caller names no offset. An
 # aspirate must be IN the liquid, so it references the well bottom; the old
@@ -1982,6 +1987,9 @@ class OT2Service:
             )
 
     def drop_tip(self, request: Any) -> None:
+        if getattr(request, "force_drop", False):
+            self._force_drop_tip(request)
+            return
         nickname = request.labware_nickname
         position = request.position
         if nickname and not position and str(nickname).strip() in _TRASH_ALIASES:
@@ -2106,6 +2114,75 @@ class OT2Service:
                 to_wells=dest_wells or None,
             )
 
+    def _force_drop_tip(self, request: Any) -> None:
+        """Drop into the fixed trash whatever the robot's run believes.
+
+        The operator has seen a tip the run has no record of — typically after
+        a stop, since the next session's run starts with every head bare. No
+        tip-state pre-check: home Z, travel high to the trash, eject. On
+        success the head is recorded bare, the mount released, its origin
+        wells left empty.
+        """
+        nickname = request.labware_nickname
+        if request.position or (nickname and str(nickname).strip() not in _TRASH_ALIASES):
+            raise ValueError("force_drop only drops into the fixed trash; omit labware_nickname and position")
+        if IS_FLEX or self.transport != "http":
+            raise ValueError("force_drop is supported on the OT-2 over the HTTP transport only")
+        mounted = self.tips.get_mount(request.pipette)
+
+        def _drop() -> None:
+            control = self._require_control()
+            pip = self._ensure_session_pipette(request.pipette)
+            # When the run does know the tip, its own geometry already puts the
+            # tip end at the rim; raising it again could push the target out of
+            # Z range.
+            clearance = 0.0 if control.engine_has_tip(pip) is True else (
+                self._tip_length_for(pip, mounted) + _FORCE_DROP_RIM_CLEARANCE_MM
+            )
+            control.force_drop_tip(pip, tip_clearance_mm=clearance)
+
+        try:
+            self._run_action("drop_tip", _drop, idempotent=False)
+        except UnknownOutcomeError:
+            self.tips.update_mount(request.pipette, uncertain=True)
+            raise
+        released = self._release_mount(request.pipette, status=EMPTY)
+        if released is not None:
+            self._emit_tip_event(
+                "tip_drop",
+                released.rack,
+                pipette=request.pipette,
+                well=released.well,
+                wells=released.wells or None,
+                channels=released.channels,
+                sample_id=released.last_sample,
+                contacted_liquid=released.contacted_liquid,
+                forced=True,
+            )
+
+    def _tip_length_for(self, session_pipette: str, mounted: Optional[TipMount]) -> float:
+        """Length of the tip on the head: the mounted rack's definition when
+        the deck knows it, else the standard Opentrons tip for the loaded
+        pipette's volume (``p300_single_gen2`` -> 300 uL tips), else the
+        longest standard tip."""
+        if mounted is not None and mounted.rack:
+            slot = self._build_deck_state().slots.get(str(mounted.rack))
+            labware = slot.labware if slot is not None else None
+            if labware is not None:
+                definition = labware.definition or (
+                    standard_definition(labware.load_name) if labware.load_name else None
+                )
+                length = ((definition or {}).get("parameters") or {}).get("tipLength")
+                if isinstance(length, (int, float)) and length > 0:
+                    return float(length)
+        model = getattr(self.control, "_pipette_models", {}).get(session_pipette) or ""
+        match = re.match(r"p(\d+)_", model)
+        if match:
+            for volume, length in _STANDARD_TIP_LENGTH_MM:
+                if int(match.group(1)) <= volume:
+                    return length
+        return _STANDARD_TIP_LENGTH_MM[-1][1]
+
     def _refuse_tip_state_conflict(
         self,
         action: str,
@@ -2148,12 +2225,18 @@ class OT2Service:
             f"a tip from rack {mounted.rack} well {mounted.well}" if mounted else "no tip"
         )
         if expect_tip:
+            ledger = (
+                f"a tip on {pipette!r}, picked from rack {mounted.rack} well {mounted.well}"
+                if mounted else "no tip"
+            )
             detail = (
-                f"Cannot {action}: the robot reports no tip on {pipette!r}, so it "
-                f"would refuse the drop. The gateway's record shows {ledger}. If a "
-                "tip is physically on the head, remove it by hand; then, if the "
-                "record still shows one, release it with tips.mark (status=empty) "
-                "on its origin wells."
+                f"Cannot {action}: the robot's current run has no record of a tip on "
+                f"{pipette!r}. A run started after a stop or restart begins with none; "
+                f"the OT-2 cannot sense tips. The gateway's record shows {ledger}. If a "
+                f'tip is on the head, drop it with {{"pipette": "{pipette}", '
+                '"force_drop": true}: home Z, travel high to the fixed trash, eject. '
+                "If the head is bare, release the record with tips.mark "
+                "(status=empty) on its origin wells."
             )
         else:
             detail = (

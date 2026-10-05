@@ -413,6 +413,19 @@ def test_declared_deck_pick_without_an_attached_pipette_is_honest(service):
         service.pick_up_tip(TipRequest(pipette="left"))
 
 
+def test_force_drop_is_refused_off_the_http_transport(service):
+    from opentrons_server.gateway.models import DropTipRequest
+
+    service.setup_protocol(RECIPE)
+    _pick(service, "A1")
+
+    with pytest.raises(ValueError, match="HTTP"):
+        service.drop_tip(DropTipRequest(pipette="p300", force_drop=True))
+
+    service.control.drop_tip.assert_not_called()
+    assert service.tips.get_mount("p300") is not None
+
+
 def test_drop_into_a_tracked_rack_well_relocates_the_tip(service):
     """The 2026-08-11 bench ask: move the tip from H12 into the rack's empty
     A1. The robot did it, but the tracker recorded only "H12 is gone" — A1
