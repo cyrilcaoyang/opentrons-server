@@ -934,8 +934,11 @@ function PatternSummaryBlock({ summary: s }: { summary: PatternSummary }) {
         {" · "}{s.total_steps} steps in total
       </p>
       {Object.keys(s.overrides).length > 0 && (
-        <p className="mt-0.5 text-amber-700 dark:text-amber-400">
-          Exceptions: {Object.entries(s.overrides).map(([w, ids]) => `${w} (${ids.join(", ")})`).join("; ")}
+        <p className="mt-0.5 font-mono text-[10px] text-amber-700 dark:text-amber-400">
+          Exceptions:{" "}
+          {Object.entries(s.overrides).map(([w, per]) =>
+            `${w}: ${Object.entries(per).map(([id, args]) => `${id} ${JSON.stringify(args)}`).join("; ")}`,
+          ).join(" · ")}
         </p>
       )}
     </div>

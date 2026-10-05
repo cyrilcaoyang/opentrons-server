@@ -3458,19 +3458,28 @@ class OT2Service:
             except Exception:  # pragma: no cover - best-effort background loop
                 pass
 
-    def labware_grid(self, ref: str) -> Optional[Tuple[int, int]]:
-        """``(rows, columns)`` of the labware at a slot or recipe nickname, as
-        the deck currently knows it (declared or observed); None when it
-        does not. What plan_patterns needs to check a pattern's wells."""
+    def labware_grid(self, ref: str) -> Optional[Any]:
+        """The wells of the labware a plan step addresses as ``ref`` — a recipe
+        nickname first (that is how /control/* resolves it), else a deck slot
+        — as the deck currently knows it (declared or observed). A definition
+        that lists its wells gives the exact set (custom labware can be
+        sparse); otherwise the rectangular grid. None when unknown. What
+        plan_patterns needs to check a pattern's wells."""
+        from .plan_patterns import WellGrid
+
         deck = self._build_deck_state()
-        slot = deck.slots.get(str(ref))
+        mapped = self._nickname_to_slot().get(str(ref))
+        slot = deck.slots.get(str(mapped)) if mapped is not None else None
         if slot is None:
-            mapped = self._nickname_to_slot().get(str(ref))
-            slot = deck.slots.get(str(mapped)) if mapped is not None else None
+            slot = deck.slots.get(str(ref))
         labware = slot.labware if slot is not None else None
         if labware is None or not labware.rows or not labware.columns:
             return None
-        return int(labware.rows), int(labware.columns)
+        wells = None
+        definition = getattr(labware, "definition", None)
+        if isinstance(definition, dict) and isinstance(definition.get("wells"), dict) and definition["wells"]:
+            wells = frozenset(str(w) for w in definition["wells"])
+        return WellGrid(rows=int(labware.rows), columns=int(labware.columns), wells=wells)
 
     def _nickname_to_slot(self) -> Dict[str, str]:
         """Map labware nicknames to deck slots from the current setup recipe.
