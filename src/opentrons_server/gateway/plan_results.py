@@ -74,9 +74,44 @@ def _writer_alive(writer: Any) -> bool:
         return True
     if writer.get("host") != _WRITER["host"] or not isinstance(writer.get("pid"), int):
         return False
+    return _pid_alive(writer["pid"])
+
+
+def _pid_alive(pid: int) -> bool:
+    """Whether ``pid`` is a running process — a pure query on every platform.
+
+    Not ``os.kill(pid, 0)`` on Windows (where the gateways run): there a
+    signal argument is not a probe — 0 is CTRL_C_EVENT and anything else
+    calls TerminateProcess — so the "check" would interrupt or kill the other
+    process. Windows opens the process for query only and reads its exit code.
+    """
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
-        os.kill(writer["pid"], 0)
-    except (OSError, ValueError):
+        os.kill(pid, 0)  # POSIX: signal 0 checks existence and sends nothing
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except OSError:
         return False
     return True
 

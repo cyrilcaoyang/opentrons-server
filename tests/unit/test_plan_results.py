@@ -337,3 +337,37 @@ def test_a_restart_mid_run_is_recorded_when_the_gateway_comes_back(tmp_path, mon
     record = client.get("/plans/results/cut-off").json()
     assert record["status"] == "interrupted"
     assert [r["outcome"] for r in record["plan"]["results"]] == ["ok", "unknown"]
+
+
+def test_the_liveness_check_never_signals_on_windows(monkeypatch):
+    """os.kill(pid, 0) is a probe on POSIX but sends CTRL_C_EVENT on Windows,
+    where the gateways run: the check must use a query there instead."""
+    import ctypes
+    from ctypes import wintypes  # noqa: F401 — loaded before os.name is faked
+
+    from opentrons_server.gateway import plan_results as pr
+
+    def forbidden(*_a, **_k):
+        raise AssertionError("os.kill must not be called on Windows")
+
+    monkeypatch.setattr(pr.os, "name", "nt")
+    monkeypatch.setattr(pr.os, "kill", forbidden)
+    calls = []
+
+    class _K32:
+        class _F:
+            def __init__(self, fn):
+                self.fn = fn
+                self.restype = None
+
+            def __call__(self, *a):
+                return self.fn(*a)
+
+        def __init__(self):
+            self.OpenProcess = self._F(lambda access, inherit, pid: calls.append(("open", access, pid)) or 1)
+            self.GetExitCodeProcess = self._F(lambda h, ref: (setattr(ref._obj, "value", 259), True)[1])
+            self.CloseHandle = self._F(lambda h: calls.append(("close", h)) or True)
+
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: _K32(), raising=False)
+    assert pr._pid_alive(4242) is True
+    assert calls[0] == ("open", 0x1000, 4242) and calls[-1] == ("close", 1)
