@@ -69,6 +69,7 @@ from .assistant import (
 )
 from ..version import __version__ as GATEWAY_VERSION
 from .plan_results import InvalidPlanId, PlanResultsStore
+from .run_access import RunReader, redact_plan_view
 from .plans import (
     ApprovalRequiresClaim,
     Plan,
@@ -1072,7 +1073,7 @@ def create_app(
         try:
             return Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
                 http_request, http_request.headers.get("X-Claim-Token")
-            )).chat(
+            ), reader=_run_reader(http_request)).chat(
                 [m.model_dump() for m in request.messages]
             )
         except AssistantDisabled as exc:
@@ -1098,7 +1099,7 @@ def create_app(
         messages = [m.model_dump() for m in request.messages]
         assistant = Assistant(service, plans, config, ensure_authorized=lambda: require_claim(
             http_request, http_request.headers.get("X-Claim-Token")
-        ))
+        ), reader=_run_reader(http_request))
         if request.request_id:
             with active_assistants_lock:
                 if request.request_id in active_assistants:
@@ -1166,11 +1167,46 @@ def create_app(
         """
         return action_catalog()
 
-    @app.get("/plans", tags=["plans"])
-    def list_plans() -> list[dict[str, Any]]:
-        return [_plan_view(p) for p in plans.list()]
+    def _run_reader(request: Request) -> RunReader:
+        """Who is reading run data (run_access.py). The edge's signed-in user
+        with their projects (member and PI) and admin role; an API key is a
+        lab service with full read; anonymous only on a login-off gateway."""
+        if _from_edge(request):
+            user = (request.headers.get("X-Auth-User") or "").strip()
+            if user:
+                raw = ",".join(request.headers.get(h, "") for h in ("X-Auth-Projects", "X-Auth-Pi-Projects"))
+                return RunReader(
+                    user=user,
+                    projects=frozenset(p.strip() for p in raw.split(",") if p.strip()),
+                    admin=request.headers.get("X-Auth-Role") == "admin",
+                )
+        supplied = request.headers.get("X-Api-Key")
+        if supplied and _principal_for_api_key(supplied):
+            return RunReader(unrestricted=True)
+        if not require_login:
+            return RunReader(unrestricted=True)
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "login_required",
+                    "hint": "Run data needs a signed-in user (through the auth edge) or X-Api-Key."},
+        )
 
-    def _plate_report(plan_id: list[str], labware: Optional[str], density_g_per_ml: Optional[float]) -> dict[str, Any]:
+    _RUN_DATA_DENIED = ("This run's data is only open to the user who approved it, members and PIs "
+                        "of its ELN project, and admins.")
+
+    def _view_for(reader: RunReader, plan: Any) -> dict[str, Any]:
+        view = _plan_view(plan)
+        return view if reader.can_read_plan(plan) else redact_plan_view(view)
+
+    @app.get("/plans", tags=["plans"])
+    def list_plans(request: Request) -> list[dict[str, Any]]:
+        """Every plan: anyone signed in sees that it exists and how far it got;
+        readings and step messages only for those who may read its data."""
+        reader = _run_reader(request)
+        return [_view_for(reader, p) for p in plans.list()]
+
+    def _plate_report(plan_id: list[str], labware: Optional[str], density_g_per_ml: Optional[float],
+                      reader: RunReader) -> dict[str, Any]:
         if not plan_id:
             raise HTTPException(status_code=422, detail="give at least one plan_id")
         # A plan still in memory (running or recent) first; otherwise its saved
@@ -1178,16 +1214,22 @@ def create_app(
         selected: list[Any] = []
         for pid in plan_id:
             try:
-                selected.append(plans.get(pid))
-                continue
+                live = plans.get(pid)
             except PlanError as exc:
                 missing = exc
+            else:
+                if not reader.can_read_plan(live):
+                    raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
+                selected.append(live)
+                continue
             try:
                 bundle = plan_results.get(pid)
             except InvalidPlanId:
                 bundle = None
             if bundle is None:
                 raise HTTPException(status_code=_plan_error_status(missing), detail=str(missing))
+            if not reader.can_read_record(bundle):
+                raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
             selected.append(bundle["plan"])
         try:
             return build_plate_report(selected, labware=labware, density_g_per_ml=density_g_per_ml)
@@ -1208,26 +1250,34 @@ def create_app(
         return {"user": request.headers.get("X-Auth-User") or None, "projects": projects}
 
     @app.get("/plans/results", tags=["plans"])
-    def list_plan_results(limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
+    def list_plan_results(request: Request, limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
         """Run records, newest first: status (``executing`` while it runs,
         updated as each step starts and ends; ``interrupted`` when the gateway
         restarted mid-run), progress, approver, ELN project and delivery
-        state. Durable across restarts, unlike /plans."""
-        return plan_results.list(limit=limit)
+        state. Durable across restarts, unlike /plans. Everyone signed in sees
+        the list; ``can_open`` says whether this reader may open the run's
+        data (record, plate report)."""
+        reader = _run_reader(request)
+        return [{**row, "can_open": reader.can_read_record(row)} for row in plan_results.list(limit=limit)]
 
     @app.get("/plans/results/{plan_id}", tags=["plans"])
-    def get_plan_results(plan_id: str) -> dict[str, Any]:
-        """One saved bundle: the full plan record, its plate report, delivery."""
+    def get_plan_results(plan_id: str, request: Request) -> dict[str, Any]:
+        """One saved bundle: the full plan record, its plate report, delivery.
+        Only for the approver, members and PIs of its ELN project, and admins."""
+        reader = _run_reader(request)
         try:
             bundle = plan_results.get(plan_id)
         except InvalidPlanId as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         if bundle is None:
             raise HTTPException(status_code=404, detail=f"no saved results for plan {plan_id}")
+        if not reader.can_read_record(bundle):
+            raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
         return bundle
 
     @app.get("/plans/plate-report", tags=["plans"])
     def plate_report(
+        request: Request,
         plan_id: list[str] = Query(default=[]),
         labware: Optional[str] = None,
         density_g_per_ml: Optional[float] = None,
@@ -1238,28 +1288,30 @@ def create_app(
         combined in the order given, so a run split across plans reads as one
         plate. No implied volume unless the caller supplies a density.
         """
-        return _plate_report(plan_id, labware, density_g_per_ml)
+        return _plate_report(plan_id, labware, density_g_per_ml, _run_reader(request))
 
     @app.get("/plans/plate-report.html", response_class=HTMLResponse, tags=["plans"])
     def plate_report_html(
+        request: Request,
         plan_id: list[str] = Query(default=[]),
         labware: Optional[str] = None,
         density_g_per_ml: Optional[float] = None,
     ) -> HTMLResponse:
         """The same report as an interactive, self-contained heatmap page."""
-        report = _plate_report(plan_id, labware, density_g_per_ml)
+        report = _plate_report(plan_id, labware, density_g_per_ml, _run_reader(request))
         title = f"{service.equipment_id} plate report"
         return HTMLResponse(render_plate_report_html(report, title=title))
 
     @app.get("/plans/plate-report.xlsx", tags=["plans"])
     def plate_report_xlsx(
+        request: Request,
         plan_id: list[str] = Query(default=[]),
         labware: Optional[str] = None,
         density_g_per_ml: Optional[float] = None,
     ) -> Response:
         """The same report as an Excel workbook: summary, mass and deviation
         plate grids with colour-scale heatmaps, per-well table, weighing log."""
-        report = _plate_report(plan_id, labware, density_g_per_ml)
+        report = _plate_report(plan_id, labware, density_g_per_ml, _run_reader(request))
         name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{service.equipment_id}_plate_report_{'_'.join(plan_id)}")[:120]
         return Response(
             render_plate_report_xlsx(report),
@@ -1285,9 +1337,10 @@ def create_app(
         return _plan_view(plan)
 
     @app.get("/plans/{plan_id}", tags=["plans"])
-    def get_plan(plan_id: str) -> dict[str, Any]:
+    def get_plan(plan_id: str, request: Request) -> dict[str, Any]:
+        reader = _run_reader(request)
         try:
-            return _plan_view(plans.get(plan_id))
+            return _view_for(reader, plans.get(plan_id))
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
 

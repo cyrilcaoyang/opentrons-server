@@ -65,6 +65,9 @@ export interface RunRecord {
   steps_failed: number;
   steps_unknown?: number;
   readings?: number;
+  /** Whether you may open this run's data (record, plate report): its
+   *  approver, members and PIs of its ELN project, and admins. */
+  can_open?: boolean;
   delivery: {
     state: string;
     last_error: string | null;

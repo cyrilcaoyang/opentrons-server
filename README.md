@@ -1111,6 +1111,18 @@ unreachable dashboard drops rows rather than stalling the control path.
 
 ### Plan results (`OT2_PLAN_RESULTS_DIR`, `OT2_RESULTS_URL`)
 
+**Who may read run data.** Run records, plate reports and plan results carry
+balance readings, scoped by project as in the ELN (`gateway/run_access.py`).
+With `OT2_REQUIRE_LOGIN` on, `/plans`, `/plans/{id}`, `/plans/results*` and
+`/plans/plate-report*` need the edge's signed-in user or an API key (401
+otherwise). Every signed-in user sees the run list (`can_open` per row) and
+other people's plan cards with their readings and step messages removed; a
+run's record and plate report open (else 403) only for its approver, members
+and PIs of its ELN project (`X-Auth-Projects` / `X-Auth-Pi-Projects` from the
+edge), and admins. API keys are lab services and read everything. The
+built-in assistant reads with the asking user's eyes. `/status`, `/docs/agent`
+and `/plans/actions` stay open.
+
 Every plan is saved as one JSON record **as it runs**: written when it
 starts and again as each step starts and ends, so its steps and readings can
 be watched live (the panel's *RUNS* section, `GET /plans/results`,

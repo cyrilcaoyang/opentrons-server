@@ -337,6 +337,9 @@ class Plan(BaseModel):
     # The ELN project the approver chose for this plan's results; None keeps
     # them on the gateway only (see plan_results.py).
     eln_project: Optional[str] = None
+    # Who approved it. Kept after the run spends the approval, because who may
+    # read the run's data depends on it (run_access.py).
+    approved_by: Optional[str] = None
 
     @property
     def non_idempotent_actions(self) -> List[str]:
@@ -463,6 +466,7 @@ class PlanStore:
         plan.status = "draft"
         plan.approval = None
         plan.eln_project = None
+        plan.approved_by = None
         return plan
 
     # -- the gate ----------------------------------------------------------
@@ -505,6 +509,7 @@ class PlanStore:
             expires_at=now + timedelta(seconds=APPROVAL_TTL_S),
         )
         plan.status = "approved"
+        plan.approved_by = claimed_by.owner
         plan.eln_project = eln_project.strip() if eln_project and eln_project.strip() else None
         return plan
 
