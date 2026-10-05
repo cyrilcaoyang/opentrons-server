@@ -873,7 +873,8 @@ const CARD_STEP_TONE: Record<string, string> = {
 };
 
 function stepLine(s: PlanStep): string {
-  const args = Object.entries(s.args)
+  // A plan you may not open arrives with action names only (run_access.py).
+  const args = Object.entries(s.args ?? {})
     .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
     .join(" ");
   return args ? `${s.action}  ${args}` : s.action;

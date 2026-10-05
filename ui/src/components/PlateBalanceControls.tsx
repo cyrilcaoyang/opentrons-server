@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ApiError, getBalanceReading } from "../lib/api";
 import type { PlateBalanceStatus } from "../lib/types";
 
 export function PlateBalanceControls({ balance, disabled, allowedActions, onAction }: {
@@ -8,14 +9,37 @@ export function PlateBalanceControls({ balance, disabled, allowedActions, onActi
   onAction: (action: "read" | "tare" | "zero", waitUntilStable: boolean) => void;
 }) {
   const [waitUntilStable, setWaitUntilStable] = useState(true);
+  // /status carries no weight (it is scientific data, public there); the
+  // value comes from /platebalance/reading under the run's access rule,
+  // fetched whenever /status says the reading changed.
+  const observedAt = balance.reading?.observed_at ?? null;
+  const [value, setValue] = useState<{ at: string | null; value: number | null; restricted: boolean }>(
+    { at: null, value: null, restricted: false });
+  // A gateway that still puts the weight in /status (older builds) is used
+  // as-is; the access rule is enforced by the server, not here.
+  const direct = typeof balance.reading?.value === "number" ? balance.reading.value : null;
+  useEffect(() => {
+    if (!observedAt || direct !== null) return;
+    let active = true;
+    getBalanceReading()
+      .then(r => active && setValue({ at: observedAt, value: r.reading?.value ?? null, restricted: false }))
+      .catch((e: unknown) => active && setValue({
+        at: observedAt, value: null, restricted: e instanceof ApiError && e.status === 403 }));
+    return () => { active = false; };
+  }, [observedAt, direct]);
   const reading = balance.reading;
+  const shown = !reading ? null
+    : direct !== null ? { at: observedAt, value: direct, restricted: false }
+    : value.at === observedAt ? value : null;
   return <div className="flex flex-col gap-1.5 text-xs">
     <div className="flex items-center gap-2">
       <div aria-label="Last measured weight" className="inline-flex items-baseline gap-2 rounded border border-slate-300 bg-slate-50 px-3 py-2 font-mono text-sm tabular-nums dark:border-slate-600 dark:bg-slate-900">
-        <span className="inline-block w-[9ch] whitespace-pre text-right">{reading ? reading.value.toFixed(4).padStart(8, " ") : "       —"}</span>
+        <span className="inline-block w-[9ch] whitespace-pre text-right">{shown?.value != null ? shown.value.toFixed(4).padStart(8, " ") : shown?.restricted ? "  locked" : "       —"}</span>
         <span>g</span>
       </div>
-      <span className="text-ink-subtle">{reading ? (reading.stable ? "Stable" : "Unstable") : "No reading"}</span>
+      <span className="text-ink-subtle" title={shown?.restricted ? "This reading was taken by another user's run; only its approver, project members and admins can see the weight." : undefined}>
+        {reading ? (reading.stable ? "Stable" : "Unstable") : "No reading"}{shown?.restricted && " · another user's run"}
+      </span>
     </div>
     <label className="flex items-center gap-2 text-ink-subtle">
       <input type="checkbox" checked={waitUntilStable} disabled={disabled}

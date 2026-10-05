@@ -69,7 +69,7 @@ from .assistant import (
 )
 from ..version import __version__ as GATEWAY_VERSION
 from .plan_results import InvalidPlanId, PlanResultsStore
-from .run_access import RunReader, redact_plan_view
+from .run_access import RunReader, redact_plan_view, redact_record_summary
 from .plans import (
     ApprovalRequiresClaim,
     Plan,
@@ -1171,6 +1171,14 @@ def create_app(
         """Who is reading run data (run_access.py). The edge's signed-in user
         with their projects (member and PI) and admin role; an API key is a
         lab service with full read; anonymous only on a login-off gateway."""
+        # A login-off gateway is open to every reader, signed in or not; an
+        # API key is a lab service and reads everything, even alongside an
+        # edge identity. Only then is a signed-in user scoped.
+        if not require_login:
+            return RunReader(unrestricted=True)
+        supplied = request.headers.get("X-Api-Key")
+        if supplied and _principal_for_api_key(supplied):
+            return RunReader(unrestricted=True)
         if _from_edge(request):
             user = (request.headers.get("X-Auth-User") or "").strip()
             if user:
@@ -1180,11 +1188,6 @@ def create_app(
                     projects=frozenset(p.strip() for p in raw.split(",") if p.strip()),
                     admin=request.headers.get("X-Auth-Role") == "admin",
                 )
-        supplied = request.headers.get("X-Api-Key")
-        if supplied and _principal_for_api_key(supplied):
-            return RunReader(unrestricted=True)
-        if not require_login:
-            return RunReader(unrestricted=True)
         raise HTTPException(
             status_code=401,
             detail={"error": "login_required",
@@ -1249,6 +1252,33 @@ def create_app(
         projects = sorted({p.strip() for p in raw.split(",") if p.strip()})
         return {"user": request.headers.get("X-Auth-User") or None, "projects": projects}
 
+    @app.get("/platebalance/reading", tags=["plans"])
+    def platebalance_reading(request: Request) -> dict[str, Any]:
+        """The balance's latest reading and error, in full. A reading taken by
+        a plan follows that run's access rule (its approver, project members
+        and PIs, admins); a manual read is open to anyone signed in. /status
+        shows only that a reading exists."""
+        reader = _run_reader(request)
+        balance = service.platebalance
+        if balance is None:
+            raise HTTPException(status_code=404, detail="no plate balance on this gateway")
+        snapshot = balance.snapshot()
+        owner = service.balance_reading_plan
+        if owner is not None:
+            try:
+                allowed = reader.can_read_plan(plans.get(owner))
+            except PlanError:
+                bundle = None
+                try:
+                    bundle = plan_results.get(owner)
+                except InvalidPlanId:
+                    pass
+                allowed = reader.unrestricted or reader.admin if bundle is None else reader.can_read_record(bundle)
+            if not allowed:
+                raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
+        return {"reading": snapshot.get("reading"), "last_error": snapshot.get("last_error"),
+                "plan_id": owner}
+
     @app.get("/plans/results", tags=["plans"])
     def list_plan_results(request: Request, limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
         """Run records, newest first: status (``executing`` while it runs,
@@ -1258,7 +1288,11 @@ def create_app(
         the list; ``can_open`` says whether this reader may open the run's
         data (record, plate report)."""
         reader = _run_reader(request)
-        return [{**row, "can_open": reader.can_read_record(row)} for row in plan_results.list(limit=limit)]
+        rows = []
+        for row in plan_results.list(limit=limit):
+            readable = reader.can_read_record(row)
+            rows.append({**(row if readable else redact_record_summary(row)), "can_open": readable})
+        return rows
 
     @app.get("/plans/results/{plan_id}", tags=["plans"])
     def get_plan_results(plan_id: str, request: Request) -> dict[str, Any]:
@@ -1464,11 +1498,15 @@ def create_app(
         return _plan_view(plan)
 
     @app.post("/plans/{plan_id}/abort", tags=["plans"])
-    def abort_plan(plan_id: str, _claim: None = Depends(require_claim_or_automation)) -> dict[str, Any]:
+    def abort_plan(plan_id: str, request: Request,
+                   _claim: None = Depends(require_claim_or_automation)) -> dict[str, Any]:
         """Operator stop. Claim-gated so only the person at the device can do
-        it — or, while a plan runs unattended, anyone signed in."""
+        it — or, while a plan runs unattended, anyone signed in. Stopping is
+        open; what comes back follows the run-data rule, so aborting someone
+        else's (finished) run is never a way to read it."""
+        reader = _run_reader(request)
         try:
-            return _plan_view(plans.abort(plan_id, reason="aborted by operator"))
+            return _view_for(reader, plans.abort(plan_id, reason="aborted by operator"))
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
 

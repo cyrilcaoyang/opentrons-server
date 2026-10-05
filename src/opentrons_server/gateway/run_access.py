@@ -54,13 +54,42 @@ class RunReader:
         return self.can_read(record.get("approved_by"), record.get("eln_project"))
 
 
+#: What a reader who may not open a run still sees: that it exists, who ran
+#: it, and how far it got — an allowlist, so a field added later stays hidden
+#: until someone decides it is safe. Step arguments (sample ids, volumes) and
+#: messages (a balance error can carry raw frames) are never on it.
+_PLAN_FIELDS = ("plan_id", "status", "created_at", "created_by", "approved_by", "eln_project",
+                "executable", "blocked_reason", "non_idempotent_actions", "step_hash")
+_RESULT_FIELDS = ("action", "outcome", "started_at", "finished_at")
+RESTRICTED = "(restricted to the run's approver, project members and admins)"
+
+
 def redact_plan_view(view: Dict[str, Any]) -> Dict[str, Any]:
-    """A plan view without its measured data, for a reader who may see that
-    the run happened but not what it measured."""
-    out = dict(view)
-    out["results"] = [
-        {k: v for k, v in result.items() if k not in {"reading", "balance_operation", "message"}}
-        for result in view.get("results") or []
-    ]
+    """A plan view for a reader who may see that the run happened but not
+    what it used or measured."""
+    out: Dict[str, Any] = {k: view[k] for k in _PLAN_FIELDS if k in view}
+    out["steps"] = [{"action": step.get("action")} for step in view.get("steps") or []]
+    out["results"] = [{k: r.get(k) for k in _RESULT_FIELDS} for r in view.get("results") or []]
+    out["halt_reason"] = RESTRICTED if view.get("halt_reason") else None
+    out["approval"] = None
     out["redacted"] = True
+    return out
+
+
+def redact_record_summary(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A run-list row for the same reader: the halt reason and delivery
+    error text can carry data, so they are replaced."""
+    out = dict(row)
+    if out.get("halt_reason"):
+        out["halt_reason"] = RESTRICTED
+    delivery = dict(out.get("delivery") or {})
+    if delivery.get("last_error"):
+        delivery["last_error"] = RESTRICTED
+    eln = dict(delivery.get("eln") or {})
+    for key in ("last_error", "check_error"):
+        if eln.get(key):
+            eln[key] = RESTRICTED
+    if eln:
+        delivery["eln"] = eln
+    out["delivery"] = delivery
     return out

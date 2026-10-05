@@ -230,6 +230,7 @@ export type StepOutcome = "pending" | "ok" | "failed" | "skipped";
 
 export interface PlanStep {
   action: string;
+  /** Absent on a plan you may not open (others' runs are redacted). */
   args: Record<string, unknown>;
 }
 
@@ -244,6 +245,8 @@ export interface StepResult {
 }
 
 export interface WeightReading {
+  /** Present in plan results you may open and in /platebalance/reading;
+   *  never in /status (run_access.py). */
   value: number;
   unit: string;
   stable: boolean;
