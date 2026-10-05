@@ -44,6 +44,14 @@ SCHEMA = "ot2.plan_results.v1"
 LOCAL_ONLY = "local_only"  # no ELN project chosen, or delivery not configured
 PENDING = "pending"
 DELIVERED = "delivered"
+RUNNING = "running"  # the plan is still executing; never delivered in this state
+
+#: The run status a bundle carries when the gateway restarted mid-run.
+INTERRUPTED = "interrupted"
+_INTERRUPTED_REASON = (
+    "The gateway restarted during this run. The step that was in progress has an "
+    "unknown outcome; later steps were not run. Inspect the robot before continuing."
+)
 
 
 def _now() -> str:
@@ -114,24 +122,77 @@ class PlanResultsStore:
 
     def save(self, plan: Any, *, approved_by: Optional[str], equipment_id: str,
              gateway_version: str) -> Dict[str, Any]:
-        """Write the bundle for a plan that has ended; queue it for the ELN when
-        it was approved with a project and delivery is configured."""
+        """Write the final bundle for a plan that has ended; queue it for the ELN
+        when it was approved with a project and delivery is configured."""
         record = plan.model_dump(mode="json")
+        return self._finish(self._bundle(record, approved_by=approved_by,
+                                         equipment_id=equipment_id,
+                                         gateway_version=gateway_version))
+
+    def save_progress(self, plan: Any, *, approved_by: Optional[str], equipment_id: str,
+                      gateway_version: str) -> Dict[str, Any]:
+        """Write the bundle of a plan that is still running, after each step
+        starts and ends, so its steps and readings can be watched as they come
+        in and survive a gateway restart. Never delivered while running."""
+        record = plan.model_dump(mode="json")
+        bundle = self._bundle(record, approved_by=approved_by, equipment_id=equipment_id,
+                              gateway_version=gateway_version, final=False)
+        self._write(bundle)
+        return bundle
+
+    def recover(self) -> List[str]:
+        """Close out runs the last process left ``running``: the gateway died
+        or restarted mid-run. The step that had started has an unknown
+        outcome, later steps did not run; the run is marked ``interrupted``
+        and, like any ended run, queued for the ELN when it has a project.
+        Returns the plan ids recovered."""
+        recovered: List[str] = []
+        if not self.directory.exists():
+            return recovered
+        for path in sorted(self.directory.glob("*.json")):
+            bundle = json.loads(path.read_text(encoding="utf-8"))
+            if (bundle.get("delivery") or {}).get("state") != RUNNING:
+                continue
+            record = bundle.get("plan") or {}
+            for result in record.get("results") or []:
+                if result.get("outcome") == "pending":
+                    if result.get("started_at") and not result.get("finished_at"):
+                        result["outcome"] = "unknown"
+                        result["message"] = "In progress when the gateway restarted; outcome unknown"
+                    else:
+                        result["outcome"] = "skipped"
+            record["status"] = INTERRUPTED
+            record["halt_reason"] = _INTERRUPTED_REASON
+            self._finish(self._bundle(record, approved_by=bundle.get("approved_by"),
+                                      equipment_id=bundle.get("equipment_id") or "",
+                                      gateway_version=bundle.get("gateway_version") or ""))
+            recovered.append(bundle["plan_id"])
+            logger.warning("plan %s was running when the gateway stopped; recorded as interrupted",
+                           bundle["plan_id"])
+        return recovered
+
+    def _bundle(self, record: Dict[str, Any], *, approved_by: Optional[str], equipment_id: str,
+                gateway_version: str, final: bool = True) -> Dict[str, Any]:
         results = record.get("results") or []
         started = [r["started_at"] for r in results if r.get("started_at")]
         finished = [r["finished_at"] for r in results if r.get("finished_at")]
         outcomes = [r.get("outcome") for r in results]
         report: Optional[Dict[str, Any]] = None
         report_error: Optional[str] = None
-        if any(r.get("reading") for r in results):
+        # The plate report is derived data: built once, when the run ends.
+        # While running, the report endpoints build it from the plan record.
+        if final and any(r.get("reading") for r in results):
             try:
                 report = build_plate_report([record])
             except ValueError as exc:
                 # Recorded, not hidden: the readings are still in `plan`.
                 report_error = str(exc)
         eln_project = record.get("eln_project")
-        state = PENDING if (eln_project and self.delivery_enabled) else LOCAL_ONLY
-        bundle = {
+        if not final:
+            state = RUNNING
+        else:
+            state = PENDING if (eln_project and self.delivery_enabled) else LOCAL_ONLY
+        return {
             "schema": SCHEMA,
             "plan_id": record["plan_id"],
             "device_id": self.device_id,
@@ -150,14 +211,19 @@ class PlanResultsStore:
             "steps_ok": outcomes.count("ok"),
             "steps_failed": outcomes.count("failed"),
             "steps_skipped": outcomes.count("skipped"),
+            "steps_unknown": outcomes.count("unknown"),
+            "steps_done": sum(1 for r in results if r.get("finished_at")),
+            "readings": sum(1 for r in results if r.get("reading")),
             "plate_report": report,
             "plate_report_error": report_error,
             "plan": record,
             "delivery": {"state": state, "attempts": 0, "last_error": None,
                          "delivered_at": None, "receipt": None},
         }
+
+    def _finish(self, bundle: Dict[str, Any]) -> Dict[str, Any]:
         self._write(bundle)
-        if state == PENDING:
+        if bundle["delivery"]["state"] == PENDING:
             with self._lock:
                 self._pending.add(bundle["plan_id"])
             self._wake.set()
@@ -191,13 +257,15 @@ class PlanResultsStore:
                 return None
             return json.loads(path.read_text(encoding="utf-8"))
 
-    def list(self) -> List[Dict[str, Any]]:
-        """Summaries, newest first — without the plan record and report."""
+    def list(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """The newest ``limit`` summaries (by file time), without the plan
+        record and report — cheap enough for the panel to poll."""
         with self._lock:
             if not self.directory.exists():
                 return []
-            bundles = [json.loads(p.read_text(encoding="utf-8"))
-                       for p in self.directory.glob("*.json")]
+            paths = sorted(self.directory.glob("*.json"),
+                           key=lambda p: p.stat().st_mtime, reverse=True)[:max(limit, 0)]
+            bundles = [json.loads(p.read_text(encoding="utf-8")) for p in paths]
         bundles.sort(key=lambda b: b.get("saved_at") or "", reverse=True)
         return [{k: v for k, v in b.items() if k not in {"plan", "plate_report"}}
                 for b in bundles]

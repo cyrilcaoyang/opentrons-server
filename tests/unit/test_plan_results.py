@@ -145,3 +145,140 @@ def test_me_reports_identity_and_projects_only_through_the_edge():
     assert client.get("/me", headers=headers).json() == {"user": None, "projects": []}
     assert client.get("/me", headers={**headers, "X-Edge-Key": "s3cret"}).json() == {
         "user": "ada@lab", "projects": ["Complexation HTE", "Polymers"]}
+
+
+# ── live run records (2026-10-05): saved as the run goes, survive restarts ──
+
+
+def test_a_running_plan_is_saved_as_running_and_never_delivered(tmp_path):
+    sent = []
+    store = _store(tmp_path, results_url="http://central/x", transport=sent.append)
+    plan = _plan()
+    plan.status = "executing"
+    plan.results[1].finished_at = None
+    plan.results[1].outcome = "pending"
+    bundle = store.save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
+                                 gateway_version="0.4.0")
+    assert bundle["delivery"]["state"] == "running"
+    assert bundle["status"] == "executing" and bundle["steps_done"] == 1
+    assert store.summary()["pending"] == 0
+    assert store.deliver_pending() == 0 and sent == []
+    assert store.list()[0]["delivery"]["state"] == "running"
+
+
+def test_a_run_cut_off_by_a_restart_is_recovered_as_interrupted(tmp_path):
+    store = _store(tmp_path, results_url="http://central/x", transport=lambda p: {"ok": True})
+    plan = _plan()
+    plan.status = "executing"
+    plan.steps.append(PlanStep(action="lights.set", args={"on": False}))
+    plan.results[1].finished_at = None
+    plan.results[1].outcome = "pending"  # started, never finished
+    plan.results.append(StepResult(action="lights.set"))  # never started
+    store.save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
+                        gateway_version="0.4.0")
+
+    reopened = _store(tmp_path, results_url="http://central/x", transport=lambda p: {"ok": True})
+    assert reopened.recover() == ["p1"]
+    bundle = reopened.get("p1")
+    assert bundle["status"] == "interrupted" and "restarted" in bundle["halt_reason"]
+    assert [r["outcome"] for r in bundle["plan"]["results"]] == ["ok", "unknown", "skipped"]
+    assert bundle["steps_unknown"] == 1 and bundle["steps_skipped"] == 1
+    # Like any ended run with a project, it goes to the ELN.
+    assert bundle["delivery"]["state"] == PENDING
+    assert reopened.recover() == []  # only once
+
+
+def test_list_returns_the_newest_records_first_and_honours_the_limit(tmp_path):
+    import os
+    import time
+
+    store = _store(tmp_path)
+    for i, pid in enumerate(["old", "mid", "new"]):
+        store.save(_plan(pid), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+        os.utime(store._path(pid), (time.time() + i, time.time() + i))
+    assert [b["plan_id"] for b in store.list(limit=2)] == ["new", "mid"]
+
+
+def test_the_executor_reports_each_step_as_it_starts_and_ends():
+    from unittest.mock import Mock
+
+    from opentrons_server.gateway.claims import ClaimManager
+    from opentrons_server.gateway.models import ClaimedBy
+    from opentrons_server.gateway.plans import PlanExecutor, PlanStore
+
+    store = PlanStore()
+    service = Mock()
+    service.claims = ClaimManager()
+    service.allowed_actions.return_value = ["lights.set", "plate.unload"]
+    claim = ClaimedBy(session_id="s", owner="ada@lab",
+                      expires_at=datetime.now(timezone.utc).replace(year=2099))
+    plan = store.create([PlanStep(action="lights.set", args={"on": True}),
+                         PlanStep(action="plate.unload", args={})], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=claim)
+    seen = []
+    executor = PlanExecutor(service, store)
+    executor.on_progress = lambda snap: seen.append(
+        [(r.outcome, r.started_at is not None) for r in snap.results])
+    done = executor.execute(plan.plan_id, claimed_by=claim)
+    assert done.status == "executed"
+    # start, then (step started, step done) per step
+    assert seen == [
+        [("pending", False), ("pending", False)],
+        [("pending", True), ("pending", False)],
+        [("ok", True), ("pending", False)],
+        [("ok", True), ("pending", True)],
+        [("ok", True), ("ok", True)],
+    ]
+
+
+def test_a_failing_record_write_never_halts_the_robot():
+    from unittest.mock import Mock
+
+    from opentrons_server.gateway.claims import ClaimManager
+    from opentrons_server.gateway.models import ClaimedBy
+    from opentrons_server.gateway.plans import PlanExecutor, PlanStore
+
+    store = PlanStore()
+    service = Mock()
+    service.claims = ClaimManager()
+    service.allowed_actions.return_value = ["lights.set"]
+    claim = ClaimedBy(session_id="s", owner="ada@lab",
+                      expires_at=datetime.now(timezone.utc).replace(year=2099))
+    plan = store.create([PlanStep(action="lights.set", args={"on": True})], created_by="agent")
+    store.approve(plan.plan_id, step_hash=plan.step_hash, claimed_by=claim)
+    executor = PlanExecutor(service, store)
+
+    def disk_full(_snap):
+        raise OSError("disk full")
+
+    executor.on_progress = disk_full
+    assert executor.execute(plan.plan_id, claimed_by=claim).status == "executed"
+    assert "disk full" in executor.progress_error
+
+
+def test_the_plate_report_outlives_a_gateway_restart(tmp_path, monkeypatch):
+    monkeypatch.setenv("OT2_PLAN_RESULTS_DIR", str(tmp_path / "results"))
+    # A finished run saved by an earlier process; this one never had it in memory.
+    _store(tmp_path).save(_plan("ran-before"), approved_by="ada@lab",
+                          equipment_id="ot2_complexation", gateway_version="0.4.0")
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+    assert client.get("/plans/ran-before").status_code == 404  # not in memory
+    report = client.get("/plans/plate-report", params={"plan_id": "ran-before"})
+    assert report.status_code == 200, report.text
+    assert report.json()["plans"][0]["plan_id"] == "ran-before"
+    assert client.get("/plans/plate-report.xlsx", params={"plan_id": "ran-before"}).status_code == 200
+    assert client.get("/plans/plate-report", params={"plan_id": "never"}).status_code == 404
+
+
+def test_a_restart_mid_run_is_recorded_when_the_gateway_comes_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("OT2_PLAN_RESULTS_DIR", str(tmp_path / "results"))
+    plan = _plan("cut-off")
+    plan.status = "executing"
+    plan.results[1].finished_at = None
+    plan.results[1].outcome = "pending"
+    _store(tmp_path).save_progress(plan, approved_by="ada@lab", equipment_id="ot2_complexation",
+                                   gateway_version="0.4.0")
+    client = TestClient(create_app(dry_run=True, enforce_claims=True, ui=False))
+    record = client.get("/plans/results/cut-off").json()
+    assert record["status"] == "interrupted"
+    assert [r["outcome"] for r in record["plan"]["results"]] == ["ok", "unknown"]

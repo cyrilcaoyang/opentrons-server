@@ -47,6 +47,35 @@ export function plateReportUrl(planIds: string[], format: "html" | "xlsx" = "htm
   return `${apiBase}plans/plate-report.${format}?${q}`;
 }
 
+/** One run record from GET /plans/results — saved on the gateway as the
+ *  plan runs (after each step starts and ends), so it survives a restart. */
+export interface RunRecord {
+  plan_id: string;
+  status: string; // executing | executed | failed | aborted | interrupted
+  halt_reason: string | null;
+  approved_by: string | null;
+  proposed_by: string | null;
+  eln_project: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  saved_at: string;
+  steps_total: number;
+  steps_done: number;
+  steps_ok: number;
+  steps_failed: number;
+  steps_unknown?: number;
+  readings?: number;
+  delivery: { state: string; last_error: string | null; delivered_at: string | null };
+}
+
+export const getRunRecords = (limit = 10) =>
+  fetchJson<RunRecord[]>(`/plans/results?limit=${limit}`);
+
+/** The full saved record (every step, reading and timestamp) as JSON. */
+export function runRecordUrl(planId: string): string {
+  return `${apiBase}plans/results/${encodeURIComponent(planId)}`;
+}
+
 function apiUrl(path: string): string {
   // Join without ever producing a leading "//": the browser would read that
   // as a scheme-relative URL (e.g. "//status" -> http://status/). apiBase

@@ -1111,12 +1111,18 @@ unreachable dashboard drops rows rather than stalling the control path.
 
 ### Plan results (`OT2_PLAN_RESULTS_DIR`, `OT2_RESULTS_URL`)
 
-Every plan that ends — executed, failed or aborted — is saved as one JSON
-bundle: the full plan record with each step's outcome and reading, approver,
-proposer, and the per-well plate report when it weighed anything. Plans
-themselves stay in memory; the bundle is what survives a restart (a 483-step
-run's 192 weights once existed only in memory). Read them at
-`GET /plans/results` and `GET /plans/results/{plan_id}`.
+Every plan is saved as one JSON record **as it runs**: written when it
+starts and again as each step starts and ends, so its steps and readings can
+be watched live (the panel's *Run records* section, `GET /plans/results`,
+`GET /plans/results/{plan_id}`) and nothing done so far is lost to a gateway
+restart. The final save adds the per-well plate report. A run the gateway was
+in the middle of when it stopped comes back as `interrupted`: the step that
+had started is `unknown`, later steps `skipped`, and the robot should be
+inspected before continuing. The plate report and spreadsheet read a plan from
+memory while it is there and from its saved record afterwards, so they keep
+working after a restart (a 483-step run's 192 weights once existed only in
+memory). A failed record write is reported in `/status` →
+`details.plan_results.error` and never halts the robot mid-plate.
 
 ```
 OT2_PLAN_RESULTS_DIR=C:\SDL_State\ot2-complexation\ot2_plan_results   # default: beside the tip-state file
