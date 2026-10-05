@@ -129,6 +129,9 @@ def test_a_sparse_custom_labware_checks_exact_wells_and_lists_run_as_listed():
         resolve_wells(_spec(wells=["A2"]), sparse)
     with pytest.raises(PatternError, match="does not have: B1, A2"):
         resolve_wells(_spec(wells="A1:B2"), sparse)
+    # A gigantic range is refused by arithmetic, before anything is built.
+    with pytest.raises(PatternError, match="at most"):
+        resolve_wells(_spec(wells="A1:A1000000000"), sparse)
     # A range inside the exact well set is fine even past the bounding box.
     sparse_rc = WellGrid(rows=1, columns=2, wells=frozenset({"A1", "B2"}))
     assert resolve_wells(_spec(wells="B2:B2"), sparse_rc) == ["B2"]
@@ -160,6 +163,11 @@ def test_labware_grid_prefers_the_recipe_nickname_and_reads_definition_wells():
     service._build_deck_state = lambda: SimpleNamespace(
         slots={"4": SimpleNamespace(labware=loaded, declared=declared)})
     assert service.labware_grid("4").wells == frozenset({"A1", "B2"})
+    # ...and its dimensions too, when the run engine reports none.
+    dimless = SimpleNamespace(rows=None, columns=None, definition=None, load_name="custom_sparse")
+    service._build_deck_state = lambda: SimpleNamespace(
+        slots={"4": SimpleNamespace(labware=dimless, declared=declared)})
+    assert (service.labware_grid("4").rows, service.labware_grid("4").wells) == (2, frozenset({"A1", "B2"}))
     other_decl = SimpleNamespace(rows=2, columns=2, definition={"wells": {"A1": {}}}, load_name="different")
     service._build_deck_state = lambda: SimpleNamespace(
         slots={"4": SimpleNamespace(labware=loaded, declared=other_decl)})
