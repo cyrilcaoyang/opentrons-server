@@ -280,10 +280,39 @@ export interface Plan {
   eln_project?: string | null;
   /** Steps that cannot be safely repeated after a transport loss. */
   non_idempotent_actions: string[];
+  /** For a plan expanded from a for_each_well pattern: what the reviewer
+   *  reads first, derived by the gateway from the expanded steps. */
+  pattern_summary?: PatternSummary | null;
   /** Whether the gateway would run this right now... */
   executable: boolean;
   /** ...and if not, why — same string the agent sees. */
   blocked_reason: string | null;
+}
+
+export interface PatternSummary {
+  labware: string | null;
+  well_count: number;
+  wells_first: string[];
+  wells_last: string[];
+  order: "column" | "row" | null;
+  pipettes: string[];
+  per_well: {
+    action: string;
+    pipette: string | null;
+    template_location: string | null;
+    first_location: string | null;
+    volume_ul: number | null;
+    total_volume_ul: number | null;
+    count: number;
+  }[];
+  prelude: string[];
+  epilogue: string[];
+  tip_pickups: number;
+  tip_drops: number;
+  balance_reads: number;
+  balance_tares: number;
+  overrides: Record<string, string[]>;
+  total_steps: number;
 }
 
 // --- Optional chat assistant (see gateway/assistant.py) ---------------------

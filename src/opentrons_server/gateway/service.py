@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import paramiko
 import requests
@@ -3457,6 +3457,20 @@ class OT2Service:
                 self._refresh_identity()
             except Exception:  # pragma: no cover - best-effort background loop
                 pass
+
+    def labware_grid(self, ref: str) -> Optional[Tuple[int, int]]:
+        """``(rows, columns)`` of the labware at a slot or recipe nickname, as
+        the deck currently knows it (declared or observed); None when it
+        does not. What plan_patterns needs to check a pattern's wells."""
+        deck = self._build_deck_state()
+        slot = deck.slots.get(str(ref))
+        if slot is None:
+            mapped = self._nickname_to_slot().get(str(ref))
+            slot = deck.slots.get(str(mapped)) if mapped is not None else None
+        labware = slot.labware if slot is not None else None
+        if labware is None or not labware.rows or not labware.columns:
+            return None
+        return int(labware.rows), int(labware.columns)
 
     def _nickname_to_slot(self) -> Dict[str, str]:
         """Map labware nicknames to deck slots from the current setup recipe.

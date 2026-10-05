@@ -86,6 +86,21 @@ completion record with no one's name on it.
 
 ## What can be planned
 
+**Per-well work is proposed as a pattern, not written out.** `POST /plans`
+(and the assistant's `propose_plan`, and Hermes' MCP tool) accept
+`for_each_well`: a step template, the wells (`"A1:H12"` walked in column or
+row order, or an explicit list), optional per-well `overrides` keyed by a
+template step `id`, and `prelude` / `epilogue` steps around the loop. The
+gateway expands it into the flat step list, validates every step, and hashes
+the *expansion* for approval exactly as a hand-written list. The plan keeps
+the pattern as provenance and the card shows a summary the gateway derived
+from the expanded steps (wells, order, volumes and totals, tip pickups and
+drops, balance reads) above the full, inspectable list. Single-channel only;
+`{well}` / `{row}` are strings, `{column}` / `{index}` integers; unknown
+placeholders, wells off the labware's grid and unknown labware are refused.
+See `docs/PLAN_REPEAT_DESIGN.md`. This is the same idea as Bitácora's
+`for_each_well` in its protocol compiler, brought to ad-hoc plans.
+
 `GET /plans/actions` returns the catalog with each action's JSON schema — the
 authoritative list. It includes `platebalance.zero`, `platebalance.tare`, and
 `platebalance.read`, so one approved plan can set a reference, dispense, wait,
