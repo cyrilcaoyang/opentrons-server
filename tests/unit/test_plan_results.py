@@ -451,3 +451,22 @@ def test_a_failed_status_check_is_recorded_and_retried(tmp_path):
     assert "central down" in store.get("p1")["delivery"]["eln"]["check_error"]
     assert store.check_filing() == 1
     assert "check_error" not in store.get("p1")["delivery"]["eln"]
+
+
+def test_a_held_run_is_rechecked_and_learns_when_it_is_filed_later(tmp_path, monkeypatch):
+    from opentrons_server.gateway import plan_results as pr
+
+    central = {"state": "held", "last_error": "project 'x' does not exist"}
+    store = _store(tmp_path, results_url="http://central/x", transport=lambda p: {},
+                   status_transport=lambda pid: dict(central))
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    store.deliver_pending()
+    assert store.check_filing() == 1
+    assert store.get("p1")["delivery"]["eln"]["state"] == "held"
+
+    central.update(state="filed", last_error=None, experiment_id="exp-9")
+    assert store.check_filing() == 0  # held runs are not re-asked every pass
+    monkeypatch.setattr(pr, "_HELD_RECHECK_S", 0.0)
+    assert store.check_filing() == 1
+    assert store.get("p1")["delivery"]["eln"]["state"] == "filed"
+    assert store.get("p1")["delivery"]["eln"]["experiment_id"] == "exp-9"
