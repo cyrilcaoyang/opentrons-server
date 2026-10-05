@@ -102,3 +102,53 @@ def test_the_assistant_reads_with_the_same_rule(gateway):
     assert listed["readings"] == [] and listed["redacted"] is True
     alice = Assistant(app.state.service, plans, config=None, reader=RunReader(user="alice@lab"))
     assert alice._tools()["get_plan"]({"plan_id": pid})["results"][0]["reading"]["value"] == 0.1
+
+
+def test_status_never_shows_a_weight_and_the_reading_route_follows_the_rule(gateway, monkeypatch):
+    client, pid, _draft, app = gateway
+    service = app.state.service
+
+    class _Balance:
+        def snapshot(self):
+            return {"configured": True, "model": "platebalanceV1", "last_operation": None,
+                    "reading": {"value": 0.1234, "unit": "g", "stable": True,
+                                "observed_at": "2026-10-05T12:00:00Z"},
+                    "last_error": "frame b'0.1234 g'"}
+
+    monkeypatch.setattr(service, "platebalance", _Balance())
+    monkeypatch.setattr(service, "_balance_placement_valid", lambda: True, raising=False)
+    service.balance_reading_plan = pid  # taken by alice's run
+    public = service._public_balance_snapshot()
+    assert "value" not in public["reading"] and public["reading"]["stable"] is True
+    assert "0.1234" not in str(public)
+    assert client.get("/platebalance/reading").status_code == 401
+    assert client.get("/platebalance/reading", headers=_edge("carol@lab")).status_code == 403
+    alice = client.get("/platebalance/reading", headers=_edge("alice@lab")).json()
+    assert alice["reading"]["value"] == 0.1234
+    service.balance_reading_plan = None  # a manual read: anyone signed in
+    assert client.get("/platebalance/reading", headers=_edge("carol@lab")).json()["reading"]["value"] == 0.1234
+
+
+def test_redaction_is_an_allowlist(gateway):
+    client, pid, _draft, app = gateway
+    plan = app.state.plans.get(pid)
+    plan.steps[0].args = {"sample_id": "SECRET-SAMPLE"}
+    plan.halt_reason = "balance frame b'0.1 g' unreadable"
+    view = client.get(f"/plans/{pid}", headers=_edge("carol@lab")).json()
+    assert "SECRET-SAMPLE" not in str(view) and "0.1 g" not in str(view)
+    assert view["steps"] == [{"action": "platebalance.read"}]
+
+
+def test_an_api_key_reads_everything_even_with_an_edge_identity(gateway):
+    client, pid, _draft, _app = gateway
+    headers = {**_edge("carol@lab"), "X-Api-Key": "wf-key"}
+    assert client.get(f"/plans/results/{pid}", headers=headers).status_code == 200
+
+
+def test_aborting_someone_elses_finished_run_does_not_reveal_it(gateway):
+    client, pid, _draft, app = gateway
+    carol = _edge("carol@lab")
+    token = client.post("/control/claim", json={"owner": "carol@lab", "session_id": "c1"},
+                        headers=carol).json()["claim_token"]
+    view = client.post(f"/plans/{pid}/abort", headers={**carol, "X-Claim-Token": token}).json()
+    assert view["redacted"] is True and "reading" not in str(view["results"])

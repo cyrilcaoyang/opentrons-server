@@ -78,6 +78,12 @@ export interface RunRecord {
   };
 }
 
+/** The balance's latest weight. /status only says a reading exists; the value
+ *  follows the access rule of the run that took it (403 if not yours). */
+export const getBalanceReading = () =>
+  fetchJson<{ reading: { value: number; unit: string; stable: boolean; observed_at: string } | null;
+              last_error: string | null; plan_id: string | null }>("/platebalance/reading");
+
 /** One run record in full (for the chat card's ELN outcome). */
 export const getRunRecord = (planId: string) =>
   fetchJson<RunRecord>(`/plans/results/${encodeURIComponent(planId)}`);

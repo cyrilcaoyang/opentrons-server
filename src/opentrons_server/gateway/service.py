@@ -384,6 +384,8 @@ class OT2Service:
         # and the executor whose per-step saves feed them.
         self.plan_results: Optional[Any] = None
         self.plan_executor: Optional[Any] = None
+        # The plan that took the balance's latest reading (None: manual read).
+        self.balance_reading_plan: Optional[str] = None
         self.last_error: Optional[ErrorInfo] = None
         self._dry_run_lights_on = False
         # Cached deck-light state. Refreshed off the request path (background
@@ -1531,8 +1533,29 @@ class OT2Service:
             if not self.simulation:
                 result.clear()
                 result.update(balance.execute(action, request=request, cancelled=lambda: self._stop_latched))
-        self._run_action(f"platebalance.{action}", execute, idempotent=action == "read")
+        try:
+            self._run_action(f"platebalance.{action}", execute, idempotent=action == "read")
+        finally:
+            # Which run the balance's latest reading or error belongs to, so
+            # /status can withhold it and /platebalance/reading can apply that
+            # run's access rule (run_access.py). None: a manual read.
+            automation = self.claims.automation()
+            self.balance_reading_plan = automation["plan_id"] if automation else None
         return result
+
+    def _public_balance_snapshot(self) -> Dict[str, Any]:
+        """The balance for /status, which anyone may poll: a reading's
+        weight is scientific data, so it is withheld here and served by
+        /platebalance/reading under the access rule of the run that took it.
+        Whether there is a reading, its stability and time stay public."""
+        snapshot = self.platebalance.snapshot()
+        reading = snapshot.get("reading")
+        if isinstance(reading, dict):
+            snapshot["reading"] = {k: v for k, v in reading.items() if k != "value"}
+            snapshot["reading"]["value_at"] = "/platebalance/reading"
+        if self.balance_reading_plan and snapshot.get("last_error"):
+            snapshot["last_error"] = "Balance error during a run (details at /platebalance/reading)"
+        return snapshot
 
     def pipette_position(self, request: PipettePositionRequest) -> PipettePositionResponse:
         """Explicit controller read, serialized with motion. Never called by /status."""
@@ -3172,7 +3195,7 @@ class OT2Service:
             "session_recipe": self.session_recipe,
         }
         if self.platebalance is not None:
-            details["platebalance"] = self.platebalance.snapshot()
+            details["platebalance"] = self._public_balance_snapshot()
             details["platebalance"]["placement_error"] = (None if self._balance_placement_valid()
                 else f"Slot {self.platebalance.slot} has another occupant. Reconcile its records and clear the slot declaration.")
         loaded_plate = self.plates.get()

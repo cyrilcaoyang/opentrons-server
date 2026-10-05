@@ -930,6 +930,8 @@ def test_plate_report_tool_reads_plan_records_only():
     service = Mock()
     assistant = assistant_mod.Assistant.__new__(assistant_mod.Assistant)
     assistant._service, assistant._plans = service, store
+    from opentrons_server.gateway.run_access import RunReader
+    assistant._reader = RunReader(unrestricted=True)  # built without __init__
     out = assistant._tools()["get_plate_report"]({"plan_ids": ["gS0maKvThQsH_p2S", "C5B-GLbrcj7Q6rII"]})
     assert out["stats"]["n"] == 31
     assert service.method_calls == []  # no robot or gateway call at all
