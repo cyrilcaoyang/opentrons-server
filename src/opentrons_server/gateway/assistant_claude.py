@@ -15,19 +15,39 @@ import time
 from typing import Any
 
 
+_STEP = {
+    "type": "object",
+    "properties": {"action": {"type": "string"}, "args": {"type": "object"}},
+    "required": ["action", "args"],
+    "additionalProperties": False,
+}
 _REPLY_SCHEMA = {
     "type": "object",
     "properties": {
         "reply": {"type": "string"},
-        "steps": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {"action": {"type": "string"}, "args": {"type": "object"}},
-                "required": ["action", "args"],
-                "additionalProperties": False,
+        # Written-out steps, or a for_each_well pattern (plan_patterns.py)
+        # that the gateway expands; prelude/epilogue wrap the pattern.
+        "steps": {"type": "array", "items": _STEP},
+        "prelude": {"type": "array", "items": _STEP},
+        "for_each_well": {
+            "type": ["object", "null"],
+            "properties": {
+                "labware_nickname": {"type": "string"},
+                "wells": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                "order": {"type": "string", "enum": ["column", "row"]},
+                "steps": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"action": {"type": "string"}, "args": {"type": "object"},
+                                   "id": {"type": "string"}},
+                    "required": ["action", "args"],
+                    "additionalProperties": False,
+                }},
+                "overrides": {"type": "object"},
             },
+            "required": ["labware_nickname", "wells", "steps"],
+            "additionalProperties": False,
         },
+        "epilogue": {"type": "array", "items": _STEP},
     },
     "required": ["reply", "steps"],
     "additionalProperties": False,
@@ -136,6 +156,10 @@ def run_claude_code(
         reply, steps = structured["reply"], structured["steps"]
         if not isinstance(reply, str) or not isinstance(steps, list):
             raise ValueError("Claude Code returned an invalid reply")
-        return {"reply": reply, "steps": steps}
+        out = {"reply": reply, "steps": steps}
+        for key in ("prelude", "for_each_well", "epilogue"):
+            if structured.get(key):
+                out[key] = structured[key]
+        return out
     except (KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError("Claude Code returned no valid structured reply") from exc

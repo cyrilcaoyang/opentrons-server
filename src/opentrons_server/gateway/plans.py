@@ -72,11 +72,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from .advanced import ADVANCED_ACTIONS
 from .platebalance import PlateBalanceReferenceRequest, PlateBalanceRequest
 from .claims import plan_session_id
+from .plan_patterns import ChannelsFor, ForEachWell, GridFor, PatternError, expand, summarize
 from .models import (
     ClaimedBy,
     DeckDeclareRequest,
@@ -340,6 +341,11 @@ class Plan(BaseModel):
     # Who approved it. Kept after the run spends the approval, because who may
     # read the run's data depends on it (run_access.py).
     approved_by: Optional[str] = None
+    # The for_each_well pattern this plan was expanded from (plan_patterns.py),
+    # as provenance for the review card's summary. None for a hand-written
+    # step list, and cleared by replace_steps: edited steps are no longer the
+    # pattern's expansion.
+    pattern: Optional[Dict[str, Any]] = None
 
     @property
     def non_idempotent_actions(self) -> List[str]:
@@ -352,14 +358,52 @@ class Plan(BaseModel):
 
 
 class PlanCreateRequest(BaseModel):
-    """``POST /plans`` — an agent proposing work. Creates a draft, nothing more."""
+    """``POST /plans`` — an agent proposing work. Creates a draft, nothing more.
 
-    steps: List[PlanStep]
+    Either ``steps`` (written out) or ``for_each_well`` (a pattern the gateway
+    expands — plan_patterns.py), optionally wrapped in ``prelude`` /
+    ``epilogue`` steps. Never both.
+    """
+
+    steps: List[PlanStep] = Field(default_factory=list)
+    prelude: List[PlanStep] = Field(default_factory=list)
+    for_each_well: Optional[ForEachWell] = None
+    epilogue: List[PlanStep] = Field(default_factory=list)
     # Who proposed this, for the review UI and the audit row. Free-form because
     # the proposer is not authenticated at this layer; it is a label, never a
     # permission. Approval identity comes from the claim, not from here.
     created_by: str = "agent"
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _one_form(self) -> "PlanCreateRequest":
+        if bool(self.steps) == (self.for_each_well is not None):
+            raise ValueError("give either steps or for_each_well, not both (and not neither)")
+        if self.steps and (self.prelude or self.epilogue):
+            raise ValueError("prelude and epilogue go with for_each_well; put them in steps instead")
+        return self
+
+
+def compile_proposal(
+    request: PlanCreateRequest,
+    *,
+    grid_for: GridFor,
+    channels_for: ChannelsFor,
+) -> tuple[List[PlanStep], Optional[Dict[str, Any]]]:
+    """The one place a proposal becomes a flat step list: used by the API,
+    the assistant's propose_plan tool and the Claude path alike. Returns the
+    steps and, for a pattern, its provenance. Raises PatternError /
+    StepValidationError with the offending part named."""
+    if request.for_each_well is None:
+        return list(request.steps), None
+    raw, pattern = expand(
+        request.for_each_well,
+        grid_for=grid_for,
+        channels_for=channels_for,
+        prelude=[s.model_dump() for s in request.prelude],
+        epilogue=[s.model_dump() for s in request.epilogue],
+    )
+    return [PlanStep(**s) for s in raw], pattern
 
 
 class PlanReviseRequest(BaseModel):
@@ -419,11 +463,18 @@ class PlanStore:
     # -- lifecycle ---------------------------------------------------------
 
     @_synchronized
-    def create(self, steps: Sequence[PlanStep], *, created_by: str) -> Plan:
+    def create(self, steps: Sequence[PlanStep], *, created_by: str,
+               pattern: Optional[Dict[str, Any]] = None) -> Plan:
         if not steps:
             raise StepValidationError("a plan needs at least one step")
-        for step in steps:
-            step.validated_args()  # layer 1, at proposal time
+        for index, step in enumerate(steps, start=1):
+            try:
+                step.validated_args()  # layer 1, at proposal time
+            except StepValidationError as exc:
+                if pattern is None:
+                    raise
+                # Name the expanded step so a bad template is fixed once.
+                raise StepValidationError(f"expanded step {index} ({step.action}): {exc}") from exc
         plan = Plan(
             plan_id=secrets.token_urlsafe(12),
             steps=[step.model_copy(deep=True) for step in steps],
@@ -431,6 +482,7 @@ class PlanStore:
             created_at=datetime.now(timezone.utc),
             created_by=created_by,
             results=[StepResult(action=s.action) for s in steps],
+            pattern=pattern,
         )
         self._plans[plan.plan_id] = plan
         return plan
@@ -467,6 +519,7 @@ class PlanStore:
         plan.approval = None
         plan.eln_project = None
         plan.approved_by = None
+        plan.pattern = None  # edited steps are no longer the pattern's expansion
         return plan
 
     # -- the gate ----------------------------------------------------------

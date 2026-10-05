@@ -70,7 +70,9 @@ from .assistant import (
 from ..version import __version__ as GATEWAY_VERSION
 from .plan_results import InvalidPlanId, PlanResultsStore
 from .run_access import RunReader, redact_plan_view, redact_record_summary
+from .plan_patterns import PatternError, summarize
 from .plans import (
+    compile_proposal,
     ApprovalRequiresClaim,
     Plan,
     PlanApproveRequest,
@@ -995,6 +997,9 @@ def create_app(
         """
         body = plan.model_dump(mode="json")
         body["non_idempotent_actions"] = plan.non_idempotent_actions
+        # For a pattern plan: what the reviewer reads first, derived here from
+        # the expanded steps (never from the proposer's description).
+        body["pattern_summary"] = summarize(plan.pattern, plan.steps) if plan.pattern else None
         try:
             _check_plan_module_access(plan)
             plans.check_executable(plan.plan_id, claimed_by=service.claims.current())
@@ -1371,7 +1376,11 @@ def create_app(
         if require_login:
             _require_identity(http_request)
         try:
-            plan = plans.create(request.steps, created_by=request.created_by)
+            steps, pattern = compile_proposal(
+                request, grid_for=service.labware_grid, channels_for=service._channels_for)
+            plan = plans.create(steps, created_by=request.created_by, pattern=pattern)
+        except PatternError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
         return _plan_view(plan)

@@ -21,6 +21,7 @@ import { AssistantMarkdown } from "../lib/assistant-markdown";
 import type { Corner, WindowRect } from "../lib/floating-window";
 import type { ClaimState } from "../lib/use-claim";
 import type {
+  PatternSummary,
   AssistantMessage,
   AssistantProgressEvent,
   AssistantToolProgress,
@@ -896,6 +897,50 @@ function stepLine(s: PlanStep): string {
  * gateway restarted) the card degrades to the read-only preview.
  */
 const ELN_PROJECT_KEY = "ot2.assistant.elnProject";
+/** Above this many steps the card shows the pattern summary (if any) and
+ *  collapses the list behind "Show all N steps". */
+const LONG_PLAN = 24;
+
+/** The gateway's own account of a pattern plan — wells, order, volumes,
+ *  tips, balance reads — derived from the expanded steps. The reviewer checks
+ *  intent here and spot-checks the list; the hash approved is the list's. */
+function PatternSummaryBlock({ summary: s }: { summary: PatternSummary }) {
+  const wells = s.wells_last.length
+    ? `${s.wells_first.join(", ")} … ${s.wells_last.join(", ")}`
+    : s.wells_first.join(", ");
+  const fmt = (n: number | null) => (n == null ? "" : `${Math.round(n * 1000) / 1000} µL`);
+  return (
+    <div className="mb-1.5 rounded border border-purple-200 bg-white/60 p-1.5 text-[11px] dark:border-purple-800 dark:bg-slate-900/40">
+      <p className="font-medium text-ink dark:text-slate-100">
+        For each of {s.well_count} wells of labware {s.labware} ({s.order} order: {wells})
+        {s.pipettes.length > 0 && <> · pipette {s.pipettes.join(", ")}</>}
+      </p>
+      <ol className="ml-4 list-decimal">
+        {s.per_well.map((a, i) => (
+          <li key={i} className="font-mono text-[10px]">
+            {a.action}
+            {a.volume_ul != null && ` ${fmt(a.volume_ul)}`}
+            {a.template_location && ` → ${a.template_location}`}
+            {a.total_volume_ul != null && <span className="font-sans text-ink-subtle dark:text-slate-400"> (total {fmt(a.total_volume_ul)} over {a.count})</span>}
+          </li>
+        ))}
+      </ol>
+      <p className="mt-0.5 text-ink-subtle dark:text-slate-400">
+        {s.prelude.length > 0 && <>before: {s.prelude.join(", ")} · </>}
+        {s.epilogue.length > 0 && <>after: {s.epilogue.join(", ")} · </>}
+        tips: {s.tip_pickups} picked, {s.tip_drops} dropped
+        {s.tip_pickups > 0 && s.tip_pickups < s.well_count && <> (one tip reused across wells)</>}
+        {" · "}balance reads: {s.balance_reads}{s.balance_tares > 0 && <>, references: {s.balance_tares}</>}
+        {" · "}{s.total_steps} steps in total
+      </p>
+      {Object.keys(s.overrides).length > 0 && (
+        <p className="mt-0.5 text-amber-700 dark:text-amber-400">
+          Exceptions: {Object.entries(s.overrides).map(([w, ids]) => `${w} (${ids.join(", ")})`).join("; ")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 interface ElnProjects {
   status: "loading" | "ready" | "unconfigured" | "error";
@@ -965,6 +1010,7 @@ function ChatPlanCard({
       return "";
     }
   });
+  const [showAllSteps, setShowAllSteps] = useState(false);
   const approve = (stepHash: string) => {
     // Only a project the picker offered: a remembered choice the user can no
     // longer file into falls back to "none" rather than being sent anyway.
@@ -1043,7 +1089,17 @@ function ChatPlanCard({
           </a>
         )}
       </div>
-      <ol className="mb-1 flex flex-col gap-0.5">
+      {live.pattern_summary && <PatternSummaryBlock summary={live.pattern_summary} />}
+      {live.steps.length > LONG_PLAN && !showAllSteps ? (
+        <button
+          type="button"
+          onClick={() => setShowAllSteps(true)}
+          className="mb-1 text-[11px] text-purple-700 underline-offset-2 hover:underline dark:text-purple-300"
+        >
+          Show all {live.steps.length} steps
+        </button>
+      ) : (
+      <ol className="mb-1 flex max-h-96 flex-col gap-0.5 overflow-y-auto">
         {live.steps.map((s, si) => {
           const outcome = live.results[si]?.outcome ?? "pending";
           return (
@@ -1075,6 +1131,7 @@ function ChatPlanCard({
           );
         })}
       </ol>
+      )}
       {live.status === "draft" && live.non_idempotent_actions.length > 0 && (
         <p className="mb-1 text-[10px] text-amber-700 dark:text-amber-500">
           ⚠ {live.non_idempotent_actions.join(", ")} cannot be safely repeated if the

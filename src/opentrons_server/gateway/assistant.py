@@ -37,11 +37,12 @@ from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
-from .plans import PlanStep, PlanStore, StepValidationError
+from .plans import PlanCreateRequest, PlanStep, PlanStore, StepValidationError, compile_proposal
 from .robot_profile import PROFILE, IS_FLEX
 from .documentation import action_catalog, equipment_documentation
 from .assistant_claude import claude_code_authenticated, run_claude_code
 from .plate_report import build_plate_report, summarize_for_agent
+from .plan_patterns import PatternError, summarize
 from .run_access import RESTRICTED, RunReader, redact_plan_view
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,11 @@ plan card's **Plate report** button. Pass a density only if the operator gave \
 one; never assume water.
 
 What you cannot do, and must never imply otherwise:
+- For work repeated over wells (dispense to each well, weigh each well), \
+propose with `for_each_well` — a step template plus the wells — and optional \
+`prelude`/`epilogue` steps (tip pickup, tip drop). Never write a plate out as \
+hundreds of steps: the gateway expands the pattern and the operator reviews \
+the expansion. Put `{well}` where the well name goes; single-channel only.
 - You cannot run anything. `propose_plan` creates a DRAFT. A human reviews, \
 approves, and runs it in chat. Say a newly proposed draft awaits approval. \
 For an existing plan, use its current gateway record. `executed` means all \
@@ -484,26 +490,11 @@ def _tool_schemas() -> List[Dict[str, Any]]:
                 "description": (
                     "Propose an ordered plan for the operator to review. Creates a "
                     "DRAFT — it does not run. The operator approves and runs it "
-                    "in the panel."
+                    "in the panel. For work repeated over wells, use for_each_well "
+                    "(with optional prelude/epilogue) instead of writing every step: "
+                    "the gateway expands it and the operator reviews the expansion."
                 ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "steps": {
-                            "type": "array",
-                            "description": "Ordered steps drawn from list_actions.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "action": {"type": "string"},
-                                    "args": {"type": "object"},
-                                },
-                                "required": ["action"],
-                            },
-                        }
-                    },
-                    "required": ["steps"],
-                },
+                "parameters": PROPOSAL_PARAMETERS,
             },
         },
         {
@@ -678,9 +669,18 @@ class Assistant:
         raised — its next turn can repair the step instead of the operator
         seeing a stack trace."""
         try:
-            steps = [PlanStep(**s) for s in args.get("steps", [])]
-            plan = self._plans.create(steps, created_by="assistant")
-        except (StepValidationError, TypeError, ValueError) as exc:
+            request = PlanCreateRequest(
+                steps=args.get("steps") or [],
+                prelude=args.get("prelude") or [],
+                for_each_well=args.get("for_each_well"),
+                epilogue=args.get("epilogue") or [],
+                created_by="assistant",
+            )
+            steps, pattern = compile_proposal(
+                request, grid_for=self._service.labware_grid,
+                channels_for=self._service._channels_for)
+            plan = self._plans.create(steps, created_by="assistant", pattern=pattern)
+        except (StepValidationError, PatternError, TypeError, ValueError) as exc:
             # Logged as well as returned to the model: otherwise the reason a
             # draft was refused exists only in one browser tab.
             logger.warning("propose_plan refused (%d steps): %s", len(args.get("steps") or []), exc)
@@ -688,7 +688,12 @@ class Assistant:
         return {
             "plan_id": plan.plan_id,
             "status": plan.status,
-            "steps": [{"action": s.action, "args": s.args} for s in plan.steps],
+            "step_count": len(plan.steps),
+            # The full expansion is on the card; the model gets the summary
+            # (a 500-step list would only crowd its context).
+            "steps": ([{"action": s.action, "args": s.args} for s in plan.steps]
+                      if pattern is None else None),
+            "pattern_summary": summarize(pattern, plan.steps) if pattern else None,
             "note": "Draft created. The operator must approve and run it in chat.",
         }
 
@@ -767,13 +772,14 @@ class Assistant:
         self._ensure_active()
         plan_id: Optional[str] = None
         reply = answer["reply"].strip()
-        if answer["steps"]:
+        if answer["steps"] or answer.get("for_each_well"):
             self._ensure_active()
             used.append("propose_plan")
             event_id = "2:claude-proposal"
             yield {"type": "tool_started", "id": event_id, "name": "propose_plan"}
             self._ensure_active()
-            proposal = self._propose({"steps": answer["steps"]})
+            proposal = self._propose({k: answer.get(k) for k in
+                                      ("steps", "prelude", "for_each_well", "epilogue")})
             error = proposal.get("error")
             yield {"type": "tool_finished", "id": event_id, "name": "propose_plan",
                    "success": error is None, "error": error}
@@ -1002,6 +1008,57 @@ def fit_history(messages: List[Dict[str, str]], budget: Optional[int] = None) ->
             f"[{dropped} earlier message{'s' if dropped != 1 else ''} of this conversation "
             "were left out to fit the model's context. Ask the operator if you need them.]")})
     return kept
+
+
+_STEP_SCHEMA = {
+    "type": "object",
+    "properties": {"action": {"type": "string"}, "args": {"type": "object"}},
+    "required": ["action"],
+}
+
+#: One proposal schema for the tool-calling path and the Claude reply schema.
+PROPOSAL_PARAMETERS: Dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "steps": {
+            "type": "array",
+            "description": "Ordered steps drawn from list_actions. Leave empty when using for_each_well.",
+            "items": _STEP_SCHEMA,
+        },
+        "prelude": {
+            "type": "array",
+            "description": "Steps run once before the per-well loop (e.g. pick_up_tip).",
+            "items": _STEP_SCHEMA,
+        },
+        "for_each_well": {
+            "type": "object",
+            "description": (
+                "A step template applied to each well of one labware. In args, {well} is the "
+                "well name, {row} its row letter, {column}/{index} integers. Single-channel "
+                "pipettes only. wells: a range like 'A1:H12' (walked in `order`) or a list. "
+                "Give a step an `id` to target it in overrides[well][id] = partial args."
+            ),
+            "properties": {
+                "labware_nickname": {"type": "string"},
+                "wells": {"anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}}]},
+                "order": {"type": "string", "enum": ["column", "row"]},
+                "steps": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {"action": {"type": "string"}, "args": {"type": "object"},
+                                   "id": {"type": "string"}},
+                    "required": ["action"],
+                }},
+                "overrides": {"type": "object"},
+            },
+            "required": ["labware_nickname", "wells", "steps"],
+        },
+        "epilogue": {
+            "type": "array",
+            "description": "Steps run once after the loop (e.g. drop_tip).",
+            "items": _STEP_SCHEMA,
+        },
+    },
+}
 
 
 class AssistantMessage(BaseModel):

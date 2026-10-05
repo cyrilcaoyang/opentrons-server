@@ -156,21 +156,30 @@ def build_server(gateway: Gateway, *, instance: str) -> Any:
     # ---------------- propose: phase 2, "agree the steps" ----------------
 
     @mcp.tool()
-    def propose_plan(steps: list[dict], notes: str | None = None) -> dict:
+    def propose_plan(steps: list[dict] | None = None, notes: str | None = None,
+                     for_each_well: dict | None = None, prelude: list[dict] | None = None,
+                     epilogue: list[dict] | None = None) -> dict:
         """Propose an ordered plan for a human to review. Does NOT run it.
 
-        `steps` is a list of {"action": str, "args": {...}} drawn from
-        `list_actions`. Every argument is validated against the device's own
-        request model immediately, so a malformed step comes back as an error
-        here rather than failing at the robot.
+        Either `steps` — a list of {"action": str, "args": {...}} drawn from
+        `list_actions` — or, for work repeated over wells, `for_each_well`:
+        {"labware_nickname", "wells": "A1:H12" | [...], "order": "column"|"row",
+        "steps": [template steps; {well}/{row}/{column}/{index} in args],
+        "overrides": {well: {step_id: partial args}}}, with optional `prelude`
+        and `epilogue` steps around the loop. The gateway expands the pattern
+        and validates every step; a malformed step comes back as an error here
+        rather than failing at the robot.
 
         The operator sees the proposal in the gateway UI and decides. You
         cannot approve or run it — say so plainly rather than implying the
         work is underway.
         """
-        return gateway.post(
-            "/plans", {"steps": steps, "created_by": "agent:hermes", "notes": notes}
-        )
+        body: dict = {"created_by": "agent:hermes", "notes": notes}
+        if for_each_well is not None:
+            body.update(for_each_well=for_each_well, prelude=prelude or [], epilogue=epilogue or [])
+        else:
+            body["steps"] = steps or []
+        return gateway.post("/plans", body)
 
     @mcp.tool()
     def revise_plan(plan_id: str, steps: list[dict]) -> dict:
