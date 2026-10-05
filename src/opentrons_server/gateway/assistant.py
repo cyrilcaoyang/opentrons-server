@@ -681,6 +681,9 @@ class Assistant:
             steps = [PlanStep(**s) for s in args.get("steps", [])]
             plan = self._plans.create(steps, created_by="assistant")
         except (StepValidationError, TypeError, ValueError) as exc:
+            # Logged as well as returned to the model: otherwise the reason a
+            # draft was refused exists only in one browser tab.
+            logger.warning("propose_plan refused (%d steps): %s", len(args.get("steps") or []), exc)
             return {"error": str(exc), "hint": "fix the step and call propose_plan again"}
         return {
             "plan_id": plan.plan_id,
