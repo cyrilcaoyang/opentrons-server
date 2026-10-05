@@ -67,6 +67,8 @@ from .assistant import (
     AssistantDisabled,
     env_file_candidates,
 )
+from ..version import __version__ as GATEWAY_VERSION
+from .plan_results import PlanResultsStore
 from .plans import (
     ApprovalRequiresClaim,
     Plan,
@@ -286,6 +288,17 @@ def create_app(
     # gate in AGENTIC_ELN_DESIGN.md §12. See gateway/plans.py.)
     plans = PlanStore()
     executor = PlanExecutor(service, plans)
+    # What finished plans measured, kept on disk beside the tip state, and
+    # delivered to the central server for the ELN when configured. A dry run
+    # saves nothing unless a results directory is set explicitly (tests).
+    plan_results = PlanResultsStore.from_env(
+        default_dir=Path(os.environ.get("OT2_TIP_STATE_PATH", "./ot2_tip_state.json")).parent
+        / "ot2_plan_results",
+        device_id=service.events.device_id,
+        simulation=dry_run,
+    )
+    save_plan_results = not dry_run or bool(os.environ.get("OT2_PLAN_RESULTS_DIR"))
+    service.plan_results = plan_results
     active_assistants: dict[str, Assistant] = {}
     active_assistants_lock = threading.Lock()
 
@@ -1157,6 +1170,36 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
+    @app.get("/me", tags=["ui"])
+    def me(request: Request) -> dict[str, Any]:
+        """Who the auth edge says is asking, and their ELN projects — for the
+        approval card's project picker. Read only from edge-stamped headers; a
+        direct request (no edge secret) gets no identity and no projects. The
+        list is a convenience: the central server re-checks membership against
+        the roster before filing anything in the ELN."""
+        if not _from_edge(request):
+            return {"user": None, "projects": []}
+        raw = request.headers.get("X-Auth-Projects", "")
+        projects = sorted({p.strip() for p in raw.split(",") if p.strip()})
+        return {"user": request.headers.get("X-Auth-User") or None, "projects": projects}
+
+    @app.get("/plans/results", tags=["plans"])
+    def list_plan_results() -> list[dict[str, Any]]:
+        """Finished plans' saved results, newest first: status, approver, ELN
+        project and delivery state. Durable across restarts, unlike /plans."""
+        return plan_results.list()
+
+    @app.get("/plans/results/{plan_id}", tags=["plans"])
+    def get_plan_results(plan_id: str) -> dict[str, Any]:
+        """One saved bundle: the full plan record, its plate report, delivery."""
+        try:
+            bundle = plan_results.get(plan_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        if bundle is None:
+            raise HTTPException(status_code=404, detail=f"no saved results for plan {plan_id}")
+        return bundle
+
     @app.get("/plans/plate-report", tags=["plans"])
     def plate_report(
         plan_id: list[str] = Query(default=[]),
@@ -1264,6 +1307,7 @@ def create_app(
                     plan_id,
                     step_hash=request.step_hash,
                     claimed_by=service.claims.current(),
+                    eln_project=request.eln_project,
                 ).model_copy(deep=True)
         except PlanError as exc:
             raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
@@ -1328,6 +1372,11 @@ def create_app(
             halt_reason=plan.halt_reason,
             source="device",
         )
+        if save_plan_results:
+            # After the run, never during it: a disk error here must not
+            # halt a plan, and it surfaces as this request's 500 instead.
+            plan_results.save(plan, approved_by=approver, equipment_id=service.equipment_id,
+                              gateway_version=GATEWAY_VERSION)
         return _plan_view(plan)
 
     @app.post("/plans/{plan_id}/abort", tags=["plans"])
