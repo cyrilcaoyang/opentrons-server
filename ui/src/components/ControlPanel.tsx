@@ -1306,12 +1306,6 @@ export function ControlPanel({
           </div>}
           </Section>
 
-          {/* What every plan run here did, from the records saved as it ran:
-              live progress and readings, still there after a restart. */}
-          <Section title="Run records" collapsible>
-            <RunRecords />
-          </Section>
-
           <Section title="MODULES">
             {!!(status.details?.platebalance as PlateBalanceStatus | undefined)?.placement_error &&
               <p role="alert" className="mb-2 text-xs text-amber-700 dark:text-amber-400">
@@ -1382,6 +1376,12 @@ export function ControlPanel({
                 ))}
               </ul>
             )}
+          </Section>
+
+          {/* What every plan run here did, from the records saved as it ran:
+              live progress and readings, still there after a restart. */}
+          <Section title="RUNS" collapsible>
+            <RunRecords />
           </Section>
 
 

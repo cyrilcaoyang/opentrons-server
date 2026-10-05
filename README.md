@@ -1113,7 +1113,7 @@ unreachable dashboard drops rows rather than stalling the control path.
 
 Every plan is saved as one JSON record **as it runs**: written when it
 starts and again as each step starts and ends, so its steps and readings can
-be watched live (the panel's *Run records* section, `GET /plans/results`,
+be watched live (the panel's *RUNS* section, `GET /plans/results`,
 `GET /plans/results/{plan_id}`) and nothing done so far is lost to a gateway
 restart. The final save adds the per-well plate report. A run the gateway was
 in the middle of when it stopped comes back as `interrupted`: the step that
