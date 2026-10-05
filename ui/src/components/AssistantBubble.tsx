@@ -852,6 +852,13 @@ function ToolPills({
           {toolLabel(tool.name)}
         </span>
       ))}
+      {/* A refusal's reason in plain sight, not only in a hover tooltip: the
+          operator is the one who has to rephrase or fix the request. */}
+      {tools.filter((tool) => tool.status === "failed" && tool.error).map((tool) => (
+        <p key={`${tool.id}:error`} className="basis-full whitespace-pre-wrap break-words text-[10px] text-rose-700 dark:text-rose-400">
+          × {toolLabel(tool.name)}: {tool.error}
+        </p>
+      ))}
     </div>
   );
 }
