@@ -3473,20 +3473,26 @@ class OT2Service:
         if slot is None:
             slot = deck.slots.get(str(ref))
         labware = slot.labware if slot is not None else None
-        if labware is None or not labware.rows or not labware.columns:
+        if labware is None:
             return None
-        # The run engine's view of a loaded labware carries no definition, so
-        # for custom labware fall back to the operator's declaration of the
-        # same load name — the one place its exact wells are known.
-        definition = getattr(labware, "definition", None)
+        # The run engine's view of a loaded labware carries no definition (and
+        # for custom labware often no dimensions), so fall back to the
+        # operator's declaration of the same load name — the one place its
+        # exact wells are known.
         declared = getattr(slot, "declared", None)
-        if not isinstance(definition, dict) and declared is not None \
-                and getattr(declared, "load_name", None) == labware.load_name:
+        same = declared is not None and getattr(declared, "load_name", None) == labware.load_name
+        definition = getattr(labware, "definition", None)
+        if not isinstance(definition, dict) and same:
             definition = getattr(declared, "definition", None)
+        rows, columns = labware.rows, labware.columns
+        if (not rows or not columns) and same:
+            rows, columns = declared.rows, declared.columns
+        if not rows or not columns:
+            return None
         wells = None
         if isinstance(definition, dict) and isinstance(definition.get("wells"), dict) and definition["wells"]:
             wells = frozenset(str(w) for w in definition["wells"])
-        return WellGrid(rows=int(labware.rows), columns=int(labware.columns), wells=wells)
+        return WellGrid(rows=int(rows), columns=int(columns), wells=wells)
 
     def _nickname_to_slot(self) -> Dict[str, str]:
         """Map labware nicknames to deck slots from the current setup recipe.

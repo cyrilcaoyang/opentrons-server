@@ -127,6 +127,12 @@ def resolve_wells(spec: ForEachWell, grid: WellGrid | Tuple[int, int]) -> List[s
         r1, c1 = _row_index(_WELL.match(end)[1]), int(_WELL.match(end)[2])
         if r1 < r0 or c1 < c0:
             raise PatternError(f"well range {spec.wells!r} runs backwards")
+        # Size before building anything: a range is text from a model, and
+        # "A1:A1000000000" must fail here, not in memory.
+        if (r1 - r0 + 1) * (c1 - c0 + 1) > MAX_EXPANDED_STEPS:
+            raise PatternError(
+                f"well range {spec.wells!r} names {(r1 - r0 + 1) * (c1 - c0 + 1)} wells; "
+                f"at most {MAX_EXPANDED_STEPS}")
         # A labware whose wells are known exactly is checked by membership
         # below; its rows x columns are a bounding box, not a rule.
         if grid.wells is None and (r1 >= rows or c1 > columns):
