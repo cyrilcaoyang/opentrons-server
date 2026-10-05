@@ -17,7 +17,7 @@ export function App() {
   }, [name]);
 
   return (
-    <main className="mr-auto flex min-h-screen w-full max-w-5xl flex-col gap-4 px-5 py-4 sm:px-8 sm:py-6 lg:px-10">
+    <main className="mr-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 px-5 py-4 sm:px-8 sm:py-6 lg:px-10">
       {isPending && !snapshot && (
         <p className="text-sm text-ink-muted dark:text-slate-400">Loading gateway status…</p>
       )}
