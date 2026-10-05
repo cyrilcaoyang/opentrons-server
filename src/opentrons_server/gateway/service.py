@@ -3475,8 +3475,15 @@ class OT2Service:
         labware = slot.labware if slot is not None else None
         if labware is None or not labware.rows or not labware.columns:
             return None
-        wells = None
+        # The run engine's view of a loaded labware carries no definition, so
+        # for custom labware fall back to the operator's declaration of the
+        # same load name — the one place its exact wells are known.
         definition = getattr(labware, "definition", None)
+        declared = getattr(slot, "declared", None)
+        if not isinstance(definition, dict) and declared is not None \
+                and getattr(declared, "load_name", None) == labware.load_name:
+            definition = getattr(declared, "definition", None)
+        wells = None
         if isinstance(definition, dict) and isinstance(definition.get("wells"), dict) and definition["wells"]:
             wells = frozenset(str(w) for w in definition["wells"])
         return WellGrid(rows=int(labware.rows), columns=int(labware.columns), wells=wells)

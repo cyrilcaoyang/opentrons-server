@@ -129,6 +129,9 @@ def test_a_sparse_custom_labware_checks_exact_wells_and_lists_run_as_listed():
         resolve_wells(_spec(wells=["A2"]), sparse)
     with pytest.raises(PatternError, match="does not have: B1, A2"):
         resolve_wells(_spec(wells="A1:B2"), sparse)
+    # A range inside the exact well set is fine even past the bounding box.
+    sparse_rc = WellGrid(rows=1, columns=2, wells=frozenset({"A1", "B2"}))
+    assert resolve_wells(_spec(wells="B2:B2"), sparse_rc) == ["B2"]
     steps, pattern = expand(_spec(wells=["B2", "A1"]), grid_for=_grid, channels_for=lambda p: 1)
     assert summarize(pattern, steps)["order"] == "as listed"
 
@@ -149,6 +152,18 @@ def test_labware_grid_prefers_the_recipe_nickname_and_reads_definition_wells():
     service._nickname_to_slot = lambda: {}
     assert service.labware_grid("2").wells is None and service.labware_grid("2").rows == 8
     assert service.labware_grid("9") is None
+    # A loaded custom labware (no definition from the run engine) takes its
+    # exact wells from the matching declaration.
+    loaded = SimpleNamespace(rows=2, columns=2, definition=None, load_name="custom_sparse")
+    declared = SimpleNamespace(rows=2, columns=2, definition={"wells": {"A1": {}, "B2": {}}},
+                               load_name="custom_sparse")
+    service._build_deck_state = lambda: SimpleNamespace(
+        slots={"4": SimpleNamespace(labware=loaded, declared=declared)})
+    assert service.labware_grid("4").wells == frozenset({"A1", "B2"})
+    other_decl = SimpleNamespace(rows=2, columns=2, definition={"wells": {"A1": {}}}, load_name="different")
+    service._build_deck_state = lambda: SimpleNamespace(
+        slots={"4": SimpleNamespace(labware=loaded, declared=other_decl)})
+    assert service.labware_grid("4").wells is None  # a different declaration is not borrowed
 
 
 # ── through the API and the assistant ──────────────────────────────────
