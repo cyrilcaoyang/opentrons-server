@@ -76,20 +76,24 @@ def redact_plan_view(view: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+_SUMMARY_FIELDS = ("plan_id", "status", "approved_by", "proposed_by", "eln_project", "equipment_id",
+                   "started_at", "finished_at", "saved_at", "steps_total", "steps_done", "steps_ok",
+                   "steps_failed", "steps_skipped", "steps_unknown", "readings")
+
+
 def redact_record_summary(row: Dict[str, Any]) -> Dict[str, Any]:
-    """A run-list row for the same reader: the halt reason and delivery
-    error text can carry data, so they are replaced."""
-    out = dict(row)
-    if out.get("halt_reason"):
-        out["halt_reason"] = RESTRICTED
-    delivery = dict(out.get("delivery") or {})
-    if delivery.get("last_error"):
-        delivery["last_error"] = RESTRICTED
-    eln = dict(delivery.get("eln") or {})
-    for key in ("last_error", "check_error"):
-        if eln.get(key):
-            eln[key] = RESTRICTED
-    if eln:
-        delivery["eln"] = eln
-    out["delivery"] = delivery
+    """A run-list row for the same reader — an allowlist too: counts, times
+    and states, never the halt reason or error text (which can carry data)."""
+    out: Dict[str, Any] = {k: row[k] for k in _SUMMARY_FIELDS if k in row}
+    out["halt_reason"] = RESTRICTED if row.get("halt_reason") else None
+    delivery = row.get("delivery") or {}
+    eln = delivery.get("eln") or {}
+    out["delivery"] = {
+        "state": delivery.get("state"),
+        "last_error": RESTRICTED if delivery.get("last_error") else None,
+        "delivered_at": delivery.get("delivered_at"),
+        **({"eln": {"state": eln.get("state"),
+                    "last_error": RESTRICTED if eln.get("last_error") else None,
+                    "experiment_id": None}} if eln else {}),
+    }
     return out

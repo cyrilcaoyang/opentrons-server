@@ -5,6 +5,7 @@ Extends the Matter Lab driver with WZB254-N SBI commands (manual §8.5).
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -19,6 +20,8 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+
+logger = logging.getLogger(__name__)
 class BalancePipettingGeometry(BaseModel):
     """Operator-qualified geometry for one exact plate definition in a fixed holder."""
 
@@ -220,7 +223,12 @@ def parse_weight(response: str) -> tuple[bool, float]:
     # Never interpret error codes, overload, partial frames, or another unit as g.
     match = re.fullmatch(r" *(?:N +)?([+-]?) *(\d+\.\d+) *(g)? *\r\n", response)
     if not match:
-        raise ValueError(f"Invalid balance weight frame: {response!r}")
+        # The raw frame goes to the gateway log only: a cut-off frame can hold
+        # measured digits, and this message travels into /status, halt
+        # reasons and exported events, which are not access-controlled.
+        logger.warning("unparseable balance frame: %r", response)
+        raise ValueError(
+            f"Invalid balance weight frame ({len(response)} characters; raw frame in the gateway log)")
     value = float(match[1] + match[2])
     if not math.isfinite(value):
         raise ValueError("Balance returned a non-finite weight")
@@ -238,6 +246,12 @@ class PlateBalanceV1:
         self._reading: dict[str, Any] | None = None
         self._error: str | None = None
         self._operation: dict[str, Any] | None = None
+        # The run (plan id) on whose behalf the balance is acting, set by the
+        # service around each operation; stamped onto each reading and error
+        # as it is stored, so their owner is never a guess (run_access.py).
+        self.owner: str | None = None
+        self._reading_owner: str | None = None
+        self._error_owner: str | None = None
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -245,7 +259,9 @@ class PlateBalanceV1:
             "configured": self.config.com_port is not None,
             "state": "unknown",
             "reading": dict(self._reading) if self._reading else None,
+            "reading_owner": self._reading_owner if self._reading else None,
             "last_error": self._error,
+            "error_owner": self._error_owner if self._error else None,
             "last_operation": dict(self._operation) if self._operation else None,
             "capabilities": {"read": True, "tare": True, "zero": True},
             "geometry": {"adapter_height_mm": self.config.adapter_height_mm,
@@ -285,6 +301,7 @@ class PlateBalanceV1:
                     raise ValueError("Balance returned an invalid weight or stability flag")
                 self._reading = {"value": float(weight), "unit": "g", "stable": stable,
                                  "observed_at": datetime.now(timezone.utc).isoformat()}
+                self._reading_owner = self.owner
                 if cancelled():
                     raise RuntimeError("Balance read interrupted by stop")
                 return stable, float(weight)
@@ -392,6 +409,7 @@ class PlateBalanceV1:
                 self._operation["attempts"] = attempts_made
         except Exception as exc:
             self._error = str(exc)
+            self._error_owner = self.owner
             self._operation = {"action": action, "outcome": ("baseline_unconfirmed" if isinstance(exc, BalanceReferenceTimeout)
                                else "stability_timeout" if isinstance(exc, BalanceStabilityTimeout)
                                else "failed" if action == "read" else "unknown_outcome"),

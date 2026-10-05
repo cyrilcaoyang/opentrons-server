@@ -1263,21 +1263,27 @@ def create_app(
         if balance is None:
             raise HTTPException(status_code=404, detail="no plate balance on this gateway")
         snapshot = balance.snapshot()
-        owner = service.balance_reading_plan
-        if owner is not None:
+
+        def may_read(owner: Optional[str]) -> bool:
+            if owner is None:
+                return True  # a manual read: anyone signed in
             try:
-                allowed = reader.can_read_plan(plans.get(owner))
+                return reader.can_read_plan(plans.get(owner))
             except PlanError:
+                pass
+            try:
+                bundle = plan_results.get(owner)
+            except InvalidPlanId:
                 bundle = None
-                try:
-                    bundle = plan_results.get(owner)
-                except InvalidPlanId:
-                    pass
-                allowed = reader.unrestricted or reader.admin if bundle is None else reader.can_read_record(bundle)
-            if not allowed:
-                raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
-        return {"reading": snapshot.get("reading"), "last_error": snapshot.get("last_error"),
-                "plan_id": owner}
+            return (reader.unrestricted or reader.admin) if bundle is None else reader.can_read_record(bundle)
+
+        reading_owner, error_owner = snapshot.get("reading_owner"), snapshot.get("error_owner")
+        if snapshot.get("reading") and not may_read(reading_owner):
+            raise HTTPException(status_code=403, detail=_RUN_DATA_DENIED)
+        error = snapshot.get("last_error")
+        if error and not may_read(error_owner):
+            error = "Balance error during another user's run"
+        return {"reading": snapshot.get("reading"), "last_error": error, "plan_id": reading_owner}
 
     @app.get("/plans/results", tags=["plans"])
     def list_plan_results(request: Request, limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
