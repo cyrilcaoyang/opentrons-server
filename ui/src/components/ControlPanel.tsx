@@ -909,7 +909,11 @@ export function ControlPanel({
 
       {snapshot.fetch_error && <FetchErrorBand error={snapshot.fetch_error} />}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)]">
+      {/* The left column is pinned to exactly the width it had when the page
+          capped at 64rem with a 7fr:4fr split — (64rem − 2×2.5rem padding −
+          1rem gap) × 7/11 — so the deck never moves. The page now caps at
+          72rem and every extra pixel goes to the right column. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,calc((64rem_-_6rem)*7/11))_minmax(0,1fr)]">
         {/* Left column: deck + declare.
 
             Capped below `lg`, on the COLUMN rather than on the deck inside it.
