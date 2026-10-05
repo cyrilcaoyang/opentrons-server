@@ -70,7 +70,11 @@ export function RunRecords() {
   }
   if (!records) return <p className="text-xs text-ink-subtle dark:text-slate-400">Loading run records…</p>;
   if (records.length === 0) {
-    return <p className="text-xs text-ink-subtle dark:text-slate-400">No plans have run on this gateway yet.</p>;
+    return error ? (
+      <p role="alert" className="text-xs text-rose-700 dark:text-rose-400">Could not refresh run records ({error}).</p>
+    ) : (
+      <p className="text-xs text-ink-subtle dark:text-slate-400">No plans have run on this gateway yet.</p>
+    );
   }
 
   return (

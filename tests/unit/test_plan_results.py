@@ -371,3 +371,15 @@ def test_the_liveness_check_never_signals_on_windows(monkeypatch):
     monkeypatch.setattr(ctypes, "WinDLL", lambda *_a, **_k: _K32(), raising=False)
     assert pr._pid_alive(4242) is True
     assert calls[0] == ("open", 0x1000, 4242) and calls[-1] == ("close", 1)
+
+
+def test_a_file_time_failure_never_reports_a_saved_record_as_lost(tmp_path, monkeypatch):
+    from opentrons_server.gateway import plan_results as pr
+
+    def no_utime(*_a, **_k):
+        raise OSError("read-only metadata")
+
+    monkeypatch.setattr(pr.os, "utime", no_utime)
+    store = _store(tmp_path)
+    store.save(_plan(), approved_by="ada@lab", equipment_id="e", gateway_version="v")
+    assert store.get("p1")["plan_id"] == "p1"

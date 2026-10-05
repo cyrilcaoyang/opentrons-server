@@ -1399,10 +1399,15 @@ def create_app(
             source="device",
         )
         if save_plan_results:
-            # After the run, never during it: a disk error here must not
-            # halt a plan, and it surfaces as this request's 500 instead.
-            plan_results.save(plan, approved_by=approver, equipment_id=service.equipment_id,
-                              gateway_version=GATEWAY_VERSION)
+            # After the run: the robot is done. A failure surfaces as this
+            # request's 500 and in /status, and the record stays "running"
+            # until the next start recovers it as interrupted.
+            try:
+                plan_results.save(plan, approved_by=approver, equipment_id=service.equipment_id,
+                                  gateway_version=GATEWAY_VERSION)
+            except Exception as exc:
+                executor.progress_error = f"final run record not saved: {exc}"
+                raise
         return _plan_view(plan)
 
     @app.post("/plans/{plan_id}/abort", tags=["plans"])
