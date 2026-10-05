@@ -326,8 +326,14 @@ class PlanResultsStore:
                 raise
             # The file time is the record's own save time, so a delivery retry
             # rewriting an old record does not make it look recent to list().
-            stamp = datetime.fromisoformat(bundle["saved_at"]).timestamp()
-            os.utime(path, (stamp, stamp))
+            # Ordering only: the record itself is already safely written, so a
+            # failure here is logged, never reported as a lost record.
+            try:
+                stamp = datetime.fromisoformat(bundle["saved_at"]).timestamp()
+                os.utime(path, (stamp, stamp))
+            except (OSError, ValueError) as exc:
+                logger.warning("plan %s: record saved, file time not set: %s",
+                               bundle["plan_id"], exc)
 
     # -- reading ---------------------------------------------------------------
 
