@@ -56,6 +56,7 @@ import { StalenessIndicator } from "./StalenessIndicator";
 import { StatusPill } from "./StatusPill";
 import { TileButton } from "./TileButton";
 import { PlateBalanceControls } from "./PlateBalanceControls";
+import { RunRecords } from "./RunRecords";
 import { CameraControl } from "./CameraControl";
 import { PANEL_STYLE, PANEL_HEADING_STYLE } from "./panel-styles";
 
@@ -1303,6 +1304,12 @@ export function ControlPanel({
               </ul>
             )}
           </div>}
+          </Section>
+
+          {/* What every plan run here did, from the records saved as it ran:
+              live progress and readings, still there after a restart. */}
+          <Section title="Run records" collapsible>
+            <RunRecords />
           </Section>
 
           <Section title="MODULES">

@@ -299,6 +299,18 @@ def create_app(
     )
     save_plan_results = not dry_run or bool(os.environ.get("OT2_PLAN_RESULTS_DIR"))
     service.plan_results = plan_results
+    service.plan_executor = executor
+    if save_plan_results:
+        # Runs the last process left mid-flight become `interrupted` records.
+        plan_results.recover()
+        # The record follows the run step by step (watchable live, survives
+        # a restart); the final save after execute adds the plate report.
+        executor.on_progress = lambda plan: plan_results.save_progress(
+            plan,
+            approved_by=plan.approval.owner if plan.approval else None,
+            equipment_id=service.equipment_id,
+            gateway_version=GATEWAY_VERSION,
+        )
     active_assistants: dict[str, Assistant] = {}
     active_assistants_lock = threading.Lock()
 
@@ -1161,10 +1173,22 @@ def create_app(
     def _plate_report(plan_id: list[str], labware: Optional[str], density_g_per_ml: Optional[float]) -> dict[str, Any]:
         if not plan_id:
             raise HTTPException(status_code=422, detail="give at least one plan_id")
-        try:
-            selected = [plans.get(pid) for pid in plan_id]
-        except PlanError as exc:
-            raise HTTPException(status_code=_plan_error_status(exc), detail=str(exc))
+        # A plan still in memory (running or recent) first; otherwise its saved
+        # run record, so the report outlives a gateway restart.
+        selected: list[Any] = []
+        for pid in plan_id:
+            try:
+                selected.append(plans.get(pid))
+                continue
+            except PlanError as exc:
+                missing = exc
+            try:
+                bundle = plan_results.get(pid)
+            except ValueError:
+                bundle = None
+            if bundle is None:
+                raise HTTPException(status_code=_plan_error_status(missing), detail=str(missing))
+            selected.append(bundle["plan"])
         try:
             return build_plate_report(selected, labware=labware, density_g_per_ml=density_g_per_ml)
         except ValueError as exc:
@@ -1184,10 +1208,12 @@ def create_app(
         return {"user": request.headers.get("X-Auth-User") or None, "projects": projects}
 
     @app.get("/plans/results", tags=["plans"])
-    def list_plan_results() -> list[dict[str, Any]]:
-        """Finished plans' saved results, newest first: status, approver, ELN
-        project and delivery state. Durable across restarts, unlike /plans."""
-        return plan_results.list()
+    def list_plan_results(limit: int = Query(default=20, ge=1, le=200)) -> list[dict[str, Any]]:
+        """Run records, newest first: status (``executing`` while it runs,
+        updated as each step starts and ends; ``interrupted`` when the gateway
+        restarted mid-run), progress, approver, ELN project and delivery
+        state. Durable across restarts, unlike /plans."""
+        return plan_results.list(limit=limit)
 
     @app.get("/plans/results/{plan_id}", tags=["plans"])
     def get_plan_results(plan_id: str) -> dict[str, Any]:

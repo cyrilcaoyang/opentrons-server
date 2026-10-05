@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
 import threading
 import time
@@ -94,6 +95,8 @@ from .models import (
     TipsResetRequest,
     WellUpdateRequest,
 )
+
+logger = logging.getLogger(__name__)
 
 # How long an approval stays good *to start* the plan. Short on purpose: it is
 # a standing permission to move a robot, and the operator who granted it is
@@ -578,6 +581,26 @@ class PlanExecutor:
     def __init__(self, service: Any, store: PlanStore) -> None:
         self._service = service
         self._store = store
+        # Called with a snapshot of the running plan when it starts and as each
+        # step starts and ends (plan_results.save_progress): the run record on
+        # disk follows the run, so it can be watched live and survives a
+        # restart. A failure here is surfaced, never allowed to halt a robot
+        # mid-plate; the readings are still in memory and the final save
+        # tries again.
+        self.on_progress: Optional[Callable[[Plan], None]] = None
+        self.progress_error: Optional[str] = None
+
+    def _report_progress(self, plan: Plan) -> None:
+        if self.on_progress is None:
+            return
+        with self._store._lock:
+            snapshot = plan.model_copy(deep=True)
+        try:
+            self.on_progress(snapshot)
+            self.progress_error = None
+        except Exception as exc:  # surfaced in /status, logged; see above
+            self.progress_error = f"run record not saved: {exc}"
+            logger.exception("plan %s: run record not saved", plan.plan_id)
 
     def execute(self, plan_id: str, *, claimed_by: Optional[ClaimedBy]) -> Plan:
         # Validation and reservation must be one transaction: concurrent
@@ -592,6 +615,7 @@ class PlanExecutor:
             self._service.claims.hand_to_plan(
                 plan.plan_id, approved_by=plan.approval.owner, total_steps=len(plan.steps)
             )
+        self._report_progress(plan)
         try:
             return self._run(plan)
         finally:
@@ -613,6 +637,7 @@ class PlanExecutor:
                     return plan
                 result.started_at = datetime.now(timezone.utc)
                 self._service.claims.plan_progress(plan.plan_id, step=index + 1, action=step.action)
+            self._report_progress(plan)
             # Do not hold the registry lock during I/O: abort must remain
             # available. A command already started keeps its actual outcome.
             try:
@@ -665,6 +690,7 @@ class PlanExecutor:
                 result.finished_at = datetime.now(timezone.utc)
                 if plan.status != "executing":
                     return plan
+            self._report_progress(plan)
 
         with self._store._lock:
             if plan.status != "executing":
