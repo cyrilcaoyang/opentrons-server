@@ -120,12 +120,6 @@ export function RunRecords() {
                   {r.status === "executing" ? "running" : r.status}
                 </span>
                 <span className="font-mono" title={r.plan_id}>{r.plan_id.slice(0, 8)}</span>
-                <span
-                  className="text-ink-subtle dark:text-slate-400"
-                  title={`started ${r.started_at ?? "—"}${r.approved_by ? ` · approved by ${r.approved_by}` : ""}`}
-                >
-                  {when(r.started_at)}
-                </span>
                 <span className="tabular-nums text-ink-subtle dark:text-slate-400">
                   {r.steps_done}/{r.steps_total}
                   {(r.readings ?? 0) > 0 && ` · ${r.readings} rd`}
@@ -139,6 +133,14 @@ export function RunRecords() {
                   {elnShort(r)}
                 </span>
                 <span className="ml-auto flex shrink-0">
+                  {r.can_open === false ? (
+                    <span
+                      className="px-1 text-[10px] text-ink-subtle dark:text-slate-500"
+                      title={`Only ${r.approved_by ?? "its approver"}, members of ${r.eln_project ?? "its ELN project"} and admins can open this run's data.`}
+                    >
+                      🔒 restricted
+                    </span>
+                  ) : (<>
                   {(r.readings ?? 0) > 0 && (
                     <>
                       <a href={plateReportUrl([r.plan_id])} target="_blank" rel="noopener" className={link}
@@ -154,6 +156,7 @@ export function RunRecords() {
                     title="The full saved record: every step, its outcome, reading and timestamps">
                     Record
                   </a>
+                  </>)}
                 </span>
               </div>
               <div className="mt-0.5 h-0.5 w-full overflow-hidden rounded bg-slate-200 dark:bg-slate-800" aria-hidden>
@@ -162,6 +165,13 @@ export function RunRecords() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
+              <p
+                className="mt-0.5 truncate text-[10px] text-ink-subtle dark:text-slate-400"
+                title={`approved by ${r.approved_by ?? "unknown"} · started ${r.started_at ?? "—"}${r.finished_at ? ` · ended ${r.finished_at}` : ""}`}
+              >
+                {r.approved_by ?? "unknown approver"} · {when(r.started_at)}
+                {r.finished_at && r.status !== "executing" && ` – ${when(r.finished_at).split(" ").pop()}`}
+              </p>
               {problem && (
                 <p className="mt-0.5 truncate text-[10px] text-rose-700 dark:text-rose-400" title={problem}>
                   {problem}

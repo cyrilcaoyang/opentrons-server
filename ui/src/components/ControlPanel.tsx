@@ -1163,6 +1163,21 @@ export function ControlPanel({
           </div>
 
 
+          <Section title="Claim">
+            {claimedBy ? (
+              <div className="flex flex-col gap-1">
+                <KV k="Holder" v={claimedByMe ? `${claimedBy.owner} (you)` : claimedBy.owner} mono />
+                <KV k="Session" v={claimedBy.session_id || "—"} mono />
+                <KV k="Expires" v={claimedBy.expires_at || "—"} mono />
+              </div>
+            ) : (
+              <p className="text-xs text-ink-subtle dark:text-slate-500">
+                No claim held — click <span className="font-semibold">Take control</span> to
+                acquire one and unlock the controls.
+              </p>
+            )}
+          </Section>
+
           {/* Directly under the control strip it belongs to: the strip acts on
               the robot, and the answers to "did that work" — control state,
               protocol state, what is on the heads — are right here rather than
@@ -1389,20 +1404,6 @@ export function ControlPanel({
           </Section>
 
 
-          <Section title="Claim">
-            {claimedBy ? (
-              <div className="flex flex-col gap-1">
-                <KV k="Holder" v={claimedByMe ? `${claimedBy.owner} (you)` : claimedBy.owner} mono />
-                <KV k="Session" v={claimedBy.session_id || "—"} mono />
-                <KV k="Expires" v={claimedBy.expires_at || "—"} mono />
-              </div>
-            ) : (
-              <p className="text-xs text-ink-subtle dark:text-slate-500">
-                No claim held — click <span className="font-semibold">Take control</span> to
-                acquire one and unlock the controls.
-              </p>
-            )}
-          </Section>
         </div>
       </div>
 

@@ -47,9 +47,16 @@ def test_documented_schemas_match_catalog_and_blow_out_is_exposed(docs_client):
     schema = docs_client.get("/openapi.json").json()
     assert guide["actions"] == catalog["actions"]
     assert "/docs/agent" in schema["paths"]
-    for path in guide["links"].values():
-        if path != "/status":
-            assert docs_client.get(path).status_code == 200
+    for name, path in guide["links"].items():
+        if path == "/status":
+            continue
+        if name == "plans":
+            # Run data needs an identity (run_access.py); the guide says so.
+            assert docs_client.get(path).status_code == 401
+            assert docs_client.get(path, headers={"X-Api-Key": "test-key"}).status_code == 200
+            assert "X-Api-Key" in guide["access"]
+            continue
+        assert docs_client.get(path).status_code == 200
     blowout = guide["liquid_handling"]["blow_out"]
     assert blowout["gateway_http_endpoint"] in schema["paths"]
     assert any(item["action"] == "blow_out" for item in catalog["actions"])

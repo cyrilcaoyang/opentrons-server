@@ -42,6 +42,7 @@ from .robot_profile import PROFILE, IS_FLEX
 from .documentation import action_catalog, equipment_documentation
 from .assistant_claude import claude_code_authenticated, run_claude_code
 from .plate_report import build_plate_report, summarize_for_agent
+from .run_access import RunReader, redact_plan_view
 
 logger = logging.getLogger(__name__)
 
@@ -564,9 +565,13 @@ class Assistant:
     MAX_TOOL_ROUNDS = 16
 
     def __init__(self, service: Any, plans: PlanStore, config: AssistantConfig,
-                 ensure_authorized: Optional[Callable[[], None]] = None) -> None:
+                 ensure_authorized: Optional[Callable[[], None]] = None,
+                 reader: Optional[RunReader] = None) -> None:
         self._service = service
         self._plans = plans
+        # Whose eyes the assistant reads run data with: the same rule as the
+        # API routes, so asking the assistant is never a way around them.
+        self._reader = reader or RunReader(unrestricted=True)
         self._config = config
         self._ensure_authorized = ensure_authorized
         self._cancel_event = threading.Event()
@@ -600,10 +605,10 @@ class Assistant:
             "list_actions": lambda _a: self._actions(),
             "propose_plan": self._propose,
             "get_plate_report": lambda a: summarize_for_agent(build_plate_report(
-                [self._plans.get(pid) for pid in a["plan_ids"]],
+                [self._readable_plan(pid) for pid in a["plan_ids"]],
                 labware=a.get("labware"), density_g_per_ml=a.get("density_g_per_ml"),
             )),
-            "get_plan": lambda a: self._plans.get(a["plan_id"]).model_dump(mode="json"),
+            "get_plan": lambda a: self._plan_for_reader(self._plans.get(a["plan_id"])),
             "list_plans": lambda _a: [
                 {
                     "plan_id": plan.plan_id,
@@ -614,16 +619,18 @@ class Assistant:
                     "halt_reason": plan.halt_reason,
                     "results": [
                         {"step": index + 1, "action": result.action,
-                         "outcome": result.outcome, "message": result.message,
-                         "reading": result.reading,
-                         "balance_operation": result.balance_operation}
+                         "outcome": result.outcome,
+                         **({"message": result.message, "reading": result.reading,
+                             "balance_operation": result.balance_operation}
+                            if self._reader.can_read_plan(plan) else {})}
                         for index, result in enumerate(plan.results)
                     ],
                     "readings": [
                         {"step": index + 1, **result.reading}
                         for index, result in enumerate(plan.results)
-                        if result.reading is not None
+                        if result.reading is not None and self._reader.can_read_plan(plan)
                     ],
+                    **({} if self._reader.can_read_plan(plan) else {"redacted": True}),
                 }
                 for plan in self._plans.list()[:20]
             ],
@@ -633,10 +640,22 @@ class Assistant:
         """Per-plan plate summaries for recent plans that recorded a weighing."""
         out: List[Dict[str, Any]] = []
         for plan in self._plans.list()[:10]:
-            if not any(r.reading for r in plan.results):
+            if not any(r.reading for r in plan.results) or not self._reader.can_read_plan(plan):
                 continue
             out.append({"plan_id": plan.plan_id, **summarize_for_agent(build_plate_report([plan]))})
         return out
+
+    def _plan_for_reader(self, plan: Any) -> Dict[str, Any]:
+        view = plan.model_dump(mode="json")
+        return view if self._reader.can_read_plan(plan) else redact_plan_view(view)
+
+    def _readable_plan(self, plan_id: str) -> Any:
+        plan = self._plans.get(plan_id)
+        if not self._reader.can_read_plan(plan):
+            raise PermissionError(
+                f"plan {plan_id}'s data is only open to its approver and members of its ELN "
+                "project; tell the user to ask them or an admin")
+        return plan
 
     def _consumables(self) -> Dict[str, Any]:
         details = self._service.get_status().details

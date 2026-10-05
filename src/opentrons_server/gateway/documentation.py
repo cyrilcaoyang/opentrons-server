@@ -52,6 +52,11 @@ def equipment_documentation() -> dict[str, Any]:
             "plans": "/plans",
         },
         "link_resolution": "Append paths to this gateway's base URL, including any proxy prefix.",
+        "access": (
+            "/plans and the run records and plate reports under it carry run data: they need "
+            "the auth edge's signed-in user or an X-Api-Key when the gateway requires login. "
+            "The other links are open."
+        ),
         "discovery": [
             "Read /status for equipment identity, health, activity, allowed_actions and last_error.",
             "Resolve loaded labware and pipette names from details.snapshot.labwares and "
