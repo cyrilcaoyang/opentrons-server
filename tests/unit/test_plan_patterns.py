@@ -269,3 +269,19 @@ def test_the_claude_reply_parser_forwards_the_pattern(monkeypatch):
     out = ac.run_claude_code("claude", "sys", {"messages": []}, 5, None)
     assert out["for_each_well"]["wells"] == "A1:A2" and out["epilogue"][0]["action"] == "drop_tip"
     assert out["steps"] == []
+
+
+def test_a_draft_names_the_verified_identity_it_was_created_for():
+    app = create_app(dry_run=True, enforce_claims=False, ui=False, edge_secret="s3cret")
+    client = TestClient(app)
+    body = {"steps": [{"action": "lights.set", "args": {"on": True}}],
+            "created_by": "assistant (claude-sonnet-5-5) for ada@lab"}
+    # Through the edge as ada: the label already names her, nothing is appended.
+    r = client.post("/plans", json=body, headers={"X-Edge-Key": "s3cret", "X-Auth-User": "ada@lab"})
+    assert r.json()["created_by"] == "assistant (claude-sonnet-5-5) for ada@lab"
+    # A label that does not name the verified identity gets it appended.
+    r = client.post("/plans", json={**body, "created_by": "agent:hermes"},
+                    headers={"X-Edge-Key": "s3cret", "X-Auth-User": "bob@lab"})
+    assert r.json()["created_by"] == "agent:hermes (bob@lab)"
+    # No identity (open deployment): the label stands as given.
+    assert client.post("/plans", json={**body, "created_by": "agent"}).json()["created_by"] == "agent"

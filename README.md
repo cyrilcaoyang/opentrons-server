@@ -307,6 +307,17 @@ Code CLI: otherwise `/assistant/health` reports why and the UI renders no bubble
 It exists so the package stays self-contained — install this gateway alone, with
 no dashboard, no central server and no agent harness, and you still get one.
 
+**Behind the lab's dashboard edge the chat runs on the server instead.** When
+the panel is served under `/ot2/<name>/ui/`, the bubble calls the dashboard's
+engine (`/api/assistant/equipment/ot2_<name>/{health,chat/stream,chat/cancel}`,
+one chat engine for the whole lab, with a model picker — Claude Code Sonnet
+5.5, OpenRouter models). That engine reads this gateway and creates drafts on
+it **as the signed-in user** (edge identity + secret), so `OT2_REQUIRE_LOGIN`,
+the claim gate and the run-data access rule all see the real person; the
+events it streams are this bubble's own, so the panel is unchanged. Served
+directly from the gateway (`/ui/`), the built-in assistant below answers. See
+`ac-organic-lab/docs/ASSISTANT_CONSOLIDATION_PLAN.md`.
+
 **It cannot move the robot.** Its whole tool surface is four reads plus
 `propose_plan`, the same door an agent harness comes through. A proposal is a
 *draft*; approving and running it are claim-gated clicks in the **Proposed

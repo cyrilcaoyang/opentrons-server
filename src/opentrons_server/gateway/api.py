@@ -1373,12 +1373,16 @@ def create_app(
         same request model the matching /control/* endpoint uses, so a bad
         volume is refused while it is still text.
         """
-        if require_login:
-            _require_identity(http_request)
+        identity = _require_identity(http_request) if require_login else _resolve_identity(http_request)[0]
+        # created_by is a label the caller chooses; the verified identity (when
+        # there is one) is appended so the card and audit name who it was for.
+        created_by = request.created_by
+        if identity and identity not in created_by:
+            created_by = f"{created_by} ({identity})"
         try:
             steps, pattern = compile_proposal(
                 request, grid_for=service.labware_grid, channels_for=service._channels_for)
-            plan = plans.create(steps, created_by=request.created_by, pattern=pattern)
+            plan = plans.create(steps, created_by=created_by, pattern=pattern)
         except PatternError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         except PlanError as exc:
