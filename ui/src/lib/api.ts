@@ -496,10 +496,40 @@ export function deletePlan(planId: string, token: string | null): Promise<void> 
 // Optional chat assistant
 // ---------------------------------------------------------------------------
 
-/** Open (no claim, no identity) so the UI can decide whether to render the
- *  bubble before anyone logs in. Returns only a boolean and a reason. */
+// Where the chat runs. Behind the dashboard edge (apiBase = "/ot2/<name>/")
+// the panel's assistant is the dashboard's engine — one chat engine for the
+// whole lab, with a model picker — reached same-origin at the edge root
+// (consolidation plan, steps 3–4). The engine reads this device and creates
+// drafts on it *as the signed-in user*, so the gateway still sees the real
+// person. Served directly from the gateway (apiBase = "/") that origin has
+// no such route, and the gateway's own assistant answers instead.
+//
+// This map is the per-device rollout gate: a panel is answered by the server
+// only when its edge prefix is listed here (with the equipment id the
+// Caddyfile's `/ot2/<name>/` fronts). A device that is not listed keeps its
+// gateway assistant exactly as before — HTE stays here until the switch has
+// been accepted on Complexation. Behind the edge there is deliberately no
+// fallback from one path to the other: a refusal is shown, never worked
+// around with a second credential path.
+const EDGE_EQUIPMENT_IDS: Record<string, string> = {
+  "/ot2/complexation/": "ot2_complexation",
+};
+const serverEquipmentId: string | null = EDGE_EQUIPMENT_IDS[apiBase] ?? null;
+/** True when this panel's chat is answered by the dashboard's engine. */
+export const assistantOnServer: boolean = serverEquipmentId !== null;
+
+function assistantUrl(suffix: "health" | "chat/stream" | "chat/cancel"): string {
+  return serverEquipmentId
+    ? `/api/assistant/equipment/${encodeURIComponent(serverEquipmentId)}/${suffix}`
+    : apiUrl(`/assistant/${suffix}`);
+}
+
+/** Whether the bubble should render, and which models the operator may pick.
+ *  On the gateway this is open (a boolean and a reason, read before login);
+ *  on the server it needs the signed-in session the edge already has. */
 export function getAssistantHealth(): Promise<AssistantHealth> {
-  return fetchJson<AssistantHealth>("/assistant/health");
+  return fetchJsonAt<AssistantHealth>(assistantUrl("health"), "/assistant/health",
+    { credentials: "same-origin" });
 }
 
 /** One turn. Claim-gated server-side: a proposal is only useful to whoever
@@ -529,9 +559,10 @@ export async function assistantChatStream(
   requestId?: string,
 ): Promise<AssistantReply> {
   const path = "/assistant/chat/stream";
-  const res = await fetch(apiUrl(path), {
+  const res = await fetch(assistantUrl("chat/stream"), {
     method: "POST",
     headers: withToken(token),
+    credentials: "same-origin",
     signal,
     body: JSON.stringify({
       messages: messages.map((m) => ({ role: m.role, content: m.content })),
@@ -576,13 +607,14 @@ export async function assistantChatStream(
   return completed;
 }
 
-/** Cancel an in-flight assistant turn on the gateway. This never stops robot motion. */
+/** Cancel an in-flight assistant turn. This never stops robot motion. */
 export function cancelAssistantChat(
   requestId: string, token: string | null, signal?: AbortSignal,
 ): Promise<{ canceled: boolean }> {
-  return fetchJson<{ canceled: boolean }>("/assistant/chat/cancel", {
+  return fetchJsonAt<{ canceled: boolean }>(assistantUrl("chat/cancel"), "/assistant/chat/cancel", {
     method: "POST",
     headers: withToken(token),
+    credentials: "same-origin",
     signal,
     body: JSON.stringify({ request_id: requestId }),
   });
