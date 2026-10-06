@@ -157,19 +157,21 @@ def test_guide_states_flow_rate_defaults_and_the_balance_cap(docs_client):
     guide = docs_client.get("/docs/agent").json()
     rates = guide["limits"]["flow_rates_ul_s"]
     assert rates["unit"] == "uL/s"
-    assert rates["defaults"]["aspirate"] == 90 and rates["defaults"]["blow_out"] == 100
+    assert rates["defaults"]["aspirate"] == 90 and "Opentrons default" in rates["defaults"]["blow_out"]
     assert rates["dispense_default_by_model"]["p300_single_gen2"] == 92.86
-    assert rates["balance_well"]["max_by_model"] == {
+    assert rates["blow_out_default_by_model"] == rates["dispense_default_by_model"]
+    assert rates["balance_well"]["dispense_max_by_model"] == {
         m: round(v / 2.0, 2) for m, v in _OT2_GEN2_DISPENSE_FLOW_UL_S.items()}
-    assert rates["balance_well"]["max_by_model"]["p300_single_gen2"] == 46.43
+    assert rates["balance_well"]["dispense_max_by_model"]["p300_single_gen2"] == 46.43
+    assert rates["balance_well"]["blow_out_max_by_model"]["p300_single_gen2"] == 92.86
     assert "> 0" in rates["set_flow_rate"]["range"]
     assert "limits.flow_rates_ul_s" in guide["liquid_handling"]["flow_rates"]
     # The catalog schema says the same, so a proposer sees it next to the field.
     catalog = {a["action"]: a for a in docs_client.get("/plans/actions").json()["actions"]}
     props = catalog["set_flow_rate"]["args_schema"]["properties"]
-    assert "46.43" in props["blow_out"]["description"] and "100" in props["blow_out"]["description"]
+    assert "92.86" in props["blow_out"]["description"] and "Opentrons default" in props["blow_out"]["description"]
     # Optional[float] renders as anyOf [number > 0, null]; the bound is still there.
     assert any(opt.get("exclusiveMinimum") == 0 for opt in props["blow_out"]["anyOf"])
     # And the Markdown reference the dashboard proxies.
     reference = docs_client.get("/agent-docs/api-reference").text
-    assert "46.43" in reference and "blow-out **100**" in reference
+    assert "46.43" in reference and "blow-out at the model's **full** default (92.86)" in reference

@@ -135,8 +135,10 @@ lab-skills / dashboard / agents          this repo                        robot
   qualify arced moves and slow, rim-cleared dispenses for single-channel GEN2
   pipettes. Balance-well blow-out has a separate `balance_blow_out_enabled`
   config flag, off by default; it keeps the same rim clearance and arc and
-  requires the pipette's blow-out flow rate to be at most half its documented
-  dispense default. It needs operator acceptance on Complexation. Touch tip
+  requires the pipette's blow-out flow rate to be at most the model's
+  Opentrons default blow-out rate (its dispense default; the gateway's own
+  default since 2026-10-06, previously a flat 100 µL/s). Dispense at the
+  balance stays capped at half. It needs operator acceptance on Complexation. Touch tip
   and other balance contact actions stay blocked. Do not configure it
   until the holder datum and travel path are qualified on Complexation.
   `platebalance.read`, `platebalance.tare`, and `platebalance.zero` can be

@@ -668,9 +668,17 @@ def test_balance_blow_out_requires_opt_in_clearance_and_capped_flow(tmp_path):
     service.control.blow_out.assert_called_once_with("right")
     service._mark_tip_used.assert_called_once_with("right", "9", "A1")
 
+    # The cap is the model's Opentrons default blow-out rate (p300 single GEN2:
+    # 92.86), not the dispense half-rate — 47 is fine, 93 is not.
     service.control.reset_mock()
     service.control.get_flow_rate.return_value = {"blow_out": 47.0}
-    with pytest.raises(OutOfEnvelope, match="at most"):
+    service._mark_tip_used.reset_mock()
+    service.advanced_action("blow_out", request)
+    service.control.blow_out.assert_called_once_with("right")
+
+    service.control.reset_mock()
+    service.control.get_flow_rate.return_value = {"blow_out": 93.0}
+    with pytest.raises(OutOfEnvelope, match="at most 92.86"):
         service.advanced_action("blow_out", request)
     assert service.state == OT2ServiceState.READY
     service.control.get_location_from_labware.assert_not_called()
