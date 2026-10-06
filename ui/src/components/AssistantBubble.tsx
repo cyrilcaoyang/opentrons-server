@@ -290,7 +290,9 @@ export function AssistantBubble({
 
   const send = useCallback(async (resendText?: string, resendIndex?: number) => {
     const text = (resendText ?? draft).trim();
-    if (!text || pending) return;
+    // The assistant is claim-gated on both backends (gateway and server):
+    // without control the turn would only come back 423, so never send one.
+    if (!text || pending || !claim.held) return;
     const controller = new AbortController();
     const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)),
       (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -433,7 +435,7 @@ export function AssistantBubble({
       setPending(false);
       setStopping(false);
     }
-  }, [draft, pending, thread, failedMessageIndex, claim.token, model]);
+  }, [draft, pending, thread, failedMessageIndex, claim.token, claim.held, model]);
 
   // The header and bottom grip move the panel. Pointer capture keeps movement
   // continuous when the pointer leaves either grip; controls stay clickable.
@@ -770,7 +772,8 @@ export function AssistantBubble({
           ) : (
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={!draft.trim() || !claim.held}
+              title={claim.held ? undefined : "Take control of the device to use the assistant"}
               className="self-stretch rounded bg-purple-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-purple-700 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700"
             >
               Send
