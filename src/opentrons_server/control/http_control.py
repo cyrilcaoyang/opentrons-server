@@ -69,7 +69,13 @@ _DEFAULT_DISPENSE_FLOW = (
     float(os.environ["OT2_HTTP_DISPENSE_FLOW_UL_S"])
     if "OT2_HTTP_DISPENSE_FLOW_UL_S" in os.environ else None
 )
-_DEFAULT_BLOWOUT_FLOW = float(os.getenv("OT2_HTTP_BLOWOUT_FLOW_UL_S", "100"))
+# Blow-out: the model's Opentrons GEN2 default (which equals its dispense
+# default) unless a deployment overrides it. Was a flat 100 µL/s until
+# 2026-10-06; the operator asked for the OT-2 default.
+_DEFAULT_BLOWOUT_FLOW = (
+    float(os.environ["OT2_HTTP_BLOWOUT_FLOW_UL_S"])
+    if "OT2_HTTP_BLOWOUT_FLOW_UL_S" in os.environ else None
+)
 
 # https://docs.opentrons.com/python-api/pipettes/characteristics/#ot-2-pipette-flow-rates
 _OT2_GEN2_DISPENSE_FLOW_UL_S = {
@@ -79,6 +85,10 @@ _OT2_GEN2_DISPENSE_FLOW_UL_S = {
     "p20_multi_gen2": 7.6,
     "p300_multi_gen2": 94.0,
 }
+
+# Opentrons' documented GEN2 blow-out default is the dispense default of the
+# same model (the characteristics table lists one "dispense / blow out" rate).
+_OT2_GEN2_BLOW_OUT_FLOW_UL_S = dict(_OT2_GEN2_DISPENSE_FLOW_UL_S)
 
 _OFF_DECK_ALIASES = {"OFF_DECK", "offDeck", "off_deck", OFF_DECK}
 
@@ -102,12 +112,14 @@ def flow_rate_documentation() -> Dict[str, Any]:
             "aspirate": _DEFAULT_ASPIRATE_FLOW,
             "dispense": _DEFAULT_DISPENSE_FLOW if _DEFAULT_DISPENSE_FLOW is not None
             else "per pipette model (see dispense_default_by_model)",
-            "blow_out": _DEFAULT_BLOWOUT_FLOW,
+            "blow_out": _DEFAULT_BLOWOUT_FLOW if _DEFAULT_BLOWOUT_FLOW is not None
+            else "per pipette model — the Opentrons default (see blow_out_default_by_model)",
             "note": "Applied when a call omits flow_rate and set_flow_rate has not been used in "
                     "this session. Deployment overrides: OT2_HTTP_ASPIRATE_FLOW_UL_S, "
                     "OT2_HTTP_DISPENSE_FLOW_UL_S, OT2_HTTP_BLOWOUT_FLOW_UL_S.",
         },
         "dispense_default_by_model": dict(_OT2_GEN2_DISPENSE_FLOW_UL_S),
+        "blow_out_default_by_model": dict(_OT2_GEN2_BLOW_OUT_FLOW_UL_S),
         "set_flow_rate": {
             "range": "any value > 0 per channel (aspirate, dispense, blow_out); the API sets "
                      "no upper bound — the robot's plunger speed is the physical ceiling, "
@@ -116,12 +128,12 @@ def flow_rate_documentation() -> Dict[str, Any]:
             "scope": "the session pipette, until changed or the session ends",
         },
         "balance_well": {
-            "rule": "A dispense or blow_out addressed to the plate on the local balance "
-                    "(platebalanceV1) must run at no more than half the pipette model's "
-                    "documented dispense default; a faster current rate is refused before "
-                    "motion (412) and never silently lowered. Set blow_out with "
-                    "set_flow_rate first.",
-            "max_by_model": {model: round(rate / 2.0, 2) for model, rate in _OT2_GEN2_DISPENSE_FLOW_UL_S.items()},
+            "rule": "At the plate on the local balance (platebalanceV1): a dispense runs at no "
+                    "more than half the pipette model's documented dispense default; a blow_out "
+                    "at no more than the model's Opentrons default blow-out rate. A faster "
+                    "current rate is refused before motion (412) and never silently lowered.",
+            "dispense_max_by_model": {model: round(rate / 2.0, 2) for model, rate in _OT2_GEN2_DISPENSE_FLOW_UL_S.items()},
+            "blow_out_max_by_model": dict(_OT2_GEN2_BLOW_OUT_FLOW_UL_S),
             "see": "docs/PLATEBALANCE_V1.md",
         },
     }
@@ -151,7 +163,7 @@ class OT2HttpControl:
         *,
         aspirate_flow_rate: float = _DEFAULT_ASPIRATE_FLOW,
         dispense_flow_rate: Optional[float] = _DEFAULT_DISPENSE_FLOW,
-        blow_out_flow_rate: float = _DEFAULT_BLOWOUT_FLOW,
+        blow_out_flow_rate: Optional[float] = _DEFAULT_BLOWOUT_FLOW,
     ) -> None:
         self.client = client
         self.aspirate_flow_rate = aspirate_flow_rate
@@ -1001,7 +1013,7 @@ class OT2HttpControl:
         return {
             "aspirate": rates.get("aspirate", self.aspirate_flow_rate),
             "dispense": dispense,
-            "blow_out": rates.get("blow_out", self.blow_out_flow_rate),
+            "blow_out": rates["blow_out"] if "blow_out" in rates else self._default_blow_out_flow(pip_name),
         }
 
     def set_well_bottom_clearance(
@@ -1398,12 +1410,25 @@ class OT2HttpControl:
                 base = rates[kind]
             elif kind == "dispense":
                 base = self._default_dispense_flow(pip_name)
+            elif kind == "blow_out":
+                base = self._default_blow_out_flow(pip_name)
             else:
-                base = {
-                    "aspirate": self.aspirate_flow_rate,
-                    "blow_out": self.blow_out_flow_rate,
-                }[kind]
+                base = self.aspirate_flow_rate
         return base * (float(rate) if rate is not None else 1.0)
+
+    def _default_blow_out_flow(self, pip_name: str) -> float:
+        if self.blow_out_flow_rate is not None:
+            return self.blow_out_flow_rate
+        model = self._pipette_models.get(pip_name)
+        if model is None:
+            self.adopt_run_state()
+            model = self._pipette_models.get(pip_name)
+        if model not in _OT2_GEN2_BLOW_OUT_FLOW_UL_S:
+            raise ValueError(
+                f"no documented OT-2 GEN2 blow-out default for {model or pip_name!r}; "
+                "set it with set_flow_rate"
+            )
+        return _OT2_GEN2_BLOW_OUT_FLOW_UL_S[model]
 
     def _default_dispense_flow(self, pip_name: str) -> float:
         if self.dispense_flow_rate is not None:

@@ -75,9 +75,10 @@ class FlowRateRequest(PipetteRequest):
                     "p20 single 7.56, p1000 single 274.7). At the balance plate: at most half that.")
     blow_out: Optional[float] = Field(
         default=None, gt=0, allow_inf_nan=False,
-        description="uL/s, > 0, no API ceiling. Gateway default 100 unless OT2_HTTP_BLOWOUT_FLOW_UL_S. "
-                    "At the balance plate: at most half the model's dispense default (p300 single 46.43), "
-                    "checked before motion; set it here before a balance blow_out.")
+        description="uL/s, > 0, no API ceiling. Default is the pipette model's Opentrons default "
+                    "(= its dispense default: p300 single 92.86, p20 single 7.56, p1000 single 274.7) "
+                    "unless OT2_HTTP_BLOWOUT_FLOW_UL_S. At the balance plate: at most that default, "
+                    "checked before motion.")
 
     @model_validator(mode="after")
     def at_least_one(self):

@@ -173,7 +173,9 @@ branches on transport only at control construction and snapshot refresh.
   change — the SSH REPL path is unchanged.
 - Related env knobs: `OT2_HTTP_ASPIRATE_FLOW_UL_S` (default 90),
   `OT2_HTTP_DISPENSE_FLOW_UL_S` (optional override; otherwise the
-  official OT-2 GEN2 rate for the loaded model), `OT2_HTTP_BLOWOUT_FLOW_UL_S` (100),
+  official OT-2 GEN2 rate for the loaded model), `OT2_HTTP_BLOWOUT_FLOW_UL_S`
+  (optional override; otherwise the official OT-2 GEN2 blow-out rate for the
+  loaded model, which equals its dispense rate — was a flat 100 before 2026-10-06),
   `OT2_HTTP_COMMAND_TIMEOUT` (120 s per blocking command),
   `OT2_HTTP_TIMEOUT` (10 s control-plane calls), `OT2_OPENTRONS_VERSION`
   (`Opentrons-Version` header, default 3).

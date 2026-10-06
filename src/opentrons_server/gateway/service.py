@@ -26,7 +26,7 @@ from ..control import (
     RunEngineHTTPError,
 )
 from ..control import state_readers as _state_readers
-from ..control.http_control import _OT2_GEN2_DISPENSE_FLOW_UL_S
+from ..control.http_control import _OT2_GEN2_BLOW_OUT_FLOW_UL_S, _OT2_GEN2_DISPENSE_FLOW_UL_S
 from ..version import __version__ as GATEWAY_VERSION
 from .advanced import ADVANCED_ACTIONS, FLEX_ACTIONS
 from .robot_profile import PROFILE, IS_FLEX
@@ -1014,6 +1014,15 @@ class OT2Service:
             self._balance_pipette_model(requested_pipette, session_pipette)
         ] / 2.0
 
+    def _balance_blow_out_cap(self, requested_pipette: str, session_pipette: str) -> float:
+        """The model's Opentrons default blow-out rate. A balance blow-out is
+        rim-cleared air, not liquid delivery, so it is not held to the
+        dispense half-rate; the operator set this on 2026-10-06 after
+        half-rate blow-outs left droplets on the tip."""
+        return _OT2_GEN2_BLOW_OUT_FLOW_UL_S[
+            self._balance_pipette_model(requested_pipette, session_pipette)
+        ]
+
     def _resolve_session_labware(self, ref: str, *, allow_balance: bool = False) -> str:
         """Resolve a labware reference to a session nickname, loading declared
         labware on demand.
@@ -1761,7 +1770,7 @@ class OT2Service:
                     control.blow_out_in_place(pip)
                 else:
                     if balance_blow_out is not None:
-                        cap = self._balance_dispense_cap(request.pipette, pip)
+                        cap = self._balance_blow_out_cap(request.pipette, pip)
                         current = float(control.get_flow_rate(pip)["blow_out"])
                         if not 0 < current < float("inf") or current > cap + 1e-9:
                             raise OutOfEnvelope({

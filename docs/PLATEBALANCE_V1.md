@@ -120,8 +120,12 @@ at the balance. A separate `balance_blow_out_enabled` config flag, off by
 default, permits a balance-well `blow_out` only after operator acceptance on
 Complexation. It requires the same exact plate geometry, qualified
 single-channel GEN2 pipette, 2 mm rim clearance and guarded arc as dispense.
-The current pipette blow-out flow rate must be no more than half its documented
-dispense default; set it explicitly before the blow-out if needed. The gateway
+The current pipette blow-out flow rate must be no more than the model's
+documented Opentrons default blow-out rate (p300 single GEN2: 92.86 µL/s),
+which is also the gateway's default, so no `set_flow_rate` is needed unless
+the session raised it. Until 2026-10-06 the cap was half the dispense default
+(46.43); half-rate blow-outs left droplets on the tip, and the operator set
+the cap to the OT-2 default. The dispense cap (half) is unchanged. The gateway
 refuses a faster rate before motion and never silently changes it. Use an
 explicit well destination; `in_place=true` has no balance placement or flow
 check and must not be used as a balance workaround. This configuration applies
