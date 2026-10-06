@@ -82,6 +82,50 @@ _OT2_GEN2_DISPENSE_FLOW_UL_S = {
 
 _OFF_DECK_ALIASES = {"OFF_DECK", "offDeck", "off_deck", OFF_DECK}
 
+
+def flow_rate_documentation() -> Dict[str, Any]:
+    """The flow-rate defaults and limits this deployment applies, for the
+    equipment guide (``GET /docs/agent`` → ``limits.flow_rates_ul_s``) and the
+    dashboard's API reference. Configuration only — no hardware is read; the
+    rates a session currently holds come from ``get_flow_rate`` / plan steps.
+
+    Why it is documented: the gateway's defaults are *not* the Opentrons
+    defaults (aspirate 90 and blow-out 100 µL/s here, per the 2026-07-14
+    validation), the balance-well blow-out cap is half the model's documented
+    dispense default, and ``set_flow_rate`` itself accepts any positive
+    number — three facts an operator asking "what range can I use" needs in
+    one place.
+    """
+    return {
+        "unit": "uL/s",
+        "defaults": {
+            "aspirate": _DEFAULT_ASPIRATE_FLOW,
+            "dispense": _DEFAULT_DISPENSE_FLOW if _DEFAULT_DISPENSE_FLOW is not None
+            else "per pipette model (see dispense_default_by_model)",
+            "blow_out": _DEFAULT_BLOWOUT_FLOW,
+            "note": "Applied when a call omits flow_rate and set_flow_rate has not been used in "
+                    "this session. Deployment overrides: OT2_HTTP_ASPIRATE_FLOW_UL_S, "
+                    "OT2_HTTP_DISPENSE_FLOW_UL_S, OT2_HTTP_BLOWOUT_FLOW_UL_S.",
+        },
+        "dispense_default_by_model": dict(_OT2_GEN2_DISPENSE_FLOW_UL_S),
+        "set_flow_rate": {
+            "range": "any value > 0 per channel (aspirate, dispense, blow_out); the API sets "
+                     "no upper bound — the robot's plunger speed is the physical ceiling, "
+                     "and the Opentrons default for each model (dispense_default_by_model, "
+                     "also the model's default blow-out) is the sensible reference point",
+            "scope": "the session pipette, until changed or the session ends",
+        },
+        "balance_well": {
+            "rule": "A dispense or blow_out addressed to the plate on the local balance "
+                    "(platebalanceV1) must run at no more than half the pipette model's "
+                    "documented dispense default; a faster current rate is refused before "
+                    "motion (412) and never silently lowered. Set blow_out with "
+                    "set_flow_rate first.",
+            "max_by_model": {model: round(rate / 2.0, 2) for model, rate in _OT2_GEN2_DISPENSE_FLOW_UL_S.items()},
+            "see": "docs/PLATEBALANCE_V1.md",
+        },
+    }
+
 # The OT-2's fixed trash. Older robot-servers model it as a normal labware
 # definition in slot 12; modern ones model it as an addressable AREA — slot 12
 # is then not loadable at all (AreaNotInDeckConfigurationError, observed live
