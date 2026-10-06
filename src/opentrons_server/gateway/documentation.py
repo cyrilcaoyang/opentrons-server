@@ -12,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
+from ..control.http_control import flow_rate_documentation
 from .models import PROTOCOL_VERSION
 from .robot_profile import PROFILE
 from .plans import PLAN_ACTIONS
@@ -77,6 +78,9 @@ def equipment_documentation() -> dict[str, Any]:
             "motion": "move_to defaults to an arced path. force_direct=true omits the Z-retract waypoint; constant-height XY travel requires destination Z equal to current Z. Flex absolute gripper moves default to direct; relative gripper dz=0 retains height.",
             "manual_panel": "The operator Direct Drive panel offers one-step XYZ jogs, speed, explicit position reads and Copy XYZ. jog and pipette_position are claim-gated operator endpoints, not plan actions. Jog uses fresh controller coordinates and a straight path; transport loss is unknown_outcome and must not be retried. Position reads do not home, and /status never triggers them.",
         },
+        # Numbers an operator or agent needs before choosing a rate; the
+        # same source the service enforces from (control/http_control.py).
+        "limits": {"flow_rates_ul_s": flow_rate_documentation()},
         "agent_boundary": [
             "Agents may read and propose drafts via POST /plans; a draft does not execute. "
             "The operator reviews, approves and runs it in the device panel.",
@@ -95,6 +99,8 @@ def equipment_documentation() -> dict[str, Any]:
             "air_gap": "POST /control/air-gap requires a well and height above its top. Accounts for liquid already held when capacity is known.",
             "dispense": "Optional push_out is plunger air volume in uL, separate from a full blow-out.",
             "speed": "set_speed on HTTP applies to explicit gantry moves; implicit liquid-command moves retain robot defaults.",
+            "flow_rates": "Defaults, the set_flow_rate range and the balance-well cap are in limits.flow_rates_ul_s. "
+                          "The gateway's aspirate and blow-out defaults differ from the Opentrons defaults.",
         },
         "stop": {
             "endpoint": "/control/stop", "plan_action": None,

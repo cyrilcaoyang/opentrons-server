@@ -117,8 +117,11 @@ For a plate declared on `platebalanceV1`, well-addressed `move-to` and
 Qualified moves require a single-channel GEN2 pipette, an explicit `top`
 offset that puts the tip at least 2 mm above the measured rim, and an arced
 path. Qualified dispenses default to that clearance and cap flow at half the
-documented GEN2 model default. Other well actions at the balance remain
-blocked. Absolute-coordinate moves and manual jogs do not infer balance
+documented GEN2 model default (p300 single GEN2: 46.43 µL/s); a balance-well
+`blow_out`, when enabled, has the same cap, checked against the pipette's
+*current* blow-out rate — set it with `set-flow-rate` first, since the
+gateway's default blow-out is 100 µL/s. Other well actions at the balance
+remain blocked. Absolute-coordinate moves and manual jogs do not infer balance
 clearance; they remain operator-directed motions.
 
 ## Control — bookkeeping (claim, no robot motion)
@@ -178,7 +181,7 @@ while the device is `ready` and no command is in flight.
 | `POST /control/home-pipette` | `{pipette}` | yes |
 | `POST /control/home-pipette-z` | `{pipette}` — selected mount Z only | yes |
 | `POST /control/home-plunger` | `{pipette}` | yes |
-| `POST /control/set-flow-rate` | `{pipette, aspirate?, dispense?, blow_out?}` in µL/s — at least one | yes |
+| `POST /control/set-flow-rate` | `{pipette, aspirate?, dispense?, blow_out?}` in µL/s — at least one, each > 0 with no API ceiling (the plunger is the physical limit). Gateway defaults when unset: aspirate **90**, blow-out **100**, dispense the model's Opentrons GEN2 default (p300 single 92.86, p20 single 7.56, p1000 single 274.7); overridable per deployment with `OT2_HTTP_{ASPIRATE,DISPENSE,BLOWOUT}_FLOW_UL_S`. At the balance plate, dispense and blow-out are capped at **half** the model's dispense default (p300 single 46.43) — a faster current rate is refused with **412** before motion, never lowered silently. `GET /docs/agent` → `limits.flow_rates_ul_s` carries the live table. | yes |
 | `POST /control/set-speed` | `{pipette, speed}` mm/s, ≤ 400 — applies to **explicit** gantry moves only | yes |
 | `POST /control/hs-latch-open` | `{module}` | no |
 | `POST /control/hs-latch-close` | `{module}` | no |

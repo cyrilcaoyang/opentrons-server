@@ -410,7 +410,10 @@ blocked unless the local config qualifies the exact plate definition and
 measured height; `details.platebalance.geometry.pipetting_enabled` reports that
 configuration. When configured, only arced well moves above the rim and
 single-channel GEN2 dispenses at least 2 mm above the rim are supported; the
-dispense flow is capped at half the documented model default. Aspirate and
+dispense flow — and, when enabled, the blow-out flow — is capped at half the
+documented model default (p300 single GEN2: 46.43 µL/s; the full table, the
+gateway's own defaults of 90 aspirate / 100 blow-out, and the `set_flow_rate`
+range are in `GET /docs/agent` → `limits.flow_rates_ul_s`). Aspirate and
 contact actions remain blocked. Existing slot occupants must be reconciled by
 the operator. See `docs/PLATEBALANCE_V1.md` for the qualification and operator
 acceptance requirements. There are no balance-specific workflow proposal actions.

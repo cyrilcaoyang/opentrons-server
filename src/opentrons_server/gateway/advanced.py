@@ -65,9 +65,19 @@ class TouchTipRequest(PipetteRequest):
 
 
 class FlowRateRequest(PipetteRequest):
-    aspirate: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
-    dispense: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
-    blow_out: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    aspirate: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False,
+        description="uL/s, > 0, no API ceiling (plunger speed is the physical limit). Gateway default 90 "
+                    "unless OT2_HTTP_ASPIRATE_FLOW_UL_S; see /docs/agent limits.flow_rates_ul_s.")
+    dispense: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False,
+        description="uL/s, > 0. Default is the pipette model's Opentrons GEN2 default (p300 single 92.86, "
+                    "p20 single 7.56, p1000 single 274.7). At the balance plate: at most half that.")
+    blow_out: Optional[float] = Field(
+        default=None, gt=0, allow_inf_nan=False,
+        description="uL/s, > 0, no API ceiling. Gateway default 100 unless OT2_HTTP_BLOWOUT_FLOW_UL_S. "
+                    "At the balance plate: at most half the model's dispense default (p300 single 46.43), "
+                    "checked before motion; set it here before a balance blow_out.")
 
     @model_validator(mode="after")
     def at_least_one(self):
