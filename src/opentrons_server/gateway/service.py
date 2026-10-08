@@ -3332,6 +3332,14 @@ class OT2Service:
                 and slot.source in {"run", "repl"}
             )
             if compiled_observed:
+                # Readback names only the compiled definition; carry the exact
+                # one this session loaded so readers get real geometry.
+                compiled = geometry.compile_definition(declared_balance.definition)
+                slot.labware = slot.labware.model_copy(update={
+                    "definition": compiled, "display_name": compiled["metadata"]["displayName"],
+                    "rows": declared_balance.rows, "columns": declared_balance.columns,
+                    "kind": declared_balance.kind,
+                })
                 slot.module = SlotModule(module_name="platebalanceV1", status="unknown", local_peripheral=True)
                 slot.slot_state = "in_use" if busy else "occupied"
             elif slot.source in {"run", "repl"} and slot.labware is not None:
