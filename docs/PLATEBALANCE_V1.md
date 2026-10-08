@@ -110,7 +110,9 @@ were both measured from the OT-2 top deck surface. The Agilent geometry entry is
 The hash covers the full schema-2 definition with sorted JSON keys and compact
 separators. A changed definition, unqualified plate, missing geometry, or deck
 placement conflict fails closed. The compiled run definition raises each well
-by 102 mm and gives the robot path planner a 121 mm plate envelope. Balance
+by 102 mm and gives the robot path planner a 121 mm plate envelope. Once the
+run reports that compiled name for this session, `/status` carries the compiled
+definition on the slot's labware, so readers draw the real plate. Balance
 well moves require an explicit offset at least 2 mm above the rim and an arced
 path. Dispense defaults to that clearance and caps flow at half the official
 GEN2 model default, including explicit flow rates. This path accepts only

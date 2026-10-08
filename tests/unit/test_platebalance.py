@@ -600,7 +600,7 @@ def test_balance_move_requires_explicit_clearance_and_arc(tmp_path):
 
 
 def test_compiled_balance_run_is_reconciled_without_hiding_observed_name(tmp_path):
-    service, geometry, _ = qualified_balance(tmp_path)
+    service, geometry, definition = qualified_balance(tmp_path)
     compiled_name = geometry.compiled_load_name()
     service._session_labware["9"] = "slot_9"
     service._session_balance_load_name = compiled_name
@@ -611,9 +611,15 @@ def test_compiled_balance_run_is_reconciled_without_hiding_observed_name(tmp_pat
     assert observed.labware.load_name == compiled_name
     assert observed.slot_state == "occupied"
     assert observed.module.local_peripheral
+    assert observed.labware.definition == geometry.compile_definition(definition)
+    assert observed.labware.kind == observed.declared.kind
+    assert (observed.labware.rows, observed.labware.columns) == (observed.declared.rows, observed.declared.columns)
+    assert observed.labware.display_name.endswith("· balance · 121 mm")
     assert service._balance_placement_valid()
     service._session_balance_load_name = "another_definition"
-    assert service._build_deck_state().slots["9"].slot_state == "mismatch"
+    stale = service._build_deck_state().slots["9"]
+    assert stale.slot_state == "mismatch"
+    assert stale.labware.definition is None
 
 
 @pytest.mark.parametrize("transport,expected_key,expected_value", [
