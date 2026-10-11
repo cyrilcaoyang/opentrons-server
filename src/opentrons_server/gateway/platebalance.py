@@ -90,6 +90,13 @@ class PlateBalanceConfig(BaseModel):
     # Enabled only after the guarded blow-out path is accepted on this holder.
     balance_blow_out_enabled: bool = False
     max_labware_height_mm: float | None = Field(default=25, gt=0, le=25, allow_inf_nan=False)
+    # "serial": this gateway opens the port per action (com_port).
+    # "weigh_every_plate": a weigh-every-plate service on this PC owns the
+    # port (and the balance lift); this gateway reads, tares and zeroes
+    # through its API at weigher_url and never opens the port.
+    transport: Literal["serial", "weigh_every_plate"] = "serial"
+    weigher_url: str | None = Field(default=None, pattern=r"^https?://[A-Za-z0-9.-]+(:[0-9]+)?/?$")
+    weigher_owner: str = Field(default="opentrons-gateway", min_length=1, max_length=64)
     com_port: str | None = Field(default=None, pattern=r"^(COM[1-9][0-9]*|/dev/[A-Za-z0-9_./-]+)$")
     baudrate: int = Field(default=9600, ge=300, le=115200)
     bytesize: Literal[7, 8] = 7
@@ -97,6 +104,19 @@ class PlateBalanceConfig(BaseModel):
     stopbits: Literal[1, 2] = 1
     timeout: float = Field(default=1.0, gt=0, le=5)
     units: Literal["g"] = "g"
+
+    @model_validator(mode="after")
+    def one_transport(self) -> PlateBalanceConfig:
+        if self.transport == "weigh_every_plate":
+            if self.weigher_url is None or self.com_port is not None:
+                raise ValueError("transport weigh_every_plate needs weigher_url and no com_port")
+        elif self.weigher_url is not None:
+            raise ValueError("weigher_url applies only to transport weigh_every_plate")
+        return self
+
+    @property
+    def configured(self) -> bool:
+        return (self.weigher_url if self.transport == "weigh_every_plate" else self.com_port) is not None
 
 
 class PlateBalanceRequest(BaseModel):
@@ -214,8 +234,15 @@ def matterlab_driver(config: PlateBalanceConfig) -> Any:
 
     # Defer opening the port until an explicit operator action. The serial
     # dependency version supporting this option is pinned by the extra.
-    return WZB254N(**config.model_dump(exclude={"model", "slot", "adapter_height_mm", "pipetting_geometry", "balance_blow_out_enabled", "max_labware_height_mm"}),
+    return WZB254N(**config.model_dump(exclude={"model", "slot", "adapter_height_mm", "pipetting_geometry", "balance_blow_out_enabled", "max_labware_height_mm",
+                                                "transport", "weigher_url", "weigher_owner"}),
                   connect_hardware=False, write_timeout=config.timeout)
+
+
+def weigher_http_driver(config: PlateBalanceConfig) -> Any:
+    from .weigher_http import WeigherHttpDriver
+
+    return WeigherHttpDriver(config.weigher_url, owner=config.weigher_owner)
 
 
 def parse_weight(response: str) -> tuple[bool, float]:
@@ -238,10 +265,11 @@ def parse_weight(response: str) -> tuple[bool, float]:
 class PlateBalanceV1:
     code = "platebalanceV1"
 
-    def __init__(self, config: PlateBalanceConfig, *, driver_factory: Callable = matterlab_driver):
+    def __init__(self, config: PlateBalanceConfig, *, driver_factory: Callable | None = None):
         self.config = config
         self.slot = config.slot
-        self._factory = driver_factory
+        self._factory = driver_factory or (weigher_http_driver if config.transport == "weigh_every_plate"
+                                           else matterlab_driver)
         self._driver: Any = None
         self._reading: dict[str, Any] | None = None
         self._error: str | None = None
@@ -256,7 +284,8 @@ class PlateBalanceV1:
     def snapshot(self) -> dict[str, Any]:
         return {
             "module_name": self.code, "slot": self.slot, "model": self.config.model,
-            "configured": self.config.com_port is not None,
+            "configured": self.config.configured,
+            "transport": self.config.transport,
             "state": "unknown",
             "reading": dict(self._reading) if self._reading else None,
             "reading_owner": self._reading_owner if self._reading else None,
@@ -274,7 +303,7 @@ class PlateBalanceV1:
         }
 
     def supports(self, action: str) -> bool:
-        return self.config.com_port is not None and action in {"read", "tare", "zero"}
+        return self.config.configured and action in {"read", "tare", "zero"}
 
     def execute(self, action: str, *, request: PlateBalanceRequest | None = None,
                 cancelled: Callable[[], bool] = lambda: False) -> dict[str, Any]:
@@ -289,9 +318,14 @@ class PlateBalanceV1:
         attempts_made = 0
         if action != "read":
             self._reading = None  # A pre-tare net weight no longer describes this reference.
+        scope = None
         try:
             if self._driver is None:
                 self._driver = self._factory(self.config)
+            if getattr(type(self._driver), "claims_per_operation", False):
+                # A weigher service: hold its claim for this whole operation.
+                scope = self._driver.operation()
+                scope.__enter__()
             def observe(deadline: float | None = None) -> tuple[bool, float]:
                 if cancelled():
                     raise RuntimeError("Balance read interrupted by stop")
@@ -408,8 +442,16 @@ class PlateBalanceV1:
             if action != "read":
                 self._operation["attempts"] = attempts_made
         except Exception as exc:
+            from .weigher_http import WeigherUnavailable
+
             self._error = str(exc)
             self._error_owner = self.owner
+            if isinstance(exc, WeigherUnavailable) and attempts_made == 0:
+                # Refused or unreachable before any tare/zero was written:
+                # nothing changed on the balance, so this is a plain failure.
+                self._operation = {"action": action, "outcome": "not_sent",
+                                   "at": datetime.now(timezone.utc).isoformat()}
+                raise
             self._operation = {"action": action, "outcome": ("baseline_unconfirmed" if isinstance(exc, BalanceReferenceTimeout)
                                else "stability_timeout" if isinstance(exc, BalanceStabilityTimeout)
                                else "failed" if action == "read" else "unknown_outcome"),
@@ -421,4 +463,7 @@ class PlateBalanceV1:
             if action != "read":
                 raise OSError(f"Balance {action} outcome is unknown: {exc}") from exc
             raise
+        finally:
+            if scope is not None:
+                scope.__exit__(None, None, None)
         return self.snapshot()
