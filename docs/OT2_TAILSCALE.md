@@ -308,7 +308,7 @@ Tailscale out of `resolv.conf`. `--hostname` is why the tailnet shows
 |---|---|---|
 | `ot2_hte` (`ot2cytation`) | `ssh ot2_local` → `root@192.168.254.50`, lab switch | key `~/.ssh/ot2_ssh_key` (passphrase-protected; load it into `ssh-agent` first) |
 | Flex (`sdl2-otflex-01`) | `ssh otflex_local` → `root@192.168.254.81`, lab switch | same key |
-| `ot2_complexation` (`ot2training`) | `ssh root@<robot-wired-ip>`, lab switch — the address is the gateway's `OT2_HOST_ALIAS` (machine-local). The former USB-B link-local path `169.254.40.81` through the UPLC PC is retired | same key; the UPLC PC's `known_hosts` already trusts the wired address (the gateway's SSH reads use it) |
+| `ot2_complexation` (`ot2training`) | `ssh root@<robot-wired-ip>`, lab switch — the address is the gateway's `OT2_HOST_ALIAS` (machine-local). The former USB-B link-local path `169.254.40.81` through the UPLC PC is retired | same key. The robot's host key is the one already recorded for its former USB and Wi-Fi addresses: check a new entry against those, never accept a changed key blind (an address reused from HTE left HTE's key under it on the UPLC PC until 2026-10-11) |
 
 ## Installed versions
 

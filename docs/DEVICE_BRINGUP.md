@@ -50,11 +50,13 @@ on `:31950`, what only the gateway calls). Both robots are reached over the
 lab switch. Complexation's robot address is kept out of version control: read
 it from the service's `OT2_HTTP_BASE_URL` (`nssm get ot2-gateway-complexation
 AppEnvironmentExtra`) or from `details.robot.probe_url` in `/status`. Keep
-`OT2_HOST_ALIAS` on the same address, and keep the robot's SSH host key in the
-service account's `known_hosts`. The lab-switch link has no default gateway;
-robot Wi-Fi/Tailscale remains the robot's internet and management path. Check
-robot identity (`ot2training`, serial `weathered-dream`) with the required
-`Opentrons-Version: *` header. A headerless health request can return HTTP 422
+`OT2_HOST_ALIAS` on the same address. The gateway's own SSH client does not
+read `known_hosts` (paramiko `AutoAddPolicy`), so a stale entry there breaks
+only operator `ssh`. When an address changes, replace its entry with the
+robot's key, checked against the robot's existing entries. The lab-switch
+link has no default gateway; robot Wi-Fi/Tailscale remains the robot's
+internet and management path. Check robot identity (`ot2training`, serial
+`weathered-dream`) with the required `Opentrons-Version: *` header. A headerless health request can return HTTP 422
 and must not be mistaken for an unreachable robot.
 
 Complexation runs from its own deploy checkout as `.\sdl2` (since 2026-10-02),
