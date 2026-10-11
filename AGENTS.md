@@ -80,7 +80,7 @@ lab-skills / dashboard / agents          this repo                        robot
   represent it as the `fixedTrash` addressable area, and loading labware into
   slot 12 fails. Explicit rack/well destinations are for returning tips.
 - **Tests: use `.venv.test`, not `.venv`.**
-  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 961 tests
+  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 1017 tests
   (2026-10-11), no hardware, about five and a half minutes; run it in the
   background, since a five-minute timeout cuts it off. `.venv/` is the
   **running services'** environment; syncing or installing into it can disturb a live gateway (§4).
@@ -184,6 +184,19 @@ lab-skills / dashboard / agents          this repo                        robot
   `labwareId` + `wellName` params; a new command that leaves a pipette at a
   well under other param names must be taught to it.
   See `docs/MANUAL_PIPETTE.md` for frame, limits and UI behavior.
+- **Observations (`GET /observations`):** a cache-only, no-claim view of
+  pipette positions, tips, motion and run for external followers (the HTE
+  digital twin); design and field rules in `docs/OBSERVATIONS.md`. It is fed
+  by pre-send/outcome hooks in `RunEngineClient.execute` and SSH hooks at
+  `_run_action`; every service-side call goes through `_observe_safely`, so an
+  observation failure degrades observations and never touches a command or a
+  stop. A new command type must be classified in `gateway/observations.py`
+  (`TERMINAL_COMMANDS` only if its result position is where it ends;
+  `NON_MOTION_COMMANDS` only if it cannot move the gantry); unlisted counts as
+  motion with no endpoint. Fixtures in `tests/fixtures/observations/` are
+  generated through the real hooks; regenerate with
+  `OBSERVATION_FIXTURES_REGEN=1` and review the diff. The calibration-metadata
+  read (3 GETs per session and per 10 min) is off with `OT2_CALIBRATION_READ=0`.
 - **Stop recovery:** `ot2_stop_state.json` beside the tip-state file (override
   `OT2_STOP_STATE_PATH`) blocks automatic reconnect after a software stop.
   Give each gateway its own state paths; do not delete this latch to recover.

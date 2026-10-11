@@ -1,0 +1,200 @@
+{
+  "case": "probe_partial_failure",
+  "config": "hte",
+  "description": "A failed probe read is unknown, never an absent instrument or an idle robot.",
+  "steps": [
+    {
+      "after": "instruments and runs unreadable: mounts present with unknown instruments, external run unknown",
+      "observation": {
+        "boot_id": "boot-fixture-1",
+        "calibration": {
+          "deck": null,
+          "enabled": true,
+          "errors": {},
+          "pipette_offsets": null,
+          "read_at": null,
+          "revision": null,
+          "tip_lengths": null
+        },
+        "clock": {
+          "gateway": "utc_system",
+          "robot_offset_reason": null,
+          "robot_offset_s": {
+            "drift_ppm": 50.0,
+            "from_command": "cmd-5",
+            "max": 0.251001,
+            "measured_at": "2026-10-11T12:00:02.600000Z",
+            "min": 0.238999,
+            "resolution_s": 1e-06,
+            "samples": 5,
+            "width": 0.012002
+          }
+        },
+        "command_rules": "opentrons-8.7.0",
+        "degraded": null,
+        "equipment_id": "ot2_hte",
+        "event_watermark": null,
+        "frame": {
+          "applied": [
+            "deck_calibration",
+            "mount_offset",
+            "pipette_offset_calibration",
+            "tip_length_when_attached"
+          ],
+          "axes": {
+            "x": "right",
+            "y": "back",
+            "z": "up"
+          },
+          "id": "ot2_deck",
+          "not_applied": [
+            "labware_offsets"
+          ],
+          "origin": "opentrons_deck_coordinates",
+          "units": "mm"
+        },
+        "inventory": {
+          "deck_revision": "sha256:1259add01ff686ec",
+          "details": "/status",
+          "loaded_plate_revision": "sha256:74234e98afe7498f",
+          "mounted_tips_revision": "sha256:44136fa355b3678a",
+          "tip_racks_revision": "sha256:44136fa355b3678a"
+        },
+        "motion": {
+          "epoch": 0,
+          "in_flight": null,
+          "last_command": {
+            "command_id": "cmd-5",
+            "command_type": "loadLabware",
+            "completed_at": "2026-10-11T12:00:02.839000Z",
+            "completed_at_clock": "robot",
+            "error_type": null,
+            "motion": false,
+            "mount": null,
+            "move_id": "gw-0005",
+            "observed_at": "2026-10-11T12:00:02.600000Z",
+            "outcome": "succeeded",
+            "stale": false,
+            "started_at": "2026-10-11T12:00:02.341000Z",
+            "submitted_at": "2026-10-11T12:00:02.090000Z"
+          },
+          "reason": null,
+          "state": "idle"
+        },
+        "mounts": {
+          "left": {
+            "instrument": {
+              "acquired_at": null,
+              "channels": null,
+              "loaded_in_session": true,
+              "model": null,
+              "name": null,
+              "serial": null,
+              "source": null,
+              "valid": "unknown"
+            },
+            "position": {
+              "acquired_at": null,
+              "command_id": null,
+              "effective_at": null,
+              "effective_at_clock": null,
+              "epoch": null,
+              "geometry_revision": null,
+              "move_id": null,
+              "reason": "not_acquired",
+              "reference_point": null,
+              "session_generation": null,
+              "source": null,
+              "superseded_by_move_id": null,
+              "valid": "unavailable",
+              "validity_generation": null,
+              "xyz_mm": null
+            },
+            "tip": {
+              "engine": {
+                "acquired_at": null,
+                "has_tip": null,
+                "source": "run_engine_state"
+              },
+              "ledger": {
+                "effective_at": null,
+                "has_tip": false,
+                "rack": null,
+                "source": "service_accounting",
+                "uncertain": null,
+                "well": null
+              },
+              "tip_length": null
+            }
+          },
+          "right": {
+            "instrument": {
+              "acquired_at": null,
+              "channels": null,
+              "loaded_in_session": true,
+              "model": null,
+              "name": null,
+              "serial": null,
+              "source": null,
+              "valid": "unknown"
+            },
+            "position": {
+              "acquired_at": null,
+              "command_id": null,
+              "effective_at": null,
+              "effective_at_clock": null,
+              "epoch": null,
+              "geometry_revision": null,
+              "move_id": null,
+              "reason": "not_acquired",
+              "reference_point": null,
+              "session_generation": null,
+              "source": null,
+              "superseded_by_move_id": null,
+              "valid": "unavailable",
+              "validity_generation": null,
+              "xyz_mm": null
+            },
+            "tip": {
+              "engine": {
+                "acquired_at": null,
+                "has_tip": null,
+                "source": "run_engine_state"
+              },
+              "ledger": {
+                "effective_at": null,
+                "has_tip": false,
+                "rack": null,
+                "source": "service_accounting",
+                "uncertain": null,
+                "well": null
+              },
+              "tip_length": null
+            }
+          }
+        },
+        "observation_seq": 1,
+        "qualification": "hardware",
+        "qualification_basis": "configured",
+        "response_generated_at": "2026-10-11T12:00:02.610000Z",
+        "robot": {
+          "last_seen_at": "2026-10-11T12:00:00Z",
+          "reachable": true,
+          "robot_run_id": "run-fixture",
+          "session_generation": 1,
+          "transport": "http"
+        },
+        "run": {
+          "external_run_active": null,
+          "external_run_ids": null,
+          "plan_action": null,
+          "plan_id": null,
+          "plan_step": null,
+          "robot_run_id": "run-fixture"
+        },
+        "schema_version": 1,
+        "validity_generation": 0
+      }
+    }
+  ]
+}

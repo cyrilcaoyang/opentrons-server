@@ -47,6 +47,13 @@ from .deck import (
     run_slot_for,
 )
 from .events_exporter import EventsExporter
+from .observations import (
+    MOUNTS as _OBSERVATION_MOUNTS,
+    ObservationCache,
+    ObservationResponse,
+    ServiceContext,
+    digest as _digest,
+)
 from .models import (
     EQUIPMENT_KIND,
     ERROR_CODES,
@@ -235,6 +242,26 @@ def _tempmod_engine_name(label: str) -> str:
     return "temperatureModuleV2"
 
 
+# SSH actions that cannot move the gantry; every other action counts as motion
+# for observations (docs/OBSERVATIONS.md §3.2).
+_SSH_NON_MOTION_ACTIONS = frozenset(
+    {"pipette_position", "lights.set", "tempmod.set", "tempmod.deactivate",
+     "platebalance.read", "platebalance.tare", "platebalance.zero"}
+)
+def _revisions_of(*, tip_racks: Any, mounted_tips: Any, deck: Dict[str, Any], loaded_plate: Any) -> Dict[str, str]:
+    """Opaque content revisions (docs/OBSERVATIONS.md §4.8); the deck's own
+    build timestamp is excluded so an unchanged deck keeps its revision."""
+    return {
+        "tip_racks_revision": _digest(tip_racks),
+        "mounted_tips_revision": _digest(mounted_tips),
+        "deck_revision": _digest({k: v for k, v in deck.items() if k != "timestamp"}),
+        "loaded_plate_revision": _digest(loaded_plate),
+    }
+
+
+# Calibration metadata re-read interval (docs/OBSERVATIONS.md §4.6).
+_OT2_CALIBRATION_READ_INTERVAL = float(os.getenv("OT2_CALIBRATION_READ_INTERVAL", "600"))
+
 # `/status` message while a reachable robot's /runs read fails at boot: the
 # gateway neither stands off nor starts a session until it can read the list.
 _RUN_LIST_UNREADABLE_NOTE = "Could not read the robot's run list; deferring session start"
@@ -420,6 +447,24 @@ class OT2Service:
         self._probe_failures = 0
         self._robot_last_seen_at: Optional[datetime] = None
         self._robot_unreachable_since: Optional[datetime] = None
+        # Side-effect-free observations for external followers
+        # (docs/OBSERVATIONS.md). Fed by the HTTP command hooks, SSH action
+        # boundaries and explicit reads; served by GET /observations.
+        self.observations = ObservationCache(
+            qualification=self._observation_qualification()[0],
+            qualification_basis=self._observation_qualification()[1],
+            blocked=self._observation_blocked,
+            plan_context=self.claims.automation,
+        )
+        self._last_snapshot_at: Optional[datetime] = None
+        # Calibration metadata on file on the robot (§4.6): read on the probe
+        # thread at session start, then every _OT2_CALIBRATION_READ_INTERVAL.
+        self._calibration_enabled = (
+            not dry_run and os.getenv("OT2_CALIBRATION_READ", "1").strip() not in ("0", "false", "no")
+        )
+        self._calibration: Dict[str, Any] = {"enabled": self._calibration_enabled}
+        self._calibration_read_monotonic: Optional[float] = None
+        self._calibration_session: Optional[int] = None
         # Cached labware of an active *external* robot-server run (EXTERNAL_CONTROL).
         # None while the gateway owns the REPL (deck then comes from last_snapshot).
         self._last_run_labware: Optional[Dict[str, Any]] = None
@@ -535,8 +580,12 @@ class OT2Service:
             self.simulation = simulation
 
         try:
+            self._observe_safely(lambda: self.observations.new_session("session_lost"))
+            self._observe_safely(lambda: self.observations.set_qualification(*self._observation_qualification()))
             if self.transport == "http":
                 self.control = self._connect_http()
+                run_id = self.control.client.run_id
+                self._observe_safely(lambda: self.observations.set_robot_run_id(run_id))
             else:
                 self.control = OT2Control(
                     host_alias=self.host_alias,
@@ -577,6 +626,7 @@ class OT2Service:
                 "http transport requires OT2_HTTP_BASE_URL or a configured host_alias"
             )
         control = (FlexHttpControl if IS_FLEX else OT2HttpControl)(RunEngineClient(base_url))
+        control.client.observer = self.observations
         control.initialize_protocol(simulation=self.simulation)
         # initialize_protocol creates a fresh (usually empty) run, but if the
         # robot-server preloads labware into new runs — or a future path adopts
@@ -615,6 +665,7 @@ class OT2Service:
 
     def _shutdown_session(self) -> None:
         self._operator_shutdown = True
+        self._observe_safely(lambda: self.observations.new_session("session_lost"))
         if self.control is not None:
             try:
                 self.control.shutdown()
@@ -943,6 +994,9 @@ class OT2Service:
             loaded = self.control.pipette_for_mount(mount)
             if loaded is not None:
                 self._session_pipettes[mount] = loaded
+                if isinstance(self.control, OT2HttpControl):
+                    model = self.control._pipette_models.get(loaded)
+                    self._observe_safely(lambda: self.observations.register_pipette(loaded, mount, model))
                 return loaded
         attached = next(
             (
@@ -1452,6 +1506,9 @@ class OT2Service:
                 self._emit_control_action("stop", "unknown_outcome", started, str(exc))
             raise
         finally:
+            # After the physical stop attempt, never before it: observation
+            # bookkeeping must not be able to delay or prevent a stop.
+            self._observe_safely(lambda: self.observations.new_session("session_lost"))
             self._sync_activity()
             self._stop_lock.release()
 
@@ -1594,10 +1651,23 @@ class OT2Service:
         def read() -> None:
             nonlocal coordinates, observed_at
             pipette = self._ensure_session_pipette(request.pipette)
-            coordinates = PipetteCoordinates.model_validate(
-                self._require_control().get_pipette_position(pipette)
+            # HTTP reads are observed through the command hooks (savePosition);
+            # an SSH read is committed here, under the tokens it began with.
+            mount = self._observation_mount(request.pipette)
+            ticket = (
+                self._observe_safely(lambda: self.observations.begin_read(mount))
+                if self.transport != "http" else None
             )
+            try:
+                raw = self._require_control().get_pipette_position(pipette)
+            except Exception:
+                if ticket is not None:
+                    self._observe_safely(lambda: self.observations.driver_read_failed(ticket))
+                raise
+            coordinates = PipetteCoordinates.model_validate(raw)
             observed_at = datetime.now(timezone.utc)
+            if ticket is not None:
+                self._observe_safely(lambda: self.observations.commit_driver_read(ticket, raw))
 
         self._run_action("pipette_position", read, idempotent=True)
         return PipettePositionResponse(
@@ -1634,10 +1704,22 @@ class OT2Service:
                 raise RuntimeError("stop requested before jog; no move issued")
             control.get_location_absolute(destination.x, destination.y, destination.z)
             control.move_to_pip(pipette, speed=request.speed, force_direct=True)
-            coordinates = PipetteCoordinates.model_validate(control.get_pipette_position(pipette))
+            if self.transport != "http":
+                mount = self._observation_mount(request.pipette)
+                final_read["ticket"] = self._observe_safely(lambda: self.observations.begin_read(mount))
+            raw = control.get_pipette_position(pipette)
+            final_read["raw"] = raw
+            coordinates = PipetteCoordinates.model_validate(raw)
             observed_at = datetime.now(timezone.utc)
 
+        final_read: Dict[str, Any] = {}
         self._run_action("jog", step, idempotent=False)
+        if final_read.get("ticket") is not None:
+            # Committed once the action has ended, so the read counts as a
+            # position at rest under the jog's own epoch.
+            self._observe_safely(
+                lambda: self.observations.commit_driver_read(final_read["ticket"], final_read["raw"])
+            )
         return PipettePositionResponse(
             pipette=request.pipette, coordinates=coordinates,
             source="dry_run" if self.dry_run else "simulation" if self.simulation else "robot", observed_at=observed_at,
@@ -2664,7 +2746,9 @@ class OT2Service:
 
         runs = read_list("runs")
         if runs is not None:
-            result["run_active"] = any(_run_counts_as_active(r) for r in runs)
+            active = [r for r in runs if _run_counts_as_active(r)]
+            result["run_active"] = bool(active)
+            result["active_runs"] = [{"id": r.get("id"), "status": r.get("status")} for r in active]
         instruments = read_list("instruments")
         if instruments is not None:
             result["instruments"] = [
@@ -2672,6 +2756,7 @@ class OT2Service:
                     "mount": d.get("mount"),
                     "model": d.get("instrumentModel"),
                     "name": d.get("instrumentName"),
+                    "serial": d.get("serialNumber"),
                     "channels": (d.get("data") or {}).get("channels"),
                     # Carried for the layer-1 volume guard: what THIS pipette
                     # can meter, which no schema constant can express.
@@ -2763,6 +2848,18 @@ class OT2Service:
             if self.state == OT2ServiceState.REQUIRES_INIT:
                 deferring = probe.get("run_active") is None and not self._operator_shutdown
                 self._status_note = _RUN_LIST_UNREADABLE_NOTE if deferring else None
+        if probe.get("reachable"):
+            try:
+                self._refresh_calibration()
+            except Exception as exc:
+                # Metadata only: never a reason for startup or the refresh to fail.
+                logger.exception("calibration metadata read failed")
+                self._calibration = {
+                    "enabled": True,
+                    "revision": None,
+                    "read_at": datetime.now(timezone.utc),
+                    "errors": {"internal": f"{type(exc).__name__}: {exc}"[:200]},
+                }
         self._refresh_run_labware(force=True)
         # Fold the deck-light read into the same off-request-path refresh so
         # /status can serve it from cache instead of blocking on robot HTTP.
@@ -2811,7 +2908,18 @@ class OT2Service:
                     "instruments": self._last_probe["instruments"],
                     "instruments_read_at": self._last_probe.get("instruments_read_at"),
                 }
+            elif probe.get("instruments") is not None:
+                serials = {
+                    str(inst.get("mount") or "").strip().lower(): inst.get("serial")
+                    for inst in probe["instruments"]
+                }
+                self._observe_safely(lambda: self.observations.instruments_reconciled(serials))
+            external_before = self._last_probe.get("run_active") is True
+            # Published before superseding, so a commit racing this sees the
+            # run through _observation_blocked and is refused.
             self._last_probe = probe
+            if probe.get("run_active") is True and not external_before:
+                self._observe_safely(lambda: self.observations.supersede_all("external_run"))
             if self._robot_unreachable_since is None:
                 return
             outage_s = (now - self._robot_unreachable_since).total_seconds()
@@ -2836,6 +2944,7 @@ class OT2Service:
         # so the tile still names the hardware, but say plainly that nobody can
         # reach it right now.
         self._last_probe = {**self._last_probe, "reachable": False, "run_active": None}
+        self._observe_safely(lambda: self.observations.invalidate_all("robot_unreachable"))
         logger.warning(
             "robot unreachable at %s (%d consecutive probes failed); reporting unknown",
             url,
@@ -2899,6 +3008,7 @@ class OT2Service:
 
         previous = self.state
         self.control = None
+        self._observe_safely(lambda: self.observations.new_session("session_lost"))
         self._session_labware = {}
         self._session_balance_load_name = None
         self._session_pipettes = {}
@@ -3025,6 +3135,7 @@ class OT2Service:
             # Same stand-off boot_reconnect would have taken had the robot been
             # reachable then; _maybe_resume_from_external_control takes it from here.
             self.state = OT2ServiceState.EXTERNAL_CONTROL
+            self._observe_safely(lambda: self.observations.supersede_all("external_run"))
             self._status_note = (
                 "Robot has an active run (external / official app); gateway is standing off"
             )
@@ -3084,6 +3195,7 @@ class OT2Service:
             return
         if probe.get("run_active"):
             self.state = OT2ServiceState.EXTERNAL_CONTROL
+            self._observe_safely(lambda: self.observations.supersede_all("external_run"))
             self._status_note = (
                 "Robot has an active run (external / official app); gateway is standing off"
             )
@@ -3188,6 +3300,7 @@ class OT2Service:
                 "labwares": self._key_run_entries_by_slot(labware),
                 "modules": self._key_run_entries_by_slot(modules),
             }
+            self._last_snapshot_at = datetime.now(timezone.utc)
         except Exception as exc:
             self._set_error("snapshot_failed", str(exc), severity="warning")
         return self.last_snapshot
@@ -3282,6 +3395,15 @@ class OT2Service:
         details["mounted_tips"] = {
             pip: dict(info) for pip, info in self._mounted_tips.items()
         }
+        # Shared with /observations, and computed from the exact payloads in
+        # this envelope, so a client can tell whether the /status it fetched
+        # already reflects a revision it saw there.
+        details["revisions"] = _revisions_of(
+            tip_racks=details["tip_racks"],
+            mounted_tips=details["mounted_tips"],
+            deck=details["snapshot"]["deck"],
+            loaded_plate=details["loaded_plate"],
+        )
         # How many tip wells each pipette consumes per pick. Published because an
         # unbound pipette falls back to 1, and a silent 1 on an 8-channel head is
         # exactly the mis-tracking this exists to prevent.
@@ -3353,6 +3475,269 @@ class OT2Service:
             last_error=self.last_error,
             details=details,
         )
+
+    # -- observations (docs/OBSERVATIONS.md) ----------------------------------
+
+    def observation_snapshot(self) -> ObservationResponse:
+        """``GET /observations``: cached state only; no robot I/O, no command lock.
+
+        Service context is gathered outside the cache lock; if the cache changed
+        meanwhile the snapshot is rebuilt, so instruments and positions agree.
+        """
+        for _ in range(3):
+            expect = self.observations.state_token()
+            snapshot = self.observations.snapshot(self._observation_context(), expect=expect)
+            if snapshot is not None:
+                return snapshot
+        return self.observations.snapshot(self._observation_context())
+
+    def _observation_context(self) -> ServiceContext:
+        probe = self._last_probe
+        if self.dry_run:
+            reachable: Optional[bool] = None
+        elif probe or self._robot_last_seen_at or self.robot_unreachable:
+            reachable = bool(probe.get("reachable")) and not self.robot_unreachable
+        else:
+            reachable = None
+        automation = self.claims.automation() or {}
+        motion_unknown = None
+        if self.robot_unreachable and not self.dry_run:
+            motion_unknown = "robot_unreachable"
+        elif self.state == OT2ServiceState.UNKNOWN_OUTCOME:
+            motion_unknown = "unknown_outcome"
+        elif self._stop_latched and not self._stop_confirmed:
+            motion_unknown = "stop_unconfirmed"
+        own_run = getattr(getattr(self.control, "client", None), "run_id", None)
+        external_ids = (
+            None if self.robot_unreachable or probe.get("active_runs") is None
+            else [r["id"] for r in probe["active_runs"] if r.get("id") and r.get("id") != own_run]
+        )
+        return ServiceContext(
+            equipment_id=self.equipment_id,
+            transport=self.transport,
+            reachable=reachable,
+            last_seen_at=self._robot_last_seen_at,
+            instruments=self._observed_instruments(),
+            tip_ledger=self._observed_tip_ledger(),
+            tip_engine=self._observed_tip_engine(),
+            calibration=dict(self._calibration),
+            inventory=self._inventory_revisions(),
+            run={
+                "plan_id": automation.get("plan_id"),
+                "plan_step": automation.get("step"),
+                "plan_action": automation.get("action"),
+                "external_run_active": None if self.robot_unreachable else probe.get("run_active"),
+                "external_run_ids": external_ids,
+            },
+            paused=self.state == OT2ServiceState.PAUSED,
+            external_run=(
+                self.state == OT2ServiceState.EXTERNAL_CONTROL or probe.get("run_active") is True
+            ),
+            motion_unknown=motion_unknown,
+            stopping=self._stop_latched,
+        )
+
+    def _observation_blocked(self) -> Optional[str]:
+        """Why no position may be committed right now (§4.4 commit rule)."""
+        if self.robot_unreachable and not self.dry_run:
+            return "robot_unreachable"
+        if self.state == OT2ServiceState.EXTERNAL_CONTROL or self._last_probe.get("run_active") is True:
+            return "external_run"
+        if self._stop_latched:
+            return "stop_latched"
+        return None
+
+    def _observation_qualification(self) -> Tuple[str, str]:
+        if self.dry_run:
+            return "dry_run", "configured"
+        if self.transport != "http":
+            return ("simulation" if self.simulation else "hardware"), "configured"
+        # The robot-server does not say whether it simulates; the configured
+        # robot URL is the evidence, as the simulation flag is for SSH.
+        return "hardware", "configured_robot_url"
+
+    def _observe_safely(self, call: Callable[[], Any]) -> Any:
+        """Run one observation call; its failure never reaches the control path.
+
+        A failure is logged and degrades observations (everything invalid until
+        the next session) rather than being hidden.
+        """
+        try:
+            return call()
+        except Exception as exc:
+            logger.exception("observation update failed")
+            try:
+                self.observations.degrade(f"observation update failed: {type(exc).__name__}: {exc}")
+            except Exception:
+                logger.exception("could not degrade observations")
+            return None
+
+    def _observation_mount(self, ref: Any) -> Optional[str]:
+        """Mount for a pipette reference (mount name, recipe nickname or session alias)."""
+        text = str(ref or "").strip()
+        if text.lower() in _OBSERVATION_MOUNTS:
+            return text.lower()
+        for inst in self.session_recipe.get("instruments") or []:
+            if inst.get("nickname") == text and str(inst.get("mount", "")).lower() in _OBSERVATION_MOUNTS:
+                return str(inst["mount"]).lower()
+        for mount, alias in self._session_pipettes.items():
+            if alias == text:
+                return mount
+        return None
+
+    def _observed_instruments(self) -> Dict[str, Dict[str, Any]]:
+        """Per mount, from the probe. A mount is left out (reported null) only
+        when a fresh, successful instruments read omits it (§4.9)."""
+        probe = self._last_probe
+        listed = probe.get("instruments")
+        fresh = (
+            listed is not None
+            and "instruments" not in (probe.get("probe_errors") or {})
+            and bool(probe.get("reachable"))
+            and not self.robot_unreachable
+        )
+        by_mount = {str(i.get("mount") or "").lower(): i for i in listed or []}
+        out: Dict[str, Dict[str, Any]] = {}
+        for mount in _OBSERVATION_MOUNTS:
+            inst = by_mount.get(mount)
+            if inst is not None:
+                out[mount] = {
+                    "valid": "current" if fresh else "last_known",
+                    "model": inst.get("model"),
+                    "name": inst.get("name"),
+                    "serial": inst.get("serial"),
+                    "channels": inst.get("channels"),
+                    "source": "robot_instruments",
+                    "acquired_at": probe.get("instruments_read_at"),
+                }
+            elif not fresh:
+                out[mount] = {"valid": "unknown"}
+        return out
+
+    def _observed_tip_ledger(self) -> Dict[str, Dict[str, Any]]:
+        mounts = self.tips.mounts()
+        resolved = {ref: self._observation_mount(ref) for ref in mounts}
+        # A ledger entry that names no mount we can resolve could be either
+        # mount's tip, so a mount without its own entry is then unknown, not empty.
+        absent = None if any(m is None for m in resolved.values()) else False
+        out: Dict[str, Dict[str, Any]] = {mount: {"has_tip": absent} for mount in _OBSERVATION_MOUNTS}
+        for ref, mount_state in mounts.items():
+            mount = resolved[ref]
+            if mount is None:
+                continue
+            out[mount] = {
+                "has_tip": True,
+                "rack": mount_state.rack,
+                "well": mount_state.well,
+                "uncertain": mount_state.uncertain,
+                "effective_at": mount_state.picked_at,
+            }
+        return out
+
+    def _observed_tip_engine(self) -> Dict[str, Dict[str, Any]]:
+        if self.transport != "http":
+            return {}
+        pipettes = (self.last_snapshot or {}).get("pipettes") or {}
+        out: Dict[str, Dict[str, Any]] = {}
+        for mount in _OBSERVATION_MOUNTS:
+            entry = pipettes.get(mount)
+            if isinstance(entry, dict) and isinstance(entry.get("has_tip"), bool):
+                out[mount] = {"has_tip": entry["has_tip"], "acquired_at": self._last_snapshot_at}
+        return out
+
+    def _inventory_revisions(self) -> Dict[str, str]:
+        """The same revisions /status publishes, from the same payload shapes."""
+        plate = self.plates.get()
+        return _revisions_of(
+            tip_racks=self.tips.summary(),
+            mounted_tips={pip: dict(info) for pip, info in self._mounted_tips.items()},
+            deck=self._build_deck_state().model_dump(mode="json"),
+            loaded_plate=plate.model_dump(mode="json") if plate else None,
+        )
+
+    def _refresh_calibration(self) -> None:
+        """Read calibration metadata on file (3 GETs, no motion). Probe thread only.
+
+        Runs at each new session and then every _OT2_CALIBRATION_READ_INTERVAL.
+        It describes what the robot has saved, not the geometry a sample used.
+        """
+        if self.dry_run or not self._calibration_enabled:
+            return
+        base = self._probe_base_url()
+        if base is None:
+            return
+        now = time.monotonic()
+        generation = self.observations.session_generation
+        if (
+            self._calibration_session == generation
+            and self._calibration_read_monotonic is not None
+            and now - self._calibration_read_monotonic < _OT2_CALIBRATION_READ_INTERVAL
+        ):
+            return
+        self._calibration_read_monotonic = now
+        self._calibration_session = generation
+        def deck_of(body: Dict[str, Any]) -> Dict[str, Any]:
+            cal = body["deckCalibration"]
+            data = cal.get("data") or {}
+            return {
+                "status": cal.get("status"),
+                "last_modified": data.get("lastModified"),
+                "source": data.get("source"),
+                "marked_bad": (data.get("status") or {}).get("markedBad"),
+            }
+
+        def offsets_of(body: Dict[str, Any]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "pipette_serial": d.get("pipette"),
+                    "mount": d.get("mount"),
+                    "tip_rack_uri": d.get("tiprackUri"),
+                    "last_modified": d.get("lastModified"),
+                    "source": d.get("source"),
+                    "marked_bad": (d.get("status") or {}).get("markedBad"),
+                }
+                for d in body["data"]
+            ]
+
+        def tips_of(body: Dict[str, Any]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "pipette_serial": d.get("pipette"),
+                    "tip_rack_hash": d.get("tiprack"),
+                    "tip_rack_uri": d.get("uri"),
+                    "tip_length_mm": d.get("tipLength"),
+                    "last_modified": d.get("lastModified"),
+                    "source": d.get("source"),
+                    "marked_bad": (d.get("status") or {}).get("markedBad"),
+                }
+                for d in body["data"]
+            ]
+
+        values: Dict[str, Any] = {"deck": None, "pipette_offsets": None, "tip_lengths": None}
+        errors: Dict[str, str] = {}
+        for key, path, parse in (
+            ("deck", "/calibration/status", deck_of),
+            ("pipette_offsets", "/calibration/pipette_offset", offsets_of),
+            ("tip_lengths", "/calibration/tip_length", tips_of),
+        ):
+            try:
+                resp = requests.get(base + path, headers=_OPENTRONS_HTTP_HEADERS, timeout=_OT2_HTTP_TIMEOUT)
+                resp.raise_for_status()
+                values[key] = parse(resp.json())
+            except Exception as exc:
+                errors[key] = f"{type(exc).__name__}: {exc}"[:200]
+        deck, offsets, tips = values["deck"], values["pipette_offsets"], values["tip_lengths"]
+        self._calibration = {
+            "enabled": True,
+            # Only a complete read yields a revision; a partial one is unknown,
+            # so a failed request never looks like a recalibration.
+            "revision": None if errors else _digest({"deck": deck, "offsets": offsets, "tips": tips}),
+            "read_at": datetime.now(timezone.utc),
+            "errors": errors,
+            "deck": deck,
+            "pipette_offsets": offsets,
+            "tip_lengths": tips,
+        }
 
     def _build_deck_state(self):
         """Merge the cached deck sources into a normalized DeckState.
@@ -3870,8 +4255,17 @@ class OT2Service:
             self.state = OT2ServiceState.BUSY
         self._sync_activity()  # exact span start (§2.3): the command is in flight
         started = time.monotonic()
+        # The SSH transport has no command funnel; observe at this boundary.
+        ssh_ticket = (
+            self._observe_safely(
+                lambda: self.observations.ssh_action(name, motion=name not in _SSH_NON_MOTION_ACTIONS)
+            )
+            if self.transport != "http" else None
+        )
+        ssh_ok = False
         try:
             func()
+            ssh_ok = True
             with self._state_lock:
                 if self._stop_latched:
                     raise UnknownOutcomeError("stop interrupted the command; inspect outcome")
@@ -3924,6 +4318,8 @@ class OT2Service:
             self._emit_control_action(name, "failed", started, str(exc))
             raise
         finally:
+            if ssh_ticket is not None:
+                self._observe_safely(lambda: self.observations.ssh_action_done(ssh_ticket, succeeded=ssh_ok))
             with self._state_lock:
                 if not self._stop_latched and self.state == OT2ServiceState.BUSY:
                     self.state = previous_state

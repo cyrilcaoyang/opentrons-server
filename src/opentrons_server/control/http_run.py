@@ -23,12 +23,15 @@ Every request/response uses the ``{"data": {...}}`` envelope and carries the
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # Off-deck location literal (confirmed: bare JSON string, not an object).
 OFF_DECK = "offDeck"
@@ -663,6 +666,11 @@ class RunEngineClient:
         # not confirmed. See ``_track_location``.
         self.engine_well: Optional[Tuple[str, str]] = None
         self.engine_well_known = False
+        # Optional ObservationCache (gateway/observations.py): told about every
+        # command before it is sent and after its outcome is decided. It can
+        # never change a command's result; its own failure is logged and marks
+        # observations degraded.
+        self.observer: Any = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -764,6 +772,7 @@ class RunEngineClient:
             read_timeout = effective_ms / 1000.0 + 5.0
 
         body = {"data": {"commandType": command_type, "params": params, "intent": intent}}
+        ticket = self._observe(lambda: self.observer.pre_send(command_type, params))
         try:
             result = self._request(
                 "POST",
@@ -774,8 +783,17 @@ class RunEngineClient:
             )
         except BaseException:
             self._track_location(command_type, params, succeeded=False)
+            self._observe_outcome(ticket, "transport_unknown", None)
             raise
         self._track_location(command_type, params, succeeded=result.get("status") == "succeeded")
+        status = result.get("status")
+        if self._stop_requested.is_set():
+            outcome = "interrupted"
+        elif status in ("succeeded", "failed"):
+            outcome = status
+        else:
+            outcome = "not_completed"
+        self._observe_outcome(ticket, outcome, result)
         if self._stop_requested.is_set():
             raise OSError("stop requested during command; inspect its outcome")
         status = result.get("status")
@@ -787,6 +805,24 @@ class RunEngineClient:
         if wait and status != "succeeded":
             raise CommandNotCompleted(result, timeout_ms=effective_ms)
         return result
+
+    def _observe(self, call: Any) -> Any:
+        if self.observer is None:
+            return None
+        try:
+            return call()
+        except Exception as exc:  # observation must never change a command's outcome
+            logger.exception("observation hook failed")
+            try:
+                self.observer.mark_degraded(f"observation hook failed: {type(exc).__name__}: {exc}")
+            except Exception:
+                logger.exception("could not mark observations degraded")
+            return None
+
+    def _observe_outcome(self, ticket: Any, outcome: str, result: Optional[Dict[str, Any]]) -> None:
+        if ticket is None:
+            return
+        self._observe(lambda: self.observer.outcome(ticket, outcome, result))
 
     def _track_location(self, command_type: str, params: Dict[str, Any], *, succeeded: bool) -> None:
         """Update the current-location mirror after posting one command.

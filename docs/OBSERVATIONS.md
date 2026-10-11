@@ -1,6 +1,9 @@
 # Observations for external followers
 
-**Status: design, not implemented (2026-10-11).** Requested by the digital-twin
+**Status: Phase 1 implemented (2026-10-11), not yet deployed; Phase 2 is
+design only.** Code: `gateway/observations.py`, `GET /observations`;
+fixtures: `tests/fixtures/observations/` (§8.2); Phase 2 examples:
+`docs/observations_examples/phase2_events_draft.json` (hand-written draft). Requested by the digital-twin
 team (Astra). Their twin targets **HTE** (`ot2_hte`: left `p300_multi_gen2`,
 right `p1000_single_gen2`); Complexation is for development and motion
 acceptance (§8.1). Phase 1 is the
@@ -157,8 +160,10 @@ not from the package. Paths below are relative to the `opentrons` package.
 **Hooks in `RunEngineClient.execute`.** It is the single funnel every HTTP
 command passes through. Two hooks, not one:
 
-- **Pre-send**, before any I/O: assign the command `key` (the gateway
-  `move_id`), capture plan context (plan id, step, action), and, unless the
+- **Pre-send**, before any I/O: assign a gateway `move_id` (Phase 1 keeps
+  it gateway-side; sending it to the robot as the command `key` waits until
+  that is validated on Complexation, so a wrong field can never stop
+  commands), capture plan context (plan id, step, action), and, unless the
   command is on the explicit non-motion list (§4.3), advance the motion epoch
   and mark both mounts' positions `superseded` with reason `move_in_flight`.
 - **Outcome**, on every exit path: `succeeded`, `failed`, `not_completed`
@@ -167,9 +172,22 @@ command passes through. Two hooks, not one:
   during the command). Only `succeeded` can publish an endpoint, and only for
   terminal commands. Every other outcome leaves the pose unknown, and
   `transport_unknown` or `interrupted` also leaves the motion outcome unknown.
-  The hook runs after the outcome is decided and must not change it: a failure
-  inside observation code is logged and marks observations `degraded`, never
-  replaces the command's result or exception.
+  The hook runs after the outcome is decided and must not change it. A
+  failure anywhere in observation code (these hooks, or any service-side
+  observation call, each contained by `_observe_safely`) is logged and
+  *degrades* observations: every position becomes `invalid`
+  (`observation_degraded`), motion `motion_unknown`, and nothing is committed
+  until the next session. It never replaces a command's result or exception,
+  and a stop invalidates observations only after its physical stop attempt.
+- **Stale outcomes:** an outcome for a command during which anything
+  invalidated observations (a session change, reachability loss, an external
+  run, an instrument change, degradation, a stop) is kept as `last_command`
+  with `stale: true` and changes nothing else: no tip geometry, mappings,
+  location, clock samples or motion state.
+- **Stops:** the stop latch blocks every commit and outcome at once; while a
+  stop is under way, published positions read `superseded` /
+  `stop_in_progress`, and the session is invalidated after the physical stop
+  attempt.
 
 **SSH.** The REPL transport has no command funnel. At the `_run_action`
 boundary, before any SSH action that can move, the service does what the HTTP
@@ -201,13 +219,16 @@ carried-forward instrument list counts as last-known, not a fresh read.
 - `validity_generation`: increments whenever positions are invalidated or
   superseded by anything other than a command of our own: reachability lost,
   external run seen, instrument changed, session events.
-- `observation_seq`: increments whenever the published snapshot changes, and
-  only then. Equal `boot_id` and `observation_seq` mean identical content,
-  apart from `response_generated_at`.
+- `observation_seq`: increments when a response's content differs from the
+  previous response's, and only then (implemented as a content digest).
+  Equal `boot_id` and `observation_seq` mean identical content, apart from
+  `response_generated_at`.
 - `qualification`: `hardware`, `simulation` or `dry_run`, at envelope level so
-  every component inherits it. `simulation` only when the robot-server
-  reports a simulating run, not from configured intent alone
-  (`control/http_control.py:209`).
+  every component inherits it, with `qualification_basis`: `configured` (dry
+  run; SSH, whose simulation flag the gateway itself applies) or
+  `configured_robot_url` (HTTP: the robot-server decides and does not say
+  whether it simulates, `control/http_control.py:209`; reported `hardware`
+  because the gateway is configured with a real robot's address).
 - `degraded`: true with a reason when observation processing itself failed.
 
 ### 4.2 Common provenance
@@ -268,8 +289,10 @@ acquisition tokens it was committed under (`session_generation`,
   `move_in_flight`, `this_mount_moved`, `other_mount_moved`, `external_run`.
   Stays visible as last-known, with the superseding `move_id`.
 - `invalid`, `xyz_mm` null: `move_failed`, `pose_unknown_after_command`
-  (pickup, drop, unlisted, non-success outcomes), `session_lost`,
-  `robot_unreachable`, `instrument_changed`, `geometry_changed`.
+  (pickup, drop, unlisted, non-success outcomes), `read_failed` (a position
+  read that failed cannot confirm the earlier value), `session_lost`,
+  `robot_unreachable`, `instrument_changed`, `instrument_removed`,
+  `observation_degraded`. `superseded` also has `stop_in_progress`.
 - `unavailable`, `xyz_mm` null: `not_acquired`, `instrument_not_loaded`,
   `instrument_absent`, `instrument_unknown`, `dry_run`.
 
@@ -296,12 +319,15 @@ at the time, the instrument and its nozzle layout, and tip state:
   layout is known to be full and the centring is known. Otherwise null, and
   conversion is not allowed.
 
-`RunEngineClient`'s location mirror is deliberately conservative: it may stay
-"unconfirmed" or keep an old well where the engine has moved on, because that
-errs toward refusing a jog. For observations that is not good enough to label
-coordinates, so any position whose centring the mirror cannot confirm gets
-`horizontal: unknown`. A command endpoint takes its reference from the
-command's own target labware, not from the mirror afterwards.
+`RunEngineClient`'s location mirror is deliberately conservative the other
+way: it may keep an old well where the engine has moved on, because that errs
+toward refusing a jog. Observations therefore track the engine's current
+location themselves, strictly: it is certain only after an outcome that
+settles it (a succeeded well-addressed command, or a succeeded `home` /
+coordinate / addressable-area move), and any motion command that fails, loses
+its reply or has an unlisted effect makes it uncertain. A read taken while it
+is uncertain gets `horizontal: unknown`. A command endpoint takes its
+reference from the command's own target labware.
 
 ### 4.6 Instruments, tips and geometry
 
@@ -337,27 +363,30 @@ r_c − g_r ≤ offset ≤ r_s − g_s
 ```
 
 Published as `robot_offset_s: {min, max, width, samples, from_command,
-measured_at, resolution_s}`. `width = max − min` is the uncertainty: the true
+measured_at, resolution_s, drift_ppm}`. `width = max − min` is the uncertainty: the true
 offset lies in `[min, max]`, with no preferred point inside it. `measured_at`
 (gateway clock) is when the latest contributing command completed; `samples`
 is how many commands contributed. The interval is the intersection of the bounds from the commands of the last 10 minutes within one
 session generation (at most 50), widened by the robot's timestamp resolution
-and by an allowed drift of 50 ppm of each bound's age. It expires when the
+and by 50 ppm drift for each sample's age *at `measured_at`*. The interval
+holds at `measured_at`; a client widens it by `drift_ppm × 1e-6 × age` itself,
+so repeated reads of unchanged state stay identical. It expires when the
 session generation changes or when bounds become inconsistent (a clock jump).
 No midpoint is published as if latency were symmetric. Gateway-side durations
 use the monotonic clock.
 
 ### 4.8 Inventory and run
 
-- **Revisions** on the tip ledger, deck state and loaded plate, scoped by
-  `boot_id`, bumped on every change they summarise, including deck changes
+- **Revisions** on the tip ledger, mounted tips, deck state and loaded plate:
+  opaque content digests, so any change they summarise changes them, including deck changes
   observed from the run. `/status` carries the same revisions
   (`details.revisions`), so a client that fetches `/status` after seeing a new
   revision can check it got that revision or later, and retry if not.
 - **Run**: plan context captured at submission time (`plans.py` sets progress
   before invoking a step, `plans.py:708`); the gateway's run id; other runs
-  from the probe with ids and statuses. `external_run_active` is `unknown`
-  when the probe's runs request failed.
+  from the probe (`external_run_ids`). `external_run_active` is `null` when the
+  probe's runs request failed. An external run found by the probe mid-session
+  supersedes positions and blocks commits, the same as one found at boot.
 
 ### 4.9 Null semantics
 
@@ -390,8 +419,10 @@ zero or default.
 | session created, lost, shut down, stopped, rebuilt | `session_generation` +1; positions `invalid` (`session_lost`) |
 | robot unreachable | positions `invalid` (`robot_unreachable`); motion `motion_unknown` |
 | external run seen | positions `superseded` (`external_run`) |
-| instrument serial changes on a mount | that mount `invalid` (`instrument_changed`) |
-| tip pickup or drop | that mount's earlier positions `invalid` (`geometry_changed`) |
+| instrument serial changes on a mount | that mount `invalid` (`instrument_changed`); tip geometry unknown |
+| instrument absent from a fresh instruments read | that mount `invalid` (`instrument_removed`); reattaching never revives the old value |
+| tip pickup or drop | that mount's pose unknown; a failed or unconfirmed one also makes its vertical reference and tip length unknown |
+| robot unreachable, external run, degraded | tip geometry unknown on both mounts as well |
 | calibration metadata changes | published; positions unaffected until the session is re-established |
 
 Values return only through a new terminal command or read.
@@ -540,6 +571,15 @@ session generation; the clock bounds follow §4.7.
   mappings against what it sees. The only robot traffic the feature adds is
   the calibration-metadata read (3 GETs, session start then every 10 min),
   agreed for both robots on 2026-10-11; a per-gateway setting turns it off.
+
+### 8.2 Fixture files
+
+Generated by `tests/unit/test_observations.py` through the real hooks (a fake
+robot behind `RunEngineClient._request`), one file per configuration and case,
+each a sequence of `{after, observation}` steps; regenerate with
+`OBSERVATION_FIXTURES_REGEN=1`. Serials in them are placeholders. Settings:
+`OT2_CALIBRATION_READ=0` turns the calibration read off;
+`OT2_CALIBRATION_READ_INTERVAL` (seconds, default 600) sets its cadence.
 
 ## 9. Lab contract alignment
 

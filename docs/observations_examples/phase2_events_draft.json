@@ -1,0 +1,87 @@
+{
+  "status": "DRAFT for review: hand-written to illustrate docs/OBSERVATIONS.md section 7. Not produced by any code; field names may change.",
+  "config": "hte (left p300_multi_gen2, right p1000_single_gen2)",
+  "examples": [
+    {
+      "case": "protocol move started then completed, one move_id",
+      "response": {
+        "boot_id": "boot-example-1",
+        "oldest_seq": 1,
+        "latest_seq": 2,
+        "gap": false,
+        "observation_seq": 41,
+        "events": [
+          {
+            "event_seq": 1,
+            "move_id": "cmd-7f3a",
+            "command_id": "cmd-7f3a",
+            "robot_run_id": "run-protocol-1",
+            "origin": "external_run",
+            "mount": "left",
+            "command_type": "moveToWell",
+            "state": "started",
+            "target": {"labware_id": "reservoir", "well": "A1"},
+            "reference_point": {"horizontal": "nozzle_set_y_center", "vertical": "tip_end", "centered_on_labware": "reservoir", "to_primary_nozzle_mm": {"x": 0.0, "y": 31.5, "z": 0.0}},
+            "started_at": "2026-10-11T12:00:00.251Z",
+            "completed_at": null,
+            "robot_clock": true,
+            "observed_at": "2026-10-11T12:00:00.900Z",
+            "command_endpoint": null
+          },
+          {
+            "event_seq": 2,
+            "move_id": "cmd-7f3a",
+            "command_id": "cmd-7f3a",
+            "robot_run_id": "run-protocol-1",
+            "origin": "external_run",
+            "mount": "left",
+            "command_type": "moveToWell",
+            "state": "completed",
+            "target": {"labware_id": "reservoir", "well": "A1"},
+            "reference_point": {"horizontal": "nozzle_set_y_center", "vertical": "tip_end", "centered_on_labware": "reservoir", "to_primary_nozzle_mm": {"x": 0.0, "y": 31.5, "z": 0.0}},
+            "started_at": "2026-10-11T12:00:00.251Z",
+            "completed_at": "2026-10-11T12:00:01.749Z",
+            "robot_clock": true,
+            "observed_at": "2026-10-11T12:00:02.010Z",
+            "command_endpoint": {"x": 14.4, "y": 42.6, "z": 40.0}
+          }
+        ]
+      }
+    },
+    {
+      "case": "failed command",
+      "event": {"event_seq": 3, "move_id": "cmd-81c2", "mount": "right", "command_type": "moveToWell", "state": "failed", "error_type": "PipetteNotHomedError", "target": {"labware_id": "plate", "well": "H12"}, "started_at": "2026-10-11T12:00:03.100Z", "completed_at": "2026-10-11T12:00:03.180Z", "command_endpoint": null}
+    },
+    {
+      "case": "command cut short by a stop (engine status failed + RunStoppedError, published as cancelled)",
+      "event": {"event_seq": 4, "move_id": "cmd-82aa", "mount": "left", "command_type": "aspirate", "state": "cancelled", "error_type": "RunStoppedError", "target": {"labware_id": "plate", "well": "A1"}, "started_at": "2026-10-11T12:00:04.000Z", "completed_at": "2026-10-11T12:00:04.420Z", "command_endpoint": null}
+    },
+    {
+      "case": "legacy protocol (API level < 2.14): move_to appears only as text; target unknown",
+      "event": {"event_seq": 5, "move_id": "cmd-90b1", "mount": null, "command_type": "custom", "kind": "legacy_text", "text": "Moving to (100.0, 150.0, 120.0)", "state": "completed", "target": null, "reference_point": null, "started_at": "2026-10-11T12:00:05.000Z", "completed_at": "2026-10-11T12:00:05.600Z", "command_endpoint": null}
+    },
+    {
+      "case": "legacy structured command: its (0, 0, 0) result is never published",
+      "event": {"event_seq": 6, "move_id": "cmd-90b2", "mount": "right", "command_type": "aspirate", "legacy_mapped": true, "state": "completed", "target": {"labware_id": "plate", "well": "B1"}, "started_at": "2026-10-11T12:00:06.000Z", "completed_at": "2026-10-11T12:00:06.500Z", "command_endpoint": null}
+    },
+    {
+      "case": "tip pickup: completed, but no terminal endpoint (result is the approach point)",
+      "event": {"event_seq": 7, "move_id": "cmd-91c0", "mount": "right", "command_type": "pickUpTip", "state": "completed", "target": {"labware_id": "tips", "well": "A1"}, "tip_length_mm": 51.83, "command_endpoint": null}
+    },
+    {
+      "case": "robot log gap: the run's log shrank or vanished; unfinished commands become outcome_unknown",
+      "events": [
+        {"event_seq": 8, "kind": "log_gap", "robot_run_id": "run-protocol-1", "last_index_read": 211, "reason": "run_not_found"},
+        {"event_seq": 9, "move_id": "cmd-92d4", "mount": "left", "command_type": "dispense", "state": "outcome_unknown"}
+      ]
+    },
+    {
+      "case": "client fell behind the ring: resync from /observations, then continue from its event_watermark",
+      "response": {"boot_id": "boot-example-1", "oldest_seq": 5001, "latest_seq": 10000, "gap": true, "events": []}
+    },
+    {
+      "case": "gateway restarted during an external run: new boot_id, current state of each command re-emitted once",
+      "event": {"event_seq": 1, "boot_id": "boot-example-2", "backfill": true, "move_id": "cmd-7f3a", "command_id": "cmd-7f3a", "command_type": "moveToWell", "state": "completed", "completed_at": "2026-10-11T12:00:01.749Z"}
+    }
+  ]
+}

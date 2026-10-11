@@ -22,6 +22,7 @@ Two conventions before the tables:
 | `GET /` | `ProbeResponse` — `{equipment_id, equipment_name, protocol_version}` (`"1.2"`) |
 | `GET /health` | `{"status": "healthy"}` — liveness only, never touches the robot |
 | `GET /status` | the full `EquipmentStatus` envelope — see below |
+| `GET /observations` | `ObservationResponse` — cached pipette positions, tip state, motion and run association for external followers (a digital twin). Never touches the robot or takes the command lock. Positions exist at command boundaries only; each says its `source` (`command_endpoint`, `stored_endpoint`, `driver_step_count`, never feedback — the OT-2 has no encoders), its reference point, its times and whether it is still `current`. `observation_seq` changes only when content does. Schema in `/openapi.json`; design in the repo's `docs/OBSERVATIONS.md`. |
 | `GET /docs/agent` | the JSON equipment guide + generated action catalog. No claim, no hardware I/O, available before startup. |
 | `GET /plans/actions` | `{actions: [{action, idempotent, args_schema}]}` — the proposable catalog, generated from the same models that validate a step |
 | `GET /openapi.json`, `GET /docs`, `GET /redoc` | OpenAPI document, Swagger UI, ReDoc |

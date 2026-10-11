@@ -91,6 +91,7 @@ from .module_access import ModulePlacementForbidden, module_admin
 from .plate_state import PlateStateStore
 from .limits import OutOfEnvelope
 from .service import JogReferenceRefused, OT2Service, UnknownOutcomeError
+from .observations import ObservationResponse
 from .tip_state import TipStateStore, TipUnavailable
 from .plate_report import build_plate_report, render_plate_report_html, render_plate_report_xlsx
 
@@ -546,6 +547,16 @@ def create_app(
     @app.get("/health", response_model=HealthResponse, tags=["spec"])
     def health() -> HealthResponse:
         return HealthResponse()
+
+    @app.get("/observations", response_model=ObservationResponse, tags=["observations"])
+    def observations() -> ObservationResponse:
+        """Side-effect-free observations for external followers (docs/OBSERVATIONS.md).
+
+        Served from the gateway's cache: no robot I/O, no claim, no command
+        lock. Positions exist at command boundaries only and say where they
+        came from; nothing here is position feedback (the OT-2 has no encoders).
+        """
+        return service.observation_snapshot()
 
     @app.get("/status", response_model=EquipmentStatus, tags=["spec"])
     def status(request: Request) -> EquipmentStatus:

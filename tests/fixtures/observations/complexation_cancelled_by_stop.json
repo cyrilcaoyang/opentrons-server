@@ -1,0 +1,200 @@
+{
+  "case": "cancelled_by_stop",
+  "config": "complexation",
+  "description": "A move interrupted by a stop leaves motion and pose unknown.",
+  "steps": [
+    {
+      "after": "a software stop cut the move short: motion unknown, positions invalid",
+      "observation": {
+        "boot_id": "boot-fixture-1",
+        "calibration": {
+          "deck": null,
+          "enabled": true,
+          "errors": {},
+          "pipette_offsets": null,
+          "read_at": null,
+          "revision": null,
+          "tip_lengths": null
+        },
+        "clock": {
+          "gateway": "utc_system",
+          "robot_offset_reason": null,
+          "robot_offset_s": {
+            "drift_ppm": 50.0,
+            "from_command": "cmd-6",
+            "max": 0.251001,
+            "measured_at": "2026-10-11T12:00:03.120000Z",
+            "min": 0.238999,
+            "resolution_s": 1e-06,
+            "samples": 6,
+            "width": 0.012002
+          }
+        },
+        "command_rules": "opentrons-8.7.0",
+        "degraded": null,
+        "equipment_id": "ot2_complexation",
+        "event_watermark": null,
+        "frame": {
+          "applied": [
+            "deck_calibration",
+            "mount_offset",
+            "pipette_offset_calibration",
+            "tip_length_when_attached"
+          ],
+          "axes": {
+            "x": "right",
+            "y": "back",
+            "z": "up"
+          },
+          "id": "ot2_deck",
+          "not_applied": [
+            "labware_offsets"
+          ],
+          "origin": "opentrons_deck_coordinates",
+          "units": "mm"
+        },
+        "inventory": {
+          "deck_revision": "sha256:1259add01ff686ec",
+          "details": "/status",
+          "loaded_plate_revision": "sha256:74234e98afe7498f",
+          "mounted_tips_revision": "sha256:44136fa355b3678a",
+          "tip_racks_revision": "sha256:44136fa355b3678a"
+        },
+        "motion": {
+          "epoch": 2,
+          "in_flight": null,
+          "last_command": {
+            "command_id": "cmd-7",
+            "command_type": "moveToWell",
+            "completed_at": "2026-10-11T12:00:03.879000Z",
+            "completed_at_clock": "robot",
+            "error_type": "RunStoppedError",
+            "motion": true,
+            "mount": "right",
+            "move_id": "gw-0007",
+            "observed_at": "2026-10-11T12:00:03.640000Z",
+            "outcome": "interrupted",
+            "stale": false,
+            "started_at": "2026-10-11T12:00:03.381000Z",
+            "submitted_at": "2026-10-11T12:00:03.130000Z"
+          },
+          "reason": "interrupted",
+          "state": "motion_unknown"
+        },
+        "mounts": {
+          "left": {
+            "instrument": {
+              "acquired_at": "2026-10-11T12:00:00Z",
+              "channels": 1,
+              "loaded_in_session": true,
+              "model": "p300_single_v2.1",
+              "name": "p300_single_gen2",
+              "serial": "EXAMPLE-LEFT-P300S",
+              "source": "robot_instruments",
+              "valid": "current"
+            },
+            "position": {
+              "acquired_at": null,
+              "command_id": null,
+              "effective_at": null,
+              "effective_at_clock": null,
+              "epoch": null,
+              "geometry_revision": null,
+              "move_id": null,
+              "reason": "not_acquired",
+              "reference_point": null,
+              "session_generation": null,
+              "source": null,
+              "superseded_by_move_id": null,
+              "valid": "unavailable",
+              "validity_generation": null,
+              "xyz_mm": null
+            },
+            "tip": {
+              "engine": {
+                "acquired_at": null,
+                "has_tip": null,
+                "source": "run_engine_state"
+              },
+              "ledger": {
+                "effective_at": null,
+                "has_tip": false,
+                "rack": null,
+                "source": "service_accounting",
+                "uncertain": null,
+                "well": null
+              },
+              "tip_length": null
+            }
+          },
+          "right": {
+            "instrument": {
+              "acquired_at": "2026-10-11T12:00:00Z",
+              "channels": 8,
+              "loaded_in_session": true,
+              "model": "p20_multi_v2.0",
+              "name": "p20_multi_gen2",
+              "serial": "EXAMPLE-RIGHT-P20M",
+              "source": "robot_instruments",
+              "valid": "current"
+            },
+            "position": {
+              "acquired_at": null,
+              "command_id": null,
+              "effective_at": null,
+              "effective_at_clock": null,
+              "epoch": null,
+              "geometry_revision": null,
+              "move_id": null,
+              "reason": "pose_unknown_after_command",
+              "reference_point": null,
+              "session_generation": null,
+              "source": null,
+              "superseded_by_move_id": null,
+              "valid": "invalid",
+              "validity_generation": null,
+              "xyz_mm": null
+            },
+            "tip": {
+              "engine": {
+                "acquired_at": null,
+                "has_tip": null,
+                "source": "run_engine_state"
+              },
+              "ledger": {
+                "effective_at": null,
+                "has_tip": false,
+                "rack": null,
+                "source": "service_accounting",
+                "uncertain": null,
+                "well": null
+              },
+              "tip_length": null
+            }
+          }
+        },
+        "observation_seq": 1,
+        "qualification": "hardware",
+        "qualification_basis": "configured",
+        "response_generated_at": "2026-10-11T12:00:03.650000Z",
+        "robot": {
+          "last_seen_at": "2026-10-11T12:00:00Z",
+          "reachable": true,
+          "robot_run_id": "run-fixture",
+          "session_generation": 1,
+          "transport": "http"
+        },
+        "run": {
+          "external_run_active": false,
+          "external_run_ids": null,
+          "plan_action": null,
+          "plan_id": null,
+          "plan_step": null,
+          "robot_run_id": "run-fixture"
+        },
+        "schema_version": 1,
+        "validity_generation": 0
+      }
+    }
+  ]
+}
