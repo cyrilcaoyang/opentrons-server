@@ -14,6 +14,10 @@
     anything it cannot classify (service.py `_rack_fits_pipette`). The head is
     then sent into a plate expecting tips.
 
+    Since 2026-10-11 the gateway retires these itself whenever the deck is
+    declared (service.py `_retire_racks_off_deck`). This script remains for
+    records left from before that, and for drift no declaration has touched.
+
     This finds every tracked rack whose slot disagrees with the deck -- nothing
     there, or something there that is not a tip rack -- and marks all of its
     wells `empty` via /control/tips/mark, so `next_available` finds nothing and

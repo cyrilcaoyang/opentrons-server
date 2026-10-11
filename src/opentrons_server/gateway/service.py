@@ -79,6 +79,7 @@ from .labware import standard_definition
 from .limits import OutOfEnvelope, check_volume
 from .plate_state import PlateStateStore
 from .tip_state import (
+    _FRESH_STATUSES,
     EMPTY,
     ON_PIPETTE,
     TipStateStore,
@@ -3853,7 +3854,9 @@ class OT2Service:
         Declaring a tip rack also starts tracking it: the operator saying "slot
         4 holds a tip rack" is exactly the fact the tracker needs, and requiring
         a separate /control/setup for it was why a declared rack never appeared
-        in the panel.
+        in the panel. The converse holds too: a declaration that leaves a
+        tracked slot without a tip rack retires that rack's record
+        (``_retire_racks_off_deck``).
         """
 
         if not self._command_lock.acquire(blocking=False):
@@ -3900,9 +3903,44 @@ class OT2Service:
                     raise ValueError(f"assembly in slot {slot} is loaded; end the session before changing the stack")
             result = self.decks.declare(mapping)
             self.register_tiprack_slots()
+            self._retire_racks_off_deck()
             return result
         finally:
             self._command_lock.release()
+
+    def _retire_racks_off_deck(self) -> List[str]:
+        """Stop tracking racks whose slot no longer holds a tip rack.
+
+        Registration only ever added racks, so clearing a slot or declaring a
+        plate where a rack was left the old record behind, tips and all, and
+        an unqualified pick_up_tip could still choose it: the tip-size check
+        passes any labware name it cannot classify, so the head could be sent
+        into a plate looking for tips. A rack stays tracked while any deck
+        source (run, REPL or declaration) still shows a tip rack in its slot.
+
+        A tip already on a head keeps its mount record: it is physically
+        there, and every consumer of ``mount.rack`` checks ``has_rack`` first.
+        Clearing the whole deck to re-declare it therefore also resets racks
+        that stay: a re-declared rack starts fresh and needs ``tips/mark``.
+        """
+        deck = self._build_deck_state()
+        retired: List[str] = []
+        for slot, rack in self.tips.racks().items():
+            deck_slot = deck.slots.get(str(slot))
+            labware = deck_slot.labware if deck_slot is not None else None
+            if labware is not None and labware.is_tiprack:
+                continue
+            fresh = sum(1 for status in rack.tips.values() if status.strip().lower() in _FRESH_STATUSES)
+            self.tips.remove_rack(slot)
+            retired.append(slot)
+            logger.info("tip rack record retired: slot %s no longer holds a tip rack", slot)
+            self._emit_tip_event(
+                "tip_rack_retired",
+                slot,
+                now_declared=labware.load_name if labware is not None else None,
+                tips_fresh_when_retired=fresh,
+            )
+        return retired
 
     def clear_deck(self) -> None:
         self.declare_deck({})

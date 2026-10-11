@@ -1294,6 +1294,15 @@ transports:
   in an earlier session is tracked again without the operator re-declaring a
   slot they already declared. All three are non-destructive: a slot already
   tracked keeps its used-tip statuses.
+- **A declaration also retires racks it takes off the deck** (since
+  2026-10-11). After `/control/deck/declare`, any tracked rack whose slot no
+  longer shows a tip rack from any deck source (run, REPL or declaration) is
+  removed, with a `tip_rack_retired` history event. Before this, clearing a
+  slot or declaring a plate there left the old record with its tips, and an
+  unqualified pick could choose it. A tip already on a head keeps its mount
+  record. Clearing the whole deck to re-declare it resets the racks that come
+  back: a re-declared rack starts fresh, so mark used tips with
+  `/control/tips/mark`. A rack moved to another slot also starts fresh there.
   Protocol calls still address labware by **nickname** — only the tracker uses
   slots, and the two are resolved through the session recipe.
 - `/control/pick-up-tip` validates the pick: fresh tips are free; a

@@ -1205,3 +1205,48 @@ def test_rack_reset_releases_mounts_from_that_rack(service):
     assert service.tips.summary()["4"]["available"] == 96
     # The old tip may still be on the head, but it has no origin to return to.
     assert "p300" not in service._mounted_tips
+
+
+# --- a declaration retires racks it takes off the deck -----------------------
+
+
+def test_declaring_a_plate_where_a_rack_was_retires_the_rack(service):
+    """Registration only ever added racks, so a slot re-declared as a plate kept
+    its rack record, and an auto-pick could still send the head into the plate."""
+    service.declare_deck({"6": "opentrons_96_tiprack_300ul", "9": "opentrons_96_tiprack_300ul"})
+    assert set(service.tips.racks()) == {"6", "9"}
+    service.events.emit = Mock()
+    service.declare_deck({"9": "agilent_96_700ul_square_flat"})
+    assert service.tips.racks() == {}
+    retired = sorted(call.kwargs["rack"] for call in service.events.emit.call_args_list
+                     if call.args[0] == "tip_rack_retired")
+    assert retired == ["6", "9"]
+    assert "6" not in service.get_status().details["tip_racks"]
+
+
+def test_a_rack_that_stays_declared_keeps_its_tip_map(service):
+    service.declare_deck({"7": "opentrons_96_tiprack_300ul", "8": "opentrons_96_tiprack_300ul"})
+    service.tips.set_statuses("7", ["A1", "B1"], "empty")
+    service.declare_deck({"7": "opentrons_96_tiprack_300ul"})
+    assert set(service.tips.racks()) == {"7"}
+    assert service.tips.racks()["7"].tips["A1"] == "empty"
+
+
+def test_retiring_a_rack_keeps_the_tip_still_on_a_head(service):
+    from datetime import datetime, timezone
+    from opentrons_server.gateway.models import TipMount
+
+    service.declare_deck({"7": "opentrons_96_tiprack_300ul"})
+    service.tips.set_mount(TipMount(pipette="left", rack="7", well="A1", wells=["A1"],
+                                    picked_at=datetime.now(timezone.utc)))
+    service.declare_deck({})
+    assert service.tips.racks() == {}
+    assert service.tips.get_mount("left") is not None  # the tip is physically there
+
+
+def test_a_rack_loaded_in_the_session_is_not_retired_by_a_declaration(service):
+    service.setup_protocol(_recipe_without_channels())
+    loaded = set(service.tips.racks())
+    assert loaded
+    service.declare_deck({})
+    assert set(service.tips.racks()) == loaded

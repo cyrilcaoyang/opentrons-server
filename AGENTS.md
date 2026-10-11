@@ -80,7 +80,7 @@ lab-skills / dashboard / agents          this repo                        robot
   represent it as the `fixedTrash` addressable area, and loading labware into
   slot 12 fails. Explicit rack/well destinations are for returning tips.
 - **Tests: use `.venv.test`, not `.venv`.**
-  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 1017 tests
+  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 1021 tests
   (2026-10-11), no hardware, about five and a half minutes; run it in the
   background, since a five-minute timeout cuts it off. `.venv/` is the
   **running services'** environment; syncing or installing into it can disturb a live gateway (§4).
@@ -100,7 +100,7 @@ lab-skills / dashboard / agents          this repo                        robot
   | `ot2-preflight.ps1` | one-screen state of both gateways before a session; flags a tip left on a head and whether the volume guard is actually live | nothing — read-only |
   | `ot2-tip-lifecycle-check.ps1` | picks one tip and returns it on Complexation, printing the rack at each step; plan-and-stop unless `-Run`; homes before releasing | resolves its own API key; **actuates** |
   | `ot2-enable-assistant.ps1` | toggles `OT2_ASSISTANT_ENABLED` for one gateway **without destroying the rest of its service env** | elevation (RDP session) |
-  | `ot2-forget-stale-racks.ps1` | retires tracked tip racks whose slot the deck says holds no rack (a moved rack leaves one, and auto-pick will still send the head there); marks them empty, releasing any mount they explain; plan-and-stop unless `-Run` | resolves its own API key; metadata only, **no motion** — so unlike the tip check it does not refuse HTE |
+  | `ot2-forget-stale-racks.ps1` | retires tracked tip racks whose slot the deck says holds no rack; marks them empty, releasing any mount they explain; plan-and-stop unless `-Run`. Since 2026-10-11 a deck declaration retires such racks itself, so this is for records left from before that, or drift no declaration has touched yet | resolves its own API key; metadata only, **no motion** — so unlike the tip check it does not refuse HTE |
   | `ot2-set-robot-url.ps1` | repoints one gateway at its robot (`OT2_HTTP_BASE_URL`, optionally `OT2_HOST_ALIAS`) preserving the other 13 env vars, then re-probes and reports whether the robot actually answered — a stale address hides behind a live session and only surfaces on the next restart; plan-and-stop unless `-Run` | `-Run` needs elevation (RDP session); the dry run does not |
 
   Run them by absolute path:
