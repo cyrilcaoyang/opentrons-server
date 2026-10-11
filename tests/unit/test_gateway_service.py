@@ -804,6 +804,42 @@ def test_self_heals_after_a_failed_boot_startup(monkeypatch):
     assert service.last_error is None or service.last_error.code != "startup_failed"
 
 
+def test_a_host_key_refusal_is_never_self_healed(monkeypatch):
+    """A startup refused for an unknown or changed SSH host key meets the same
+    key on every retry, so the self-heal stands off; an explicit startup
+    (after an operator fixes known_hosts) still runs and re-arms it."""
+
+    from opentrons_server.transport import HostKeyVerificationError
+
+    calls = []
+
+    def refused_then_good(**kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise HostKeyVerificationError("SSH host key check failed: changed")
+        return Mock()
+
+    monkeypatch.setattr("opentrons_server.gateway.service.OT2Control", refused_then_good)
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _fake_probe_get(run_active=False)
+    )
+    service = OT2Service(dry_run=False, host_alias="192.168.0.9", password="pw")
+    service.boot_reconnect()
+    assert service.state == OT2ServiceState.ERROR
+    assert service.last_error.code == "startup_failed"
+    assert "host key" in service.last_error.message
+
+    service._last_self_heal_at = 0.0  # outside the retry window
+    service._refresh_identity()
+    assert len(calls) == 1
+    assert service.state == OT2ServiceState.ERROR
+
+    service.startup()
+    assert len(calls) == 2
+    assert service.state == OT2ServiceState.READY
+    assert service._host_key_refused is False
+
+
 def test_a_mid_session_error_is_never_self_healed(monkeypatch):
     """A session that exists and then faults is a human's call (recover via
     the panel or reconcile) — only the no-session startup failure loops."""
@@ -894,6 +930,8 @@ def test_ssh_connect_failure_raises_the_real_reason():
         client.hostname = "ot2cytation"
         client.max_retries = 3
         client.connection_timeout = 10
+        client.host_key_failure = False
+        client.last_error = "TimeoutError: timed out"
 
         with pytest.raises(ConnectionError) as excinfo:
             OT2Control(host_alias="ot2cytation")
@@ -901,6 +939,7 @@ def test_ssh_connect_failure_raises_the_real_reason():
     message = str(excinfo.value)
     assert "ot2cytation" in message
     assert "3 attempts" in message
+    assert "TimeoutError: timed out" in message
     # The old, misleading message must not be what surfaces.
     assert "SSH client is not connected" not in message
 

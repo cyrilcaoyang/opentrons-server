@@ -21,6 +21,31 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WINDOWS_SDL2_HOME = Path("C:/Users/sdl2")
 
 
+class HostKeyVerificationError(paramiko.SSHException):
+    """The robot's SSH host key could not be verified against known_hosts.
+
+    Raised for an unknown host, a changed key, no known_hosts file at all, or
+    an SSH config that sets ``HostKeyAlias`` (unsupported, so refused rather
+    than ignored). Never retried: another attempt meets the same key, and
+    connecting anyway would log in to and drive whatever answered.
+    """
+
+
+class _RejectUnknownHostKey(paramiko.MissingHostKeyPolicy):
+    """Refuse a host absent from known_hosts, naming the key it presented."""
+
+    def __init__(self, known_hosts: List[Path]):
+        self.known_hosts = known_hosts
+
+    def missing_host_key(self, client, hostname, key):
+        files = ", ".join(str(path) for path in self.known_hosts)
+        raise HostKeyVerificationError(
+            f"SSH host key for {hostname!r} ({key.get_name()} {key.fingerprint}) "
+            f"is not in {files}. Verify that fingerprint on the robot, then add "
+            f"it by connecting once with ssh from the account that owns that file"
+        )
+
+
 class SessionState(Enum):
     SHELL = "shell"
     PYTHON = "python"
@@ -52,6 +77,11 @@ class SSHClient:
         self.is_connected = False
         self.session_state = SessionState.UNKNOWN
         self._lock = threading.Lock()
+        self._ssh_config: Dict[str, Any] = {}
+        # Why the last connect() failed, and whether that failure was a host
+        # key one (terminal: not retried by connect() or the command loops).
+        self.last_error: Optional[str] = None
+        self.host_key_failure = False
 
         self._config_host()
 
@@ -60,6 +90,7 @@ class SSHClient:
             raise ValueError("Both hostname and host_alias are None, invalid")
         if self.host_alias:
             ssh_config = self._load_ssh_config()
+            self._ssh_config = ssh_config
             self.hostname = ssh_config["hostname"]
             self.username = ssh_config["user"]
             identity_file = ssh_config["identityfile"]
@@ -128,16 +159,68 @@ class SSHClient:
             return str(self._ssh_home() / value[2:])
         return os.path.expanduser(value)
 
+    def _known_hosts_path(self) -> Path:
+        """The known_hosts file the robot's host key is verified against.
+
+        ``OT2_SSH_KNOWN_HOSTS``, else ``known_hosts`` beside the SSH config and
+        key this client already uses (see :meth:`_ssh_home`). The SSH config's
+        ``UserKnownHostsFile`` is not read; the key is looked up under the
+        hostname actually connected to.
+        """
+        configured = os.getenv("OT2_SSH_KNOWN_HOSTS")
+        if configured:
+            return Path(self._expand_ssh_path(configured))
+        return self._ssh_home() / ".ssh" / "known_hosts"
+
+    def _load_known_hosts(self, client: paramiko.SSHClient) -> List[Path]:
+        """Load known_hosts read-only; raise if it cannot verify this host."""
+        if "hostkeyalias" in self._ssh_config:
+            # Honouring it means trusting another name's key for this address;
+            # ignoring it could trust a different robot recorded here. Refuse.
+            raise HostKeyVerificationError(
+                f"SSH config for {self.host_alias!r} sets HostKeyAlias, which the "
+                "gateway does not support; remove it and record the robot's key "
+                f"under {self.hostname!r}"
+            )
+        path = self._known_hosts_path()
+        if not path.is_file():
+            raise HostKeyVerificationError(
+                f"no known_hosts file at {path}; cannot verify the SSH host key "
+                f"of {self.hostname!r}"
+            )
+        # load_system_host_keys: these entries are never written back.
+        client.load_system_host_keys(str(path))
+        return [path]
+
+    def _drop_connection(self) -> None:
+        """Close a failed or stale connection. Keeps ``session_state`` so a
+        later command can still reconnect into the mode it expects."""
+        if self.session:
+            self.session.close()
+            self.session = None
+        if self.ssh_client:
+            self.ssh_client.close()
+            self.ssh_client = None
+        self.is_connected = False
+
     def connect(self) -> bool:
-        """Establish SSH connection and start in shell mode."""
+        """Establish SSH connection and start in shell mode.
+
+        The robot's host key must already be in known_hosts. An unknown or
+        changed key fails at once without retrying; ``last_error`` and
+        ``host_key_failure`` say why.
+        """
         with self._lock:
+            self.last_error = None
+            self.host_key_failure = False
             for attempt in range(self.max_retries):
                 try:
-                    if self.ssh_client:
-                        self.ssh_client.close()
+                    self._drop_connection()
 
                     self.ssh_client = paramiko.SSHClient()
-                    self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                    known_hosts = self._load_known_hosts(self.ssh_client)
+                    self.ssh_client.set_missing_host_key_policy(
+                        _RejectUnknownHostKey(known_hosts))
 
                     private_key = paramiko.RSAKey.from_private_key_file(
                         self.key_file_path, password=self.password
@@ -162,16 +245,44 @@ class SSHClient:
                     logger.info(f"SSH connection established to {self.hostname} in SHELL mode")
                     return True
 
+                except paramiko.BadHostKeyException as e:
+                    self.last_error = (
+                        f"SSH host key check failed: the key for {e.hostname!r} changed: "
+                        f"it presented {e.key.get_name()} {e.key.fingerprint}, "
+                        f"known_hosts has {e.expected_key.get_name()} "
+                        f"{e.expected_key.fingerprint}"
+                    )
+                    self.host_key_failure = True
+                    logger.error(f"{self.last_error} (not retried)")
+                    self._drop_connection()
+                    return False
+
+                except HostKeyVerificationError as e:
+                    self.last_error = f"SSH host key check failed: {e}"
+                    self.host_key_failure = True
+                    logger.error(f"{self.last_error} (not retried)")
+                    self._drop_connection()
+                    return False
+
                 except Exception as e:
+                    self.last_error = f"{type(e).__name__}: {e}"
                     logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
+                    self._drop_connection()
                     if attempt < self.max_retries - 1:
                         time.sleep(2 ** attempt)
                     else:
                         logger.error(f"Failed to connect after {self.max_retries} attempts")
-                        self.is_connected = False
                         return False
 
             return False
+
+    def _reconnect_or_raise(self) -> bool:
+        """Reconnect inside a command loop; a host key failure ends the loop."""
+        if self.connect():
+            return True
+        if self.host_key_failure:
+            raise HostKeyVerificationError(self.last_error)
+        return False
 
     def _wait_for_shell_prompt(self):
         """Wait for shell prompt (#) to appear."""
@@ -306,12 +417,14 @@ class SSHClient:
             try:
                 if not self.is_connected or not self._is_connection_alive():
                     logger.info("Connection lost, attempting to reconnect...")
-                    if not self.connect():
+                    if not self._reconnect_or_raise():
                         continue
                     self.start_python_session()
 
                 return self._execute_python_command(code, timeout)
 
+            except HostKeyVerificationError:
+                raise
             except (socket.timeout, paramiko.SSHException, OSError) as e:
                 logger.warning(f"Python command execution failed (attempt {attempt + 1}): {e}")
                 self.is_connected = False
@@ -322,7 +435,8 @@ class SSHClient:
                 else:
                     raise Exception(f"Python command failed after {self.max_retries} attempts: {e}")
 
-        raise Exception("Failed to execute Python command after all retry attempts")
+        raise Exception("Failed to execute Python command after all retry attempts"
+                        f" (last connect error: {self.last_error})")
 
     def execute_shell_command(self, command: str, timeout: Optional[int] = None) -> str:
         """Execute shell command in shell session.
@@ -340,11 +454,13 @@ class SSHClient:
             try:
                 if not self.is_connected or not self._is_connection_alive():
                     logger.info("Connection lost, attempting to reconnect...")
-                    if not self.connect():
+                    if not self._reconnect_or_raise():
                         continue
 
                 return self._execute_shell_command(command, timeout)
 
+            except HostKeyVerificationError:
+                raise
             except (socket.timeout, paramiko.SSHException, OSError) as e:
                 logger.warning(f"Shell command execution failed (attempt {attempt + 1}): {e}")
                 self.is_connected = False
@@ -355,7 +471,8 @@ class SSHClient:
                 else:
                     raise Exception(f"Shell command failed after {self.max_retries} attempts: {e}")
 
-        raise Exception("Failed to execute shell command after all retry attempts")
+        raise Exception("Failed to execute shell command after all retry attempts"
+                        f" (last connect error: {self.last_error})")
 
     def _execute_python_command(self, code: str, timeout: int) -> str:
         """Execute a Python command and wait for >>> prompt (handling multi-line code)."""
