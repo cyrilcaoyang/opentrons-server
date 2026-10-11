@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import requests
 from fastapi.testclient import TestClient
 
 from opentrons_server.gateway import service as service_module
@@ -1149,3 +1150,128 @@ def test_explicit_offset_still_beats_the_action_default():
     kwargs = control.get_location_from_labware.call_args.kwargs
     assert kwargs["top"] == -3
     assert kwargs["bottom"] == 0
+
+
+# --- a failed probe sub-request is unknown, never an empty answer -------------
+
+
+class _HTTPErrorResponse:
+    def raise_for_status(self) -> None:
+        raise requests.HTTPError("500 Server Error")
+
+    def json(self) -> dict:
+        return {"errors": [{"detail": "internal"}]}
+
+
+def _probe_failing(*names, how="raise", run_active=False):
+    """``_fake_probe_get`` with the named robot-server reads failing."""
+
+    healthy = _fake_probe_get(run_active=run_active)
+
+    def fake_get(url, **kwargs):
+        if any(url.endswith("/" + name) for name in names):
+            if how == "raise":
+                raise RuntimeError("read timeout")
+            if how == "http_error":
+                return _HTTPErrorResponse()
+            return _FakeResponse({"errors": [{"detail": "no data key"}]})
+        return healthy(url, **kwargs)
+
+    return fake_get
+
+
+@pytest.mark.parametrize("how", ["raise", "http_error", "no_data_list"])
+def test_probe_unreadable_run_list_is_unknown_not_idle(monkeypatch, how):
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _probe_failing("runs", how=how)
+    )
+    probe = OT2Service(dry_run=False, host_alias="192.168.0.9").probe_robot()
+    assert probe["reachable"] is True
+    assert probe["run_active"] is None
+    assert "runs" in probe["probe_errors"]
+    assert "runs_read_at" not in probe
+    # The other reads are independent of the failed one.
+    assert probe["instruments"][0]["name"] == "p300_multi_gen2"
+    assert probe["instruments_read_at"] is not None
+    assert probe["modules"] == []
+
+
+def test_boot_never_starts_a_session_without_reading_the_run_list(monkeypatch):
+    """A reachable robot whose /runs read fails may be running someone else's
+    protocol. Defaulting that to "no run" let boot_reconnect seize it."""
+
+    def must_not_connect(**kwargs):
+        raise AssertionError("must not open a session without reading the run list")
+
+    monkeypatch.setattr("opentrons_server.gateway.service.OT2Control", must_not_connect)
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _probe_failing("runs")
+    )
+    service = OT2Service(dry_run=False, host_alias="192.168.0.9", password="pw")
+    service.boot_reconnect()
+
+    # Neither seized nor stood off as if a run had been seen.
+    assert service.state == OT2ServiceState.REQUIRES_INIT
+    assert service.control is None
+    status = service.get_status()
+    assert "run list" in status.message
+    assert status.details["robot"]["run_active"] is None
+    assert "runs" in status.details["robot"]["probe_errors"]
+
+    # Still unreadable on the next refresh: still deferred, note kept.
+    service._refresh_identity()
+    assert service.state == OT2ServiceState.REQUIRES_INIT
+    assert "run list" in service.get_status().message
+
+    # Readable and idle: the unreachable-boot self-heal takes it from here.
+    monkeypatch.setattr("opentrons_server.gateway.service.OT2Control", lambda **kwargs: Mock())
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _fake_probe_get(run_active=False)
+    )
+    service._refresh_identity()
+    assert service.state == OT2ServiceState.READY
+
+
+def test_external_control_holds_while_run_list_is_unreadable(monkeypatch):
+    def must_not_connect(**kwargs):
+        raise AssertionError("an unreadable run list is not evidence the run ended")
+
+    monkeypatch.setattr("opentrons_server.gateway.service.OT2Control", must_not_connect)
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _fake_probe_get(run_active=True)
+    )
+    service = OT2Service(dry_run=False, host_alias="192.168.0.9")
+    service.boot_reconnect()
+    assert service.state == OT2ServiceState.EXTERNAL_CONTROL
+
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _probe_failing("runs", run_active=True)
+    )
+    service._refresh_identity()
+
+    assert service.state == OT2ServiceState.EXTERNAL_CONTROL
+    assert service.control is None
+
+
+def test_failed_instruments_read_keeps_last_list_and_its_read_time(monkeypatch):
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get", _fake_probe_get()
+    )
+    service = OT2Service(dry_run=False, host_alias="192.168.0.9")
+    service._record_probe(service.probe_robot())
+    first_read_at = service._last_probe["instruments_read_at"]
+
+    monkeypatch.setattr(
+        "opentrons_server.gateway.service.requests.get",
+        _probe_failing("instruments", "modules"),
+    )
+    service._record_probe(service.probe_robot())
+
+    robot = service.get_status().details["robot"]
+    # Pipettes are kept, stamped with when they were actually read...
+    assert robot["instruments"][0]["name"] == "p300_multi_gen2"
+    assert robot["instruments_read_at"] == first_read_at
+    assert service.get_status().components["pipette_left"].state == "p300_multi_gen2"
+    # ... while live module telemetry is unknown, not an empty deck.
+    assert robot["modules"] is None
+    assert set(robot["probe_errors"]) == {"instruments", "modules"}

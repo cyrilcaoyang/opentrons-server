@@ -80,7 +80,7 @@ lab-skills / dashboard / agents          this repo                        robot
   represent it as the `fixedTrash` addressable area, and loading labware into
   slot 12 fails. Explicit rack/well destinations are for returning tips.
 - **Tests: use `.venv.test`, not `.venv`.**
-  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 954 tests
+  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 961 tests
   (2026-10-11), no hardware, about five and a half minutes; run it in the
   background, since a five-minute timeout cuts it off. `.venv/` is the
   **running services'** environment; syncing or installing into it can disturb a live gateway (§4).

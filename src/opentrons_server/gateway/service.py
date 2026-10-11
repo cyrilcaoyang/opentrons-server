@@ -235,6 +235,11 @@ def _tempmod_engine_name(label: str) -> str:
     return "temperatureModuleV2"
 
 
+# `/status` message while a reachable robot's /runs read fails at boot: the
+# gateway neither stands off nor starts a session until it can read the list.
+_RUN_LIST_UNREADABLE_NOTE = "Could not read the robot's run list; deferring session start"
+
+
 def _run_counts_as_active(run: Dict[str, Any]) -> bool:
     """Is this robot-server run evidence that something is driving the robot?
 
@@ -2607,15 +2612,22 @@ class OT2Service:
         what is physically attached.
         """
 
+        # ``run_active`` / ``instruments`` / ``modules`` stay None until their own
+        # request succeeds. They used to default to False / [] and keep that on
+        # failure, so a reachable robot whose /runs read failed looked idle —
+        # enough for the self-heal paths to start a session on a robot running
+        # someone else's protocol. ``probe_errors`` names each failed read and
+        # ``<name>_read_at`` stamps each successful one.
         result: Dict[str, Any] = {
             "reachable": False,
-            "run_active": False,
+            "run_active": None,
             "api_version": None,
             "fw_version": None,
             "robot_model": None,
             "robot_name": None,
-            "instruments": [],
-            "modules": [],
+            "instruments": None,
+            "modules": None,
+            "probe_errors": {},
         }
         base = self._probe_base_url()
         if base is None:
@@ -2633,20 +2645,28 @@ class OT2Service:
         result["fw_version"] = health.get("fw_version")
         result["robot_model"] = health.get("robot_model")
         result["robot_name"] = health.get("name")
-        # Best-effort extras: a failure here must not flip reachability.
-        try:
-            runs = requests.get(
-                base + "/runs", headers=_OPENTRONS_HTTP_HEADERS, timeout=_OT2_HTTP_TIMEOUT
-            ).json()
-            result["run_active"] = any(
-                _run_counts_as_active(r) for r in runs.get("data", []) or []
-            )
-        except Exception:
-            pass
-        try:
-            instruments = requests.get(
-                base + "/instruments", headers=_OPENTRONS_HTTP_HEADERS, timeout=_OT2_HTTP_TIMEOUT
-            ).json()
+        # The extras must not flip reachability, but a failed one is unknown,
+        # never an empty answer.
+        def read_list(name: str) -> Optional[List[Dict[str, Any]]]:
+            try:
+                resp = requests.get(
+                    base + "/" + name, headers=_OPENTRONS_HTTP_HEADERS, timeout=_OT2_HTTP_TIMEOUT
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data")
+                if not isinstance(data, list):
+                    raise ValueError(f"/{name} returned no data list")
+            except Exception as exc:
+                result["probe_errors"][name] = f"{type(exc).__name__}: {exc}"[:200]
+                return None
+            result[f"{name}_read_at"] = datetime.now(timezone.utc)
+            return data
+
+        runs = read_list("runs")
+        if runs is not None:
+            result["run_active"] = any(_run_counts_as_active(r) for r in runs)
+        instruments = read_list("instruments")
+        if instruments is not None:
             result["instruments"] = [
                 {
                     "mount": d.get("mount"),
@@ -2658,14 +2678,10 @@ class OT2Service:
                     "min_volume": (d.get("data") or {}).get("min_volume"),
                     "max_volume": (d.get("data") or {}).get("max_volume"),
                 }
-                for d in instruments.get("data", []) or []
+                for d in instruments
             ]
-        except Exception:
-            pass
-        try:
-            modules = requests.get(
-                base + "/modules", headers=_OPENTRONS_HTTP_HEADERS, timeout=_OT2_HTTP_TIMEOUT
-            ).json()
+        modules = read_list("modules")
+        if modules is not None:
             result["modules"] = [
                 {
                     "model": m.get("moduleModel"),
@@ -2679,10 +2695,8 @@ class OT2Service:
                     "current_temperature": (m.get("data") or {}).get("currentTemperature"),
                     "target_temperature": (m.get("data") or {}).get("targetTemperature"),
                 }
-                for m in modules.get("data", []) or []
+                for m in modules
             ]
-        except Exception:
-            pass
         return result
 
     def probe_run_labware(self) -> Optional[Dict[str, Any]]:
@@ -2744,9 +2758,11 @@ class OT2Service:
             # it describes: it is set once at boot and nothing cleared it, so
             # /status went on reporting a robot as unreachable long after it
             # came back — the single most misleading thing on the tile. The
-            # only note reachable in `requires_init` is that one.
+            # notes reachable in `requires_init` are that one and the deferral
+            # below, which holds exactly while the run list stays unreadable.
             if self.state == OT2ServiceState.REQUIRES_INIT:
-                self._status_note = None
+                deferring = probe.get("run_active") is None and not self._operator_shutdown
+                self._status_note = _RUN_LIST_UNREADABLE_NOTE if deferring else None
         self._refresh_run_labware(force=True)
         # Fold the deck-light read into the same off-request-path refresh so
         # /status can serve it from cache instead of blocking on robot HTTP.
@@ -2785,6 +2801,16 @@ class OT2Service:
         if probe.get("reachable"):
             self._probe_failures = 0
             self._robot_last_seen_at = now
+            if probe.get("instruments") is None and self._last_probe.get("instruments") is not None:
+                # Pipettes change rarely and the volume guard, channel binding and
+                # mount loading read them, so a failed /instruments read keeps the
+                # last good list; `instruments_read_at` and `probe_errors` say so.
+                # Runs and module telemetry change by the second and stay unknown.
+                probe = {
+                    **probe,
+                    "instruments": self._last_probe["instruments"],
+                    "instruments_read_at": self._last_probe.get("instruments_read_at"),
+                }
             self._last_probe = probe
             if self._robot_unreachable_since is None:
                 return
@@ -2809,7 +2835,7 @@ class OT2Service:
         # Keep the identity the robot last reported (model, pipettes, modules)
         # so the tile still names the hardware, but say plainly that nobody can
         # reach it right now.
-        self._last_probe = {**self._last_probe, "reachable": False, "run_active": False}
+        self._last_probe = {**self._last_probe, "reachable": False, "run_active": None}
         logger.warning(
             "robot unreachable at %s (%d consecutive probes failed); reporting unknown",
             url,
@@ -2928,7 +2954,9 @@ class OT2Service:
 
         if self.dry_run or self.state != OT2ServiceState.EXTERNAL_CONTROL:
             return
-        if not probe.get("reachable") or probe.get("run_active"):
+        # Only a run list read this probe that shows no active run releases the
+        # stand-off; an unreadable list is not evidence the run ended.
+        if not probe.get("reachable") or probe.get("run_active") is not False:
             return
         # Reachable and idle: safe to take the REPL control plane.
         self._status_note = None
@@ -2987,6 +3015,11 @@ class OT2Service:
             return
         if not probe.get("reachable"):
             return
+        if probe.get("run_active") is None:
+            # Could not read the run list: neither stand off nor seize. The next
+            # probe retries.
+            logger.debug("self-heal: robot run list unreadable; deferring session start")
+            return
 
         if probe.get("run_active"):
             # Same stand-off boot_reconnect would have taken had the robot been
@@ -3041,6 +3074,12 @@ class OT2Service:
             self._status_note = (
                 f"Robot unreachable at {self._probe_base_url() or 'unknown host'}; awaiting startup"
             )
+            logger.warning("boot_reconnect: %s", self._status_note)
+            return
+        if probe.get("run_active") is None:
+            # Never start a session without having read that no run is active.
+            # requires_init stays; the unreachable-boot self-heal retries.
+            self._status_note = _RUN_LIST_UNREADABLE_NOTE
             logger.warning("boot_reconnect: %s", self._status_note)
             return
         if probe.get("run_active"):

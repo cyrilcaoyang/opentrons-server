@@ -269,3 +269,12 @@ def test_robot_unreachable_fixture_matches_contract():
     assert status.components["robot"].state == "unreachable"
     assert status.details["robot"]["reachable"] is False
     assert set(status.allowed_actions) <= _OFFLINE_SAFE_ACTIONS
+
+
+def test_outage_reports_run_state_unknown_not_idle(monkeypatch):
+    """Nobody can see whether a run is active on a robot nobody can reach."""
+
+    service = _ready_http_service(monkeypatch)
+    assert service.get_status().details["robot"]["run_active"] is False
+    _fail_probes(monkeypatch, service, _OT2_UNREACHABLE_AFTER)
+    assert service.get_status().details["robot"]["run_active"] is None

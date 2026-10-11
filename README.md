@@ -1196,7 +1196,7 @@ While the robot is unreachable, `/status` says so on every surface:
 | `activity` | `unknown` |
 | `message` | `Robot unreachable at <url> since <t>; last seen <t>` |
 | `components.robot` | `connected: false`, `state: unreachable`, `last_event_at` = last answered probe |
-| `details.robot` | the last identity the robot reported plus `reachable: false`, `probe_url`, `last_seen_at`, `readback_age_s`, `unreachable_since`, `probe_failures` |
+| `details.robot` | the last identity the robot reported plus `reachable: false`, `run_active: null`, `probe_url`, `last_seen_at`, `readback_age_s`, `unreachable_since`, `probe_failures` |
 | `allowed_actions` | only what needs no robot: `shutdown` and the bookkeeping verbs (`plate.*`, `well.update`, `tips.*`, `deck.declare`) |
 | `required_actions` | empty — nothing this API can do about it |
 
@@ -1205,6 +1205,20 @@ refused immediately with "robot unreachable since …" instead of spending 20 s
 on a dead socket, and the refusal never touches `last_error` (§6.3).
 `details.robot.readback_age_s` is published even when the robot is fine, so a
 reader can always tell a fresh observation from a stale one.
+
+**A failed read is unknown, not empty.** Each probe reads `/health`, then
+`/runs`, `/instruments` and `/modules` separately. When one of those three
+fails while the robot answers `/health`, its field is `null` rather than
+`false` or `[]`, `details.robot.probe_errors` names it, and each successful
+read is stamped `runs_read_at` / `instruments_read_at` / `modules_read_at`.
+`instruments` is the exception: a failed read keeps the last good list with its
+original `instruments_read_at`, because pipettes change rarely and the volume
+guard, channel binding and mount loading read it. Until 2026-10-11 a failed
+`/runs` read reported `run_active: false`, so a gateway booting against a robot
+running someone else's protocol could start a session on it. Now no session
+starts without a run list read that shows no active run; at boot the message
+says `Could not read the robot's run list; deferring session start` and the
+self-heal retries on each probe.
 
 Two history events bracket an outage (`robot_unreachable`, `robot_reachable`
 with `outage_s`), via the same exporter as control actions.
