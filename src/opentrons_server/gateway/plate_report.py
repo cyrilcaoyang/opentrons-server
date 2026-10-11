@@ -378,7 +378,7 @@ main{max-width:1100px;margin:0 auto;padding:16px}h1{font-size:18px;margin:0 0 2p
 select,button,.btn{font:inherit;text-decoration:none;padding:4px 8px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
 .plate{overflow-x:auto}table.grid{border-collapse:separate;border-spacing:4px;margin:0 auto}
 .grid th{color:var(--sub);font-weight:500;font-size:11px;width:44px}
-.grid td{width:52px;height:40px;border-radius:50%;text-align:center;font-size:10px;font-variant-numeric:tabular-nums;cursor:pointer;border:2px solid transparent;transition:transform .08s}
+.grid td{width:52px;min-width:52px;height:52px;padding:0;border-radius:50%;text-align:center;font-size:10px;font-variant-numeric:tabular-nums;cursor:pointer;border:2px solid transparent;transition:transform .08s}
 .grid td:hover{transform:scale(1.08)}.grid td.pin{border-color:var(--accent)}
 .grid td.none{background:var(--empty);color:var(--sub)}.grid td.failed{outline:2px dashed #e11d48;outline-offset:-4px}
 .legend{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--sub)}.bar{width:220px;height:10px;border-radius:5px}
