@@ -610,6 +610,21 @@ class RunEngineCommands:
         return "thermocycler/deactivateLid", {"moduleId": module_id}
 
 
+# Commands that unconditionally leave the engine's current location off any well
+# when they succeed (Opentrons v8.7.0: ``home`` and ``retractAxis`` clear it, the
+# others set coordinates or an addressable area). Used by the location mirror
+# in ``RunEngineClient``.
+_LOCATION_RESETTING_COMMANDS = frozenset(
+    {
+        "home",
+        "retractAxis",
+        "moveToCoordinates",
+        "moveToAddressableArea",
+        "moveToAddressableAreaForDropTip",
+    }
+)
+
+
 # ---------------------------------------------------------------------------
 # Transport client
 # ---------------------------------------------------------------------------
@@ -639,6 +654,15 @@ class RunEngineClient:
         self.request_timeout_s = request_timeout_s
         self.run_id: Optional[str] = None
         self._stop_requested = threading.Event()
+        # Mirror of the engine's single "current location" — the last
+        # (pipette_id, labware_id) a well-addressed command left a pipette at,
+        # or None when it is coordinates, an addressable area or cleared. The
+        # engine picks the critical point savePosition reports from it, and no
+        # robot-server route exposes it. ``engine_well_known`` is False until a
+        # run is created and after a well-addressed command whose outcome was
+        # not confirmed. See ``_track_location``.
+        self.engine_well: Optional[Tuple[str, str]] = None
+        self.engine_well_known = False
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -658,6 +682,8 @@ class RunEngineClient:
         if not run_id:
             raise RunEngineError(f"run creation returned no id: {data!r}")
         self.run_id = run_id
+        self.engine_well = None
+        self.engine_well_known = True
         return run_id
 
     def stop_run(self) -> None:
@@ -738,13 +764,18 @@ class RunEngineClient:
             read_timeout = effective_ms / 1000.0 + 5.0
 
         body = {"data": {"commandType": command_type, "params": params, "intent": intent}}
-        result = self._request(
-            "POST",
-            f"/runs/{self.run_id}/commands",
-            json_body=body,
-            params=params_q,
-            timeout=read_timeout,
-        )
+        try:
+            result = self._request(
+                "POST",
+                f"/runs/{self.run_id}/commands",
+                json_body=body,
+                params=params_q,
+                timeout=read_timeout,
+            )
+        except BaseException:
+            self._track_location(command_type, params, succeeded=False)
+            raise
+        self._track_location(command_type, params, succeeded=result.get("status") == "succeeded")
         if self._stop_requested.is_set():
             raise OSError("stop requested during command; inspect its outcome")
         status = result.get("status")
@@ -756,6 +787,36 @@ class RunEngineClient:
         if wait and status != "succeeded":
             raise CommandNotCompleted(result, timeout_ms=effective_ms)
         return result
+
+    def _track_location(self, command_type: str, params: Dict[str, Any], *, succeeded: bool) -> None:
+        """Update the current-location mirror after posting one command.
+
+        Only a well-addressed command can leave a pipette at a well, so only
+        its outcome can make the engine center the critical point (the
+        ``centerMultichannelOnWells`` labware quirk). Its success records the
+        well; any other outcome may or may not have moved the engine there, so
+        the mirror becomes unknown. Every other command can at most move the
+        engine off a well. Leaving the mirror unchanged for those errs toward a
+        refusal, never toward a wrong reference point.
+        """
+        if all(params.get(key) for key in ("pipetteId", "labwareId", "wellName")):
+            if succeeded:
+                self.engine_well = (params["pipetteId"], params["labwareId"])
+                self.engine_well_known = True
+            else:
+                self.engine_well_known = False
+        elif not succeeded:
+            return
+        elif command_type in _LOCATION_RESETTING_COMMANDS:
+            self.engine_well = None
+            self.engine_well_known = True
+        elif (
+            command_type == "moveLabware"
+            and self.engine_well is not None
+            and self.engine_well[1] == params.get("labwareId")
+        ):
+            # The engine clears the location when the labware under it moves.
+            self.engine_well = None
 
     def get_command(self, command_id: str) -> Dict[str, Any]:
         if self.run_id is None:

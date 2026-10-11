@@ -90,7 +90,7 @@ from .platebalance import PlateBalanceRequest
 from .module_access import ModulePlacementForbidden, module_admin
 from .plate_state import PlateStateStore
 from .limits import OutOfEnvelope
-from .service import OT2Service, UnknownOutcomeError
+from .service import JogReferenceRefused, OT2Service, UnknownOutcomeError
 from .tip_state import TipStateStore, TipUnavailable
 from .plate_report import build_plate_report, render_plate_report_html, render_plate_report_xlsx
 
@@ -756,6 +756,8 @@ def create_app(
             return service.jog(request)
         except OutOfEnvelope as exc:
             raise ClaimHTTPError(status_code=412, payload=exc.body)
+        except JogReferenceRefused as exc:
+            raise ClaimHTTPError(status_code=412, payload={"detail": str(exc)})
         except UnknownOutcomeError as exc:
             raise HTTPException(status_code=409, detail=f"unknown outcome: {exc}")
         except Exception as exc:

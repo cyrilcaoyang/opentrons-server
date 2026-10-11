@@ -80,7 +80,7 @@ lab-skills / dashboard / agents          this repo                        robot
   represent it as the `fixedTrash` addressable area, and loading labware into
   slot 12 fails. Explicit rack/well destinations are for returning tips.
 - **Tests: use `.venv.test`, not `.venv`.**
-  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 909 tests
+  `./.venv.test/Scripts/python.exe -m pytest tests/unit -q` — 954 tests
   (2026-10-11), no hardware, about five and a half minutes; run it in the
   background, since a five-minute timeout cuts it off. `.venv/` is the
   **running services'** environment; syncing or installing into it can disturb a live gateway (§4).
@@ -176,7 +176,14 @@ lab-skills / dashboard / agents          this repo                        robot
   reads use `savePosition` with `failOnNotHomed`, SSH reads use the protocol
   core's synchronous `gantry_position`. Never use a browser target or the
   last requested coordinates as position readback. `/status` never queries
-  position. See `docs/MANUAL_PIPETTE.md` for frame, limits and UI behavior.
+  position. HTTP `savePosition` reports a *centered* critical point after a
+  well of `centerMultichannelOnWells` labware (reservoirs) while
+  `moveToCoordinates` targets the primary nozzle, so HTTP jog refuses
+  multi-channel pipettes there. `RunEngineClient` mirrors the engine's current
+  location from posted commands, recognizing a well by `pipetteId` +
+  `labwareId` + `wellName` params; a new command that leaves a pipette at a
+  well under other param names must be taught to it.
+  See `docs/MANUAL_PIPETTE.md` for frame, limits and UI behavior.
 - **Stop recovery:** `ot2_stop_state.json` beside the tip-state file (override
   `OT2_STOP_STATE_PATH`) blocks automatic reconnect after a software stop.
   Give each gateway its own state paths; do not delete this latch to recover.

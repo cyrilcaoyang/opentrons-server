@@ -32,14 +32,43 @@ does not disable interlocks or reset a stop latch. **Clear error** dismisses onl
    clipboard access is unavailable.
 
 **X+ is right, Y+ is back, Z+ is up in the robot's deck frame.** The reference is
-the selected pipette's critical point, accounting for the controller's tip state;
-on a multi-channel pipette it is the configured primary nozzle. These are
-controller-reported coordinates, not independent optical measurements. Removing
-or attaching a tip changes the reference geometry.
+the selected pipette's critical point: the nozzle end without a tip, the tip end
+with one (using the tip-length calibration). Deck calibration, the left-mount
+offset and pipette-offset calibration are already applied; labware offsets are
+not. Removing or attaching a tip changes the reference geometry. On a
+multi-channel pipette the default critical point is the primary nozzle (A1, the
+back nozzle; 31.5 mm behind the body center on the GEN2 8-channels).
+
+That default has one HTTP exception. After a pipette's last move went to a well
+of labware with Opentrons' `centerMultichannelOnWells` quirk (reservoirs such as
+`nest_12_reservoir_15ml` or `nest_1_reservoir_195ml`), the run engine reports the
+critical point it centered on that labware: the column's Y center for
+multi-well reservoirs, the pipette's XY center for 1-well ones. A move to deck
+coordinates resets it to the default. On a multi-channel pipette the two
+differ by up to 31.5 mm in Y; on a single-channel they coincide. SSH always
+reads the default critical point.
+
+These are controller positions, not measurements. The OT-2's motors have no
+encoders, so a stall or belt slip is invisible in them (see transport behavior
+below for what each transport returns).
 
 Jog is a **straight move with no Z retract**, preserving the other coordinates.
 The operator must inspect the physical deck and raise the pipette clear before
 lateral travel. Numeric envelope checks do not establish a collision-free path.
+
+**Centered reference refusal (HTTP, multi-channel):** jog adds its step to a
+read and moves the default critical point to the result. After a move into a
+centering reservoir (critical point above) the read is centered, so the pipette
+would also shift up to 31.5 mm toward the front in Y with no Z retract. HTTP
+jog therefore refuses a multi-channel pipette with 412 before any command, and
+without latching a fault, when its last well was such labware. It also refuses
+when that cannot be confirmed: after a well command that failed, timed out or
+lost transport. Home, or move the pipette to deck coordinates, then jog. The
+robot-server exposes no current-location route, so `RunEngineClient` mirrors
+the engine's rule from the commands it posts; only a well-addressed command can
+set a centered location. Single-channel pipettes and SSH are unaffected. Copy
+XYZ and plain position reads are not refused; in that state they return the
+centered position.
 
 Below the pipette selector, the XY pad and Z column stay visible. The center
 **HOME** uses full robot homing; **Z Home** homes only the selected pipette Z.
@@ -95,11 +124,14 @@ If communication fails during a jog, its relative displacement cannot be retried
 safely: the service records `unknown_outcome` and requires reconciliation.
 
 HTTP uses Opentrons `savePosition` with `failOnNotHomed=true`. It returns the
-pipette critical point without motion. The native `moveRelative` command in
+pipette critical point without motion, from the hardware controller's stored
+position: each successful move sets it to that move's target and a failed move
+clears it. It does not query the motor controller. The native `moveRelative` command in
 v8.7.0 does not accept a speed, so the gateway uses the serialized read plus
 existing `moveToCoordinates` path to honor the operator's speed. SSH queries
 `protocol._core.get_hardware().gantry_position(..., refresh=True,
-fail_on_not_homed=True)` and uses the existing protocol pipette move. This
+fail_on_not_homed=True)`, which asks the Smoothie motor controller for its
+step-count position (`M114.2`), and uses the existing protocol pipette move. This
 private core query is verified against both legacy and engine cores in v8.7.0;
 an incompatible robot version fails explicitly, with no guessed coordinates.
 Already loaded pipettes are resolved by mount from the active run/protocol.

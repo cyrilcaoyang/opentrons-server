@@ -286,6 +286,11 @@ class UnknownOutcomeError(RuntimeError):
     """Raised when transport failed during a non-idempotent operation."""
 
 
+class JogReferenceRefused(RuntimeError):
+    """A jog refused before motion: its position read and move would not share
+    a critical point (``OT2HttpControl.jog_reference_refusal``)."""
+
+
 class OT2Service:
     """Owns one OT-2 connection and exposes safe gateway operations."""
 
@@ -1608,6 +1613,10 @@ class OT2Service:
             nonlocal coordinates, observed_at
             pipette = self._ensure_session_pipette(request.pipette)
             control = self._require_control()
+            if isinstance(control, OT2HttpControl):
+                refusal = control.jog_reference_refusal(pipette)
+                if refusal is not None:
+                    raise JogReferenceRefused(f"jog refused, no move issued: {refusal}")
             position = PipetteCoordinates.model_validate(control.get_pipette_position(pipette))
             target = position.model_dump()
             target[request.axis] += request.distance_mm
@@ -3840,7 +3849,7 @@ class OT2Service:
                     self.state = previous_state
             self._emit_control_action(name, "failed", started, str(exc))
             raise
-        except (OutOfEnvelope, TipUnavailable):
+        except (OutOfEnvelope, TipUnavailable, JogReferenceRefused):
             with self._state_lock:
                 if not self._stop_latched:
                     self.state = previous_state

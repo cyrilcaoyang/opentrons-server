@@ -9,12 +9,17 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from opentrons_server.control.http_control import OT2HttpControl
-from opentrons_server.control.http_run import RunEngineCommands
+from opentrons_server.control.http_run import CommandFailed, RunEngineClient, RunEngineCommands
 from opentrons_server.control.ot2_control import OT2Control
 from opentrons_server.gateway.api import create_app
 from opentrons_server.gateway.limits import MAX_X_MM, OutOfEnvelope
 from opentrons_server.gateway.models import PipetteJogRequest, PipettePositionRequest
-from opentrons_server.gateway.service import OT2Service, OT2ServiceState, UnknownOutcomeError
+from opentrons_server.gateway.service import (
+    JogReferenceRefused,
+    OT2Service,
+    OT2ServiceState,
+    UnknownOutcomeError,
+)
 
 
 def ready():
@@ -244,3 +249,184 @@ def test_ssh_home_z_targets_selected_mount_without_plunger():
     assert "plunger" not in code
     with pytest.raises(ValueError):
         control.home_pipette_z("left;bad()")
+
+
+# --- HTTP critical-point mismatch (centerMultichannelOnWells) -----------------
+#
+# After a well of quirked labware the engine's savePosition reports a centered
+# critical point, but moveToCoordinates targets the primary nozzle. A jog that
+# adds a step to the centered read would shift a multi-channel pipette by up
+# to half its nozzle span with no Z retract, so it must refuse before motion.
+
+_RESERVOIR = {
+    "namespace": "opentrons",
+    "version": 1,
+    "parameters": {"loadName": "nest_12_reservoir_15ml", "quirks": ["centerMultichannelOnWells"]},
+}
+_PLATE = {
+    "namespace": "opentrons",
+    "version": 2,
+    "parameters": {"loadName": "corning_96_wellplate_360ul_flat"},
+}
+
+
+def _mirror_client(*, engine_well=None, known=True):
+    client = Mock()
+    client.engine_well = engine_well
+    client.engine_well_known = known
+    client.get_run.return_value = {
+        "labware": [
+            {"id": "reservoir", "definitionUri": "opentrons/nest_12_reservoir_15ml/1"},
+            {"id": "plate", "definitionUri": "opentrons/corning_96_wellplate_360ul_flat/2"},
+        ],
+        "pipettes": [],
+    }
+    client.get_loaded_labware_definitions.return_value = [_RESERVOIR, _PLATE]
+    client.execute.return_value = {"result": {"position": {"x": 100, "y": 200, "z": 50}}}
+    return client
+
+
+def _http_ready(client, model="p300_multi_gen2"):
+    service, _ = ready()
+    control = OT2HttpControl(client)
+    control._pipette_ids.update({"p300": "p300", "other": "other"})
+    control._pipette_models["p300"] = model
+    service.control = control
+    return service
+
+
+@pytest.mark.parametrize(
+    "engine_well, known",
+    [(("p300", "reservoir"), True), (None, False)],
+    ids=["centered-on-reservoir", "location-unconfirmed"],
+)
+def test_http_multichannel_jog_refuses_before_any_command_when_reference_may_be_centered(engine_well, known):
+    client = _mirror_client(engine_well=engine_well, known=known)
+    service = _http_ready(client)
+    with pytest.raises(JogReferenceRefused, match="no move issued.*deck coordinates"):
+        service.jog(PipetteJogRequest(pipette="p300", axis="z", distance_mm=1))
+    client.execute.assert_not_called()  # no savePosition, no move
+    assert service.state == OT2ServiceState.READY
+    assert service.last_error is None
+
+
+@pytest.mark.parametrize(
+    "engine_well, model",
+    [
+        (("p300", "reservoir"), "p300_single_gen2"),  # one nozzle: centers coincide
+        (("p300", "plate"), "p300_multi_gen2"),  # no quirk
+        (("other", "reservoir"), "p300_multi_gen2"),  # location belongs to another pipette
+        (None, "p300_multi_gen2"),  # coordinates / addressable area / homed
+    ],
+)
+def test_http_jog_proceeds_when_read_and_move_share_the_reference(engine_well, model):
+    client = _mirror_client(engine_well=engine_well)
+    service = _http_ready(client, model=model)
+    result = service.jog(PipetteJogRequest(pipette="p300", axis="z", distance_mm=1, speed=5))
+    types = [call.args[0][0] for call in client.execute.call_args_list]
+    assert types == ["savePosition", "moveToCoordinates", "savePosition"]
+    assert client.execute.call_args_list[1].args[0][1]["coordinates"] == {"x": 100.0, "y": 200.0, "z": 51.0}
+    assert result.coordinates.z == 50
+
+
+def test_http_unconfirmed_location_does_not_refuse_single_channel():
+    service = _http_ready(_mirror_client(known=False), model="p20_single_gen2")
+    service.jog(PipetteJogRequest(pipette="p300", axis="x", distance_mm=1))
+
+
+def test_http_model_falls_back_to_the_run_and_unknown_models_count_as_multichannel():
+    client = _mirror_client(engine_well=("p300", "reservoir"))
+    client.get_run.return_value["pipettes"] = [{"id": "p300", "pipetteName": "p20_single_gen2"}]
+    control = OT2HttpControl(client)
+    control._pipette_ids["p300"] = "p300"
+    assert control.jog_reference_refusal("p300") is None
+    client.get_run.return_value["pipettes"] = []
+    control._pipette_models.clear()
+    assert "nest_12_reservoir_15ml" in control.jog_reference_refusal("p300")
+
+
+def test_jog_reference_refusal_is_a_412_precondition():
+    app = create_app(dry_run=False, auto_reconnect=False, enforce_claims=False)
+    service = app.state.service
+    client = _mirror_client(engine_well=("p300", "reservoir"))
+    control = OT2HttpControl(client)
+    control._pipette_ids["p300"] = "p300"
+    control._pipette_models["p300"] = "p300_multi_gen2"
+    service.control = control
+    service.state = OT2ServiceState.READY
+    service.refresh_snapshot = Mock()
+    with TestClient(app) as http:
+        reply = http.post("/control/jog", json={"pipette": "p300", "axis": "y", "distance_mm": 1})
+    assert reply.status_code == 412
+    assert "nest_12_reservoir_15ml" in reply.json()["detail"]
+    client.execute.assert_not_called()
+
+
+class _RunEngineFake:
+    """``RunEngineClient._request`` stand-in: answers commands by status."""
+
+    def __init__(self):
+        self.status = "succeeded"
+        self.raises = None
+
+    def __call__(self, method, path, **_kwargs):
+        if path == "/runs":
+            return {"id": "run-1"}
+        if self.raises is not None:
+            raise self.raises
+        return {"status": self.status, "result": {}}
+
+
+def _tracked_client():
+    client = RunEngineClient("http://robot:31950")
+    fake = _RunEngineFake()
+    client._request = fake
+    return client, fake
+
+
+def test_run_client_mirrors_the_engine_current_well():
+    client, fake = _tracked_client()
+    assert client.engine_well_known is False  # no run, no history
+    client.create_run()
+    assert (client.engine_well, client.engine_well_known) == (None, True)
+
+    client.execute(RunEngineCommands.move_to_well("p300", "reservoir", "A1"))
+    assert client.engine_well == ("p300", "reservoir")
+    # Non-well commands cannot put a pipette at a well; they leave it.
+    client.execute(RunEngineCommands.save_position("p300"))
+    client.execute(RunEngineCommands.aspirate_in_place("p300", 10, 50))
+    client.execute(RunEngineCommands.move_labware("plate", {"slotName": "3"}))
+    assert client.engine_well == ("p300", "reservoir")
+    # Moving the labware under the pipette clears it, as the engine does.
+    client.execute(RunEngineCommands.move_labware("reservoir", {"slotName": "3"}))
+    assert client.engine_well is None
+
+    client.execute(RunEngineCommands.aspirate("p300", "reservoir", "A2", 10, 50))
+    assert client.engine_well == ("p300", "reservoir")
+    client.execute(RunEngineCommands.move_to_coordinates("p300", {"x": 1, "y": 2, "z": 3}))
+    assert client.engine_well is None
+    client.execute(RunEngineCommands.pick_up_tip("other", "tips", "A1"))
+    assert client.engine_well == ("other", "tips")
+    client.execute(RunEngineCommands.home())
+    assert (client.engine_well, client.engine_well_known) == (None, True)
+
+
+@pytest.mark.parametrize("outcome", ["failed", "queued", "transport"])
+def test_run_client_marks_location_unknown_after_an_unconfirmed_well_command(outcome):
+    client, fake = _tracked_client()
+    client.create_run()
+    if outcome == "transport":
+        fake.raises = OSError("connection reset")
+    else:
+        fake.status = outcome
+    with pytest.raises((CommandFailed, OSError, RuntimeError)):
+        client.execute(RunEngineCommands.move_to_well("p300", "reservoir", "A1"))
+    assert client.engine_well_known is False
+    # A failed reset proves nothing; a succeeded one re-establishes the location.
+    fake.raises, fake.status = None, "failed"
+    with pytest.raises(CommandFailed):
+        client.execute(RunEngineCommands.home())
+    assert client.engine_well_known is False
+    fake.status = "succeeded"
+    client.execute(RunEngineCommands.home())
+    assert (client.engine_well, client.engine_well_known) == (None, True)

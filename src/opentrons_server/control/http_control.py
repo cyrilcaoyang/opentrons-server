@@ -508,6 +508,52 @@ class OT2HttpControl:
             raise ValueError("savePosition returned no complete XYZ position")
         return position
 
+    def jog_reference_refusal(self, pip_name: str) -> Optional[str]:
+        """Why a read-then-``moveToCoordinates`` jog could misplace this pipette.
+
+        ``savePosition`` reports the critical point the engine chose for the
+        pipette's current location: centered on the column or body after a
+        well of ``centerMultichannelOnWells`` labware (reservoirs), the default
+        primary nozzle otherwise. ``moveToCoordinates`` always targets the
+        default. On a multi-channel pipette the two differ by up to half the
+        nozzle span, so a jog from a centered read adds that shift, with no Z
+        retract. Single-channel critical points coincide. Returns None when
+        the read and the move share a reference point.
+        """
+        pipette_id = self._pipette_id(pip_name)
+        if "_single" in self._pipette_model_for_id(pip_name, pipette_id):
+            return None
+        if not self.client.engine_well_known:
+            return (
+                "the run engine's current pipette location is unconfirmed after a failed or "
+                "unfinished well command, so its position reference may be centered rather than "
+                "the primary nozzle; home or move this pipette to deck coordinates before jogging"
+            )
+        if self.client.engine_well is None or self.client.engine_well[0] != pipette_id:
+            return None
+        labware_id = self.client.engine_well[1]
+        definition = self._labware_definition_for_id(labware_id, labware_id)
+        parameters = definition.get("parameters") or {}
+        if "centerMultichannelOnWells" not in (parameters.get("quirks") or []):
+            return None
+        return (
+            f"{pip_name} last moved into {labware_id} ({parameters.get('loadName')}), where the "
+            "run engine reports a centered position instead of the primary nozzle; a jog from it "
+            "would also shift the pipette up to half its nozzle span. Home or move this pipette "
+            "to deck coordinates before jogging"
+        )
+
+    def _pipette_model_for_id(self, nickname: str, pipette_id: str) -> str:
+        """The pipette's model name, from the load or else the run; '' if unknown."""
+        model = self._pipette_models.get(nickname) or self._pipette_models.get(pipette_id)
+        if model:
+            return model
+        for entry in self.client.get_run().get("pipettes") or []:
+            if entry.get("id") == pipette_id and entry.get("pipetteName"):
+                self._pipette_models[pipette_id] = entry["pipetteName"]
+                return entry["pipetteName"]
+        return ""
+
     def pipette_for_mount(self, mount: str) -> Optional[str]:
         """Resolve an already loaded mount from the run, including setup nicknames."""
         run = self.client.get_run()
@@ -1454,7 +1500,9 @@ class OT2HttpControl:
     def _labware_definition(self, nickname: str) -> Dict[str, Any]:
         """Schema-2 definition of a loaded labware, resolved by matching the
         run's ``definitionUri`` against ``GET .../loaded_labware_definitions``."""
-        labware_id = self._labware_id(nickname)
+        return self._labware_definition_for_id(self._labware_id(nickname), nickname)
+
+    def _labware_definition_for_id(self, labware_id: str, nickname: str) -> Dict[str, Any]:
         run = self.client.get_run()
         uri: Optional[str] = None
         for entry in run.get("labware") or []:
