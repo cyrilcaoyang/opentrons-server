@@ -462,7 +462,6 @@ Host ot2_robot
     HostName 192.168.254.50
     User root
     IdentityFile ~/.ssh/ot2_ssh_key
-    StrictHostKeyChecking no
 ```
 
 The AC OT-2 key is expected at `~/.ssh/ot2_ssh_key`. When a control request
@@ -473,6 +472,19 @@ does not exist, the gateway treats `host_alias` as the hostname and uses
 
 The AC key is passphrase-protected. Pass the key passphrase in the startup
 request body as `password`; do not commit the passphrase to this repository.
+
+The robot's host key must already be in `known_hosts` beside that config
+(`~/.ssh/known_hosts` of the same profile), or in the file named by
+`OT2_SSH_KNOWN_HOSTS`; the config's `UserKnownHostsFile` is not read. The
+gateway never adds a key itself: an unknown or changed key fails startup at
+once, without retries, and the startup error names the fingerprint the robot
+presented. The background self-heal does not retry that startup; fix
+`known_hosts`, then start the session explicitly. Add the key by connecting
+once with `ssh` from that profile, after checking the fingerprint against the
+robot. The key is looked up under the hostname actually connected to: an
+alias that sets `HostKeyAlias` is refused rather than ignored, and
+`StrictHostKeyChecking` has no effect. The HTTP transport opens no SSH
+session and is unaffected.
 
 On the AC Windows gateway host, the service may run under `systemprofile`.
 The SSH client still prefers the `sdl2` profile when it detects that case, so
@@ -578,6 +590,7 @@ distinguishes an instance is an environment variable read at startup in
 | `OT2_DECK_STATE_PATH` | operator-declared deck layout JSON | **yes** — same reason |
 | `OT2_TIP_STATE_PATH` | per-rack tip tracking JSON | **yes** — same reason |
 | `OT2_SSH_PASSWORD` | SSH key passphrase | per robot |
+| `OT2_SSH_KNOWN_HOSTS` | known_hosts file for the robot's host key (SSH transport only; default: beside the SSH config) | no |
 | `OT2_CORS_ORIGINS` | comma-separated allowed browser origins; defaults to `*` | no |
 | listen port (uvicorn `--port`) | the gateway's own port | **yes** |
 
@@ -882,7 +895,6 @@ Host ot2_robot
     HostName <OT2_IP_OR_HOSTNAME>
     User root
     IdentityFile ~/.ssh/ot2_ssh_key
-    StrictHostKeyChecking no
 ```
 
 The equivalent startup body is:
@@ -1223,6 +1235,8 @@ The gateway treats SSH failures differently depending on the operation:
   `move_labware`, the service enters `unknown_outcome`.
 - `unknown_outcome` requires manual inspection/reconciliation before normal
   operation resumes.
+- An unknown or changed robot host key is never retried, on startup or on a
+  reconnect inside a command: it fails with `HostKeyVerificationError`.
 
 The service exposes this through `/status` as `equipment_status: "unknown"` with
 details in `last_error` and `details.service_state`.

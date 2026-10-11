@@ -27,6 +27,7 @@ from ..control import (
 )
 from ..control import state_readers as _state_readers
 from ..control.http_control import _OT2_GEN2_BLOW_OUT_FLOW_UL_S, _OT2_GEN2_DISPENSE_FLOW_UL_S
+from ..transport import HostKeyVerificationError
 from ..version import __version__ as GATEWAY_VERSION
 from .advanced import ADVANCED_ACTIONS, FLEX_ACTIONS
 from .robot_profile import PROFILE, IS_FLEX
@@ -426,6 +427,12 @@ class OT2Service:
             self._set_error("command_unknown_outcome", "A previous stop requires operator inspection and a fresh startup", severity="critical")
         self._operator_shutdown = self._stop_latched
         self._last_self_heal_at = 0.0
+        # Set when the last startup was refused because the robot's SSH host
+        # key is unknown or changed: retrying meets the same key, so the
+        # self-heal stands off. Every startup re-evaluates it, so after an
+        # operator's explicit startup the self-heal resumes unless that
+        # startup is refused for the host key again.
+        self._host_key_refused = False
         # Activity span tracking (STATUS_SPEC v1.2 §2.3). `_activity` is the
         # last observed value and `_activity_since` the instant it last
         # changed — the start of the CURRENT span, not of the process or of
@@ -538,10 +545,12 @@ class OT2Service:
             self._stop_latch_path.unlink(missing_ok=True)
             self._stop_latched = False
             self._stop_confirmed = False
+            self._host_key_refused = False
             self._emit_session_event("startup", to_state=self.state.value)
             self.refresh_snapshot()
             self._refresh_identity()
         except Exception as exc:
+            self._host_key_refused = isinstance(exc, HostKeyVerificationError)
             self._set_error("startup_failed", str(exc), severity="error")
             self._emit_session_event("error", message=str(exc), code="startup_failed")
             raise
@@ -2948,12 +2957,16 @@ class OT2Service:
           external-control self-heal once that run ends.
         * ``_OT2_SELF_HEAL_INTERVAL`` — bounds retries against a robot that is
           reachable but cannot complete a protocol init.
+        * ``_host_key_refused`` — a startup refused for an unknown or changed
+          SSH host key is never retried here; an operator fixes known_hosts
+          and starts the session explicitly.
 
         Best-effort; never raises. ``probe`` must be a freshly-read
         ``probe_robot()`` result, not the cached ``_last_probe``.
         """
 
-        if self.dry_run or self._operator_shutdown or not self._boot_started:
+        if (self.dry_run or self._operator_shutdown or self._host_key_refused
+                or not self._boot_started):
             return
         failed_startup = (
             self.state == OT2ServiceState.ERROR

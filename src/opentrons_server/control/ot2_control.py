@@ -23,7 +23,7 @@ import keyword
 import json
 from typing import Any, Dict, List, Optional
 
-from ..transport import SSHClient
+from ..transport import HostKeyVerificationError, SSHClient
 
 
 class _Raw(str):
@@ -52,14 +52,19 @@ class OT2Control:
         # SSHClient.connect() returns False after exhausting its retries rather
         # than raising, so discarding the result let construction continue into
         # _get_protocol(), where the first invoke() failed with the misleading
-        # "SSH client is not connected". Raise the real thing here instead; the
-        # per-attempt cause is logged by SSHClient.connect at WARNING.
+        # "SSH client is not connected". Raise the real thing here instead,
+        # with the last attempt's cause so it reaches /status, not only the log.
         if not self.client.connect():
+            if self.client.host_key_failure:
+                raise HostKeyVerificationError(
+                    f"SSH connect to {self.client.hostname!r} refused: "
+                    f"{self.client.last_error}"
+                )
             raise ConnectionError(
                 f"SSH connect to {self.client.hostname!r} failed after "
                 f"{self.client.max_retries} attempts "
                 f"({self.client.connection_timeout}s timeout each); "
-                "see the gateway log for the per-attempt reason"
+                f"last error: {self.client.last_error}"
             )
 
     def invoke(self, code: str) -> str:

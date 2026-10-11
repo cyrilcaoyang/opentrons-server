@@ -50,10 +50,11 @@ on `:31950`, what only the gateway calls). Both robots are reached over the
 lab switch. Complexation's robot address is kept out of version control: read
 it from the service's `OT2_HTTP_BASE_URL` (`nssm get ot2-gateway-complexation
 AppEnvironmentExtra`) or from `details.robot.probe_url` in `/status`. Keep
-`OT2_HOST_ALIAS` on the same address. The gateway's own SSH client does not
-read `known_hosts` (paramiko `AutoAddPolicy`), so a stale entry there breaks
-only operator `ssh`. When an address changes, replace its entry with the
-robot's key, checked against the robot's existing entries. The lab-switch
+`OT2_HOST_ALIAS` on the same address. The SSH transport verifies the robot's
+host key against the `sdl2` profile's `known_hosts` and refuses an unknown or
+changed key (README *SSH Configuration*); the HTTP transport opens no SSH. When an address
+changes, replace its entry with the robot's key, checked against the robot's
+existing entries, never accepted blind. The lab-switch
 link has no default gateway; robot Wi-Fi/Tailscale remains the robot's
 internet and management path. Check robot identity (`ot2training`, serial
 `weathered-dream`) with the required `Opentrons-Version: *` header. A headerless health request can return HTTP 422
@@ -106,7 +107,8 @@ address and the absence of a default route on `eth0` before trusting control.
       no simulation mode. Choosing SSH instead (the code default for an unset
       `OT2_TRANSPORT`) means the service user needs an SSH config alias
       `<ssh-alias>` → `<robot-ip>` with the AC key working
-      (`ssh <ssh-alias> echo ok`).
+      (`ssh <ssh-alias> echo ok`), and the robot's host key in that profile's
+      `known_hosts`: the gateway refuses an unknown key rather than adding it.
       Trade-offs: [`TRANSPORT_TRADEOFFS.md`](TRANSPORT_TRADEOFFS.md).
 - [ ] Read the attached pipettes — they parameterize the motion test:
       `curl -fsS -H 'Opentrons-Version: 3' http://<robot-ip>:31950/pipettes`.
