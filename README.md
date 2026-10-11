@@ -607,13 +607,14 @@ nssm set ot2-gateway-hte AppEnvironmentExtra `
 # ... AppParameters: run uvicorn opentrons_server.gateway.api:app --host 0.0.0.0 --port 8020
 
 # Instance 2 — Complexation (matches equipment.yaml `ot2_complexation`;
-# robot "ot2training", reached through the USB bridge on the UPLC PC —
-# not its Wi-Fi tailnet IP 100.64.254.91; see DEVICE_BRINGUP.md "Network paths")
+# robot "ot2training", reached over lab-switch Ethernet — not its Wi-Fi
+# tailnet IP 100.64.254.91; see DEVICE_BRINGUP.md "Network paths"). The robot
+# address is machine-local: substitute it, never commit it.
 nssm set ot2-gateway-complexation AppEnvironmentExtra `
     OT2_EQUIPMENT_ID=ot2_complexation `
     OT2_EQUIPMENT_NAME="Opentrons OT-2 (Complexation)" `
-    OT2_HOST_ALIAS=169.254.40.81 `
-    OT2_HTTP_BASE_URL=http://100.64.254.19:31951 `
+    OT2_HOST_ALIAS=<robot-wired-ip> `
+    OT2_HTTP_BASE_URL=http://<robot-wired-ip>:31950 `
     OT2_PLATE_STATE_PATH=C:\ProgramData\ot2_complexation\ot2_state.json `
     OT2_DECK_STATE_PATH=C:\ProgramData\ot2_complexation\ot2_deck_state.json `
     OT2_TIP_STATE_PATH=C:\ProgramData\ot2_complexation\ot2_tip_state.json `
