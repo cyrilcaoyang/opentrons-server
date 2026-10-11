@@ -29,6 +29,47 @@ Install with `uv sync --extra labware --extra platebalance`. Set
 }
 ```
 
+### Transport: through a weigh-every-plate service
+
+Where a [weigh-every-plate](https://github.com/cyrilcaoyang/weigh-every-plate)
+service on the same PC owns the balance (a balance lift under it, as on
+Complexation since 2026-10-11), the gateway does not open the port. Replace
+the serial fields with:
+
+```json
+{
+  "model": "WZB254-N",
+  "slot": "9",
+  "transport": "weigh_every_plate",
+  "weigher_url": "http://127.0.0.1:8078",
+  "weigher_owner": "ot2-complexation-gateway"
+}
+```
+
+`weigher_url` is the address the weigher binds. On Complexation that is the
+UPLC PC's own Tailscale address, not loopback: that PC's firewall is off on its
+LAN profiles, so the weigher must not listen on `0.0.0.0`, and binding the
+Tailscale address lets the dashboard poll it too.
+`com_port` must then be absent, and `weigher_url` is refused with the default
+`"transport": "serial"`, so every existing install is unchanged. Read, Tare and
+Zero keep every rule below: the gateway still sends tare once, waits for two
+stable near-zero readings, never resends after silence, and latches
+`unknown_outcome` when a command may have reached the balance. The weigher
+runs the serial frame with the same WZB254-N commands (`ESC P`, `ESC U`,
+`ESC V`) and parser, and reports a silent balance (`no_frame`) and a frame
+that is not a weight (`unreadable`, `underload`, `overload`) as conditions,
+which the gateway treats exactly as the serial driver's empty and unparseable
+frames.
+
+The weigher's control routes are claim-gated. The gateway claims it for one
+whole action, a tare wait included, so nothing can move the lift mid-tare, and
+releases it afterwards; an operator can drive the lift through the SDK between
+gateway actions. If the weigher is claimed by someone else, refuses a
+precondition (for example the lift is moving), or cannot be reached before any
+command was written, the action fails with outcome `not_sent` and no unknown
+outcome is latched. `/status` reports the transport under
+`details.platebalance.transport`.
+
 The slot defaults to **9**; explicitly set `slot` for other installations.
 Changing it does not move or retire any recorded tips or labware. The optional
 `adapter_height_mm` field is metadata only. Single well plates with definition height

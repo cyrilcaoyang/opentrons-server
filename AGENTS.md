@@ -128,7 +128,11 @@ lab-skills / dashboard / agents          this repo                        robot
   See `docs/PLATE_ASSEMBLIES.md`; no tip racks or module layouts are supported.
 - **Local plate balance:** optional `platebalanceV1` defaults to OT-2 slot 9 (configurable) via
   `OT2_PLATEBALANCE_CONFIG`. It is a local serial peripheral, never an Opentrons
-  `loadModule` model. Status is cache-only; Read/Tare/Zero use the command lock
+  `loadModule` model.
+  With `"transport": "weigh_every_plate"` a weigh-every-plate service on the
+  same PC owns the port (Complexation, under its balance lift) and the gateway
+  reads, tares and zeroes through that service's claim-gated API; the default
+  `serial` transport is unchanged for every other install. Status is cache-only; Read/Tare/Zero use the command lock
   and claim/state gates. Preserve conflicting slot records for reconciliation.
   Single well plates strictly below 25 mm may use `support_module: "platebalanceV1"`
   in their slot declaration; preserve this marker and full definition. This is
