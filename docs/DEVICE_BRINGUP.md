@@ -30,7 +30,7 @@ Pick these before starting; everything below is written in terms of them.
 | `<id>` | `equipment.yaml` id + `OT2_EQUIPMENT_ID` | `ot2_<bench>` — e.g. `ot2_complexation` |
 | `<name>` | human-readable name | `Opentrons OT-2 (<Bench>)` |
 | `<port>` | gateway listen port | next free on the PC: 8020 (HTE), 8021 (complexation), 8022… |
-| `<robot-ip>` | robot's reachable address — a wired or USB path, not the robot's Wi-Fi tailnet IP (see *Network paths* below) | e.g. `192.168.254.50` |
+| `<robot-ip>` | robot's wired lab-switch address — not the robot's Wi-Fi tailnet IP, and not the gateway PC's address (see *Network paths* below). Lives only in the service's machine-local environment | e.g. `192.168.254.50` |
 | `<ssh-alias>` | SSH config `Host` for the robot | the robot's name, e.g. `ot2training` |
 | `<service>` | NSSM service name | `ot2-gateway-<bench>`, always suffixed |
 | `<dir>` | repo clone directory | `C:\Users\sdl2\Projects\opentrons-server` — **one clone serves every instance** on the PC (see the note below) |
@@ -38,15 +38,22 @@ Pick these before starting; everything below is written in terms of them.
 
 **Current fleet** (for port/name collision checks):
 
-| id | gateway host | robot | robot address | port | service |
+| id | gateway host (dashboard polls) | port | robot | robot path (gateway calls) | service |
 |---|---|---|---|---|---|
-| `ot2_hte` | Cytation PC | `ot2cytation` | `192.168.254.50` (wired, lab switch) | 8020 | `ot2-gateway-hte` |
-| `ot2_complexation` | UPLC PC | `ot2training` | `169.254.40.81:31950` (direct USB network) | 8021 | `ot2-gateway-complexation` |
+| `ot2_hte` | Cytation PC (`sdl2-pc-03-cytation`) | 8020 | `ot2cytation` | lab-switch Ethernet, `192.168.254.50` | `ot2-gateway-hte` |
+| `ot2_complexation` | UPLC PC (`sdl2-pc-06-uplc`) | 8021 | `ot2training` | lab-switch Ethernet; address in the service env only | `ot2-gateway-complexation` |
 
-**Network paths.** HTE uses its wired lab-switch address. Since the
-2026-09-30 migration, the Complexation gateway runs on the UPLC PC and connects
-directly to the robot's USB network at `http://169.254.40.81:31950`. Check robot
-identity (`ot2training`, serial `weathered-dream`) with the required
+**Network paths.** Two addresses per robot, never interchangeable: the
+*gateway* address (PC tailnet name + port, registered in `equipment.yaml`,
+what the dashboard and agents call) and the *robot* address (the robot-server
+on `:31950`, what only the gateway calls). Both robots are reached over the
+lab switch. Complexation's robot address is kept out of version control: read
+it from the service's `OT2_HTTP_BASE_URL` (`nssm get ot2-gateway-complexation
+AppEnvironmentExtra`) or from `details.robot.probe_url` in `/status`. Keep
+`OT2_HOST_ALIAS` on the same address, and keep the robot's SSH host key in the
+service account's `known_hosts`. The lab-switch link has no default gateway;
+robot Wi-Fi/Tailscale remains the robot's internet and management path. Check
+robot identity (`ot2training`, serial `weathered-dream`) with the required
 `Opentrons-Version: *` header. A headerless health request can return HTTP 422
 and must not be mistaken for an unreachable robot.
 
@@ -57,10 +64,11 @@ settings are in the instance's `OT2_PLATEBALANCE_CONFIG` file. The former
 Cytation gateway service remains disabled for rollback. Never start both
 gateway instances together.
 
-The older UPLC portproxy rules (`31951` to the USB robot and `31952` to HTE's
-wired address) are not required by the new Complexation gateway. They were not
-modified by the migration. Robot Wi-Fi/Tailscale remains a distinct path; see
-`OT2_TAILSCALE.md` for its watchdog and failure history.
+The older UPLC portproxy rules (`31951` to Complexation's former USB
+link-local address and `31952` to HTE's wired address) are not used by either
+gateway. Complexation's former direct USB path (`169.254.40.81`, 2026-09-30
+until the lab-switch move) is retired as well. Robot Wi-Fi/Tailscale remains a
+distinct path; see `OT2_TAILSCALE.md` for its watchdog and failure history.
 
 Repoint a gateway with `tools/ot2-set-robot-url.ps1` (elevated, RDP).
 HTE's wired address is a Buildroot `ifupdown` static config in
@@ -69,8 +77,14 @@ carry a `gateway` line: the lab switch is on-link only, and the bogus
 `192.168.254.230` gateway it shipped with black-holed the robot's internet
 (NTP, Tailscale) from 2026-08-14 until removed 2026-09-06 — see
 `OT2_TAILSCALE.md` *Traps*.
-A future lab-switch connection for Complexation would require a separate
-connection change; the deployed gateway currently uses direct USB networking.
+Complexation's wired address is a NetworkManager setup, not ifupdown. The
+factory `wired` and `wired-linklocal` profiles are regenerated at boot, so a
+custom address stored in them is lost on reboot. It lives in a separate
+persistent profile with `connection.autoconnect-priority >= 2` (the factory
+`wired` file asks for exactly this) and no gateway. Verify the profile file on
+disk and after `nmcli connection reload`; a live connection alone does not
+prove the address survives a reboot. After a robot restart, confirm the
+address and the absence of a default route on `eth0` before trusting control.
 
 > ⚠️ **Distinct state paths are mandatory.** The stores default to
 > `./ot2_*.json` relative to the working directory; two instances started

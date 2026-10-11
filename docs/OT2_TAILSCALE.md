@@ -8,7 +8,7 @@ as a static binary from the persistent `/data` partition in
 
 Both robots follow this layout. Neither gateway *depends* on it for control
 any more (see `DEVICE_BRINGUP.md` *Network paths*): HTE is reached by wire,
-Complexation through the UPLC PC USB bridge. Tailscale on the robot is for
+Complexation by wire too (lab-switch Ethernet). Tailscale on the robot is for
 SSH access (`tailscale up --ssh`) and for the Opentrons App.
 
 ## Layout
@@ -308,7 +308,7 @@ Tailscale out of `resolv.conf`. `--hostname` is why the tailnet shows
 |---|---|---|
 | `ot2_hte` (`ot2cytation`) | `ssh ot2_local` → `root@192.168.254.50`, lab switch | key `~/.ssh/ot2_ssh_key` (passphrase-protected; load it into `ssh-agent` first) |
 | Flex (`sdl2-otflex-01`) | `ssh otflex_local` → `root@192.168.254.81`, lab switch | same key |
-| `ot2_complexation` (`ot2training`) | `ssh -J sdl2@100.64.254.19 root@169.254.40.81` — the USB-B link, jumping through the UPLC PC | the robot key is authorized on the UPLC PC (`administrators_authorized_keys`, 2026-09-06). Direct from the Cytation PC there is no route; the bridge forwards port 31950 only. |
+| `ot2_complexation` (`ot2training`) | `ssh root@<robot-wired-ip>`, lab switch — the address is the gateway's `OT2_HOST_ALIAS` (machine-local). The former USB-B link-local path `169.254.40.81` through the UPLC PC is retired | same key; the UPLC PC's `known_hosts` already trusts the wired address (the gateway's SSH reads use it) |
 
 ## Installed versions
 

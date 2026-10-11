@@ -237,9 +237,17 @@ lab-skills / dashboard / agents          this repo                        robot
 - **Gateway hosts are separate.** HTE remains on Cytation; Complexation runs
   on UPLC. Bench tools that assume both services are local must be reviewed
   for the correct host before use. Preserve each instance's independent state.
-- **Complexation uses the UPLC PC's direct USB network.** Since the 2026-09-30
-  host migration, `OT2_HTTP_BASE_URL` is `http://169.254.40.81:31950` on UPLC.
-  The gateway no longer depends on the cross-PC portproxy or robot Wi-Fi.
+- **Both robots are controlled over lab-switch Ethernet.** Keep two addresses
+  apart: the *gateway* address the dashboard polls (Complexation:
+  `sdl2-pc-06-uplc:8021`, in `equipment.yaml`) and the *robot* address the
+  gateway calls. The robot address lives only in the service's machine-local
+  NSSM environment (`OT2_HTTP_BASE_URL`, with `OT2_HOST_ALIAS` on the same
+  address); do not commit it. Complexation's former USB link-local path and
+  the UPLC portproxy are no longer its control path, and robot Wi-Fi/Tailscale
+  carries only internet and management traffic. Its wired address is a
+  separate persistent NetworkManager profile, because the factory `wired` /
+  `wired-linklocal` profiles are regenerated at boot (DEVICE_BRINGUP.md
+  *Network paths*).
   Verify `ot2training` / `weathered-dream` when changing the connection. Since
   2026-09-06 the gateway watches the path itself: three failed probes (~15 s)
   flip `/status` to `unknown` with `components.robot: unreachable` and
