@@ -139,7 +139,7 @@ $principal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw ("This script reconfigures a Windows service and must run ELEVATED. " +
-           "UAC prompts render only inside an interactive RDP session on this PC — " +
+           "UAC prompts render only inside an interactive RDP session on this PC -- " +
            "open an elevated PowerShell there and re-run.")
 }
 

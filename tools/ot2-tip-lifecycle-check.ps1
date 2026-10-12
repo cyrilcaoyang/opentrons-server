@@ -13,13 +13,13 @@
 
     Prints a plan and stops unless -Run is given.
 
-    Complexation only. It refuses port 8020 outright — ot2_hte runs real
+    Complexation only. It refuses port 8020 outright -- ot2_hte runs real
     campaigns and is never a test target.
 
 .PARAMETER ApiKey
     Optional override. Normally omitted: the key is resolved automatically, in
     order, from $env:OT2_API_KEYS then the gateway service's own NSSM
-    environment. Claims are login-gated, so some key is required — the point of
+    environment. Claims are login-gated, so some key is required -- the point of
     resolving it here is that a hand-pasted one is the step that keeps failing.
 
     The value is never printed. Only its source and principal name are.
@@ -83,7 +83,7 @@ function Resolve-ApiKey {
     if ($ServiceName) {
         $nssm = "C:\SDL_Tools\nssm.exe"
         if (Test-Path $nssm) {
-            # `nssm get` reads service config and works unelevated — but it
+            # `nssm get` reads service config and works unelevated -- but it
             # writes "LsaOpenPolicy(): Access is denied" to stderr while doing
             # so, and under ErrorActionPreference=Stop a native command's
             # stderr is a TERMINATING error even with 2>$null. So relax it for
@@ -129,9 +129,9 @@ foreach ($k in ($d.tip_racks.PSObject.Properties.Name | Sort-Object { [int]$_ })
 
 if (-not $Run) {
     Write-Host ""
-    Write-Host "PLAN (nothing done — pass -Run to execute):" -ForegroundColor Yellow
+    Write-Host "PLAN (nothing done -- pass -Run to execute):" -ForegroundColor Yellow
     Write-Host "  1. claim the gateway"
-    Write-Host ("  2. POST /control/pick-up-tip {{pipette: {0}}}  — gateway auto-selects rack + well" -f $Pipette)
+    Write-Host ("  2. POST /control/pick-up-tip {{pipette: {0}}}  -- gateway auto-selects rack + well" -f $Pipette)
     Write-Host "  3. read the origin well: expect on_pipette, and a mount record"
     Write-Host "  4. POST /control/drop-tip back into that same well"
     Write-Host "  5. read it again: expect new (the tip never touched liquid)"
@@ -139,7 +139,7 @@ if (-not $Run) {
     exit 0
 }
 
-# A claim held by someone else — very often the operator's own panel session —
+# A claim held by someone else -- very often the operator's own panel session --
 # makes the POST below a 409 and a raw WebException. Name the holder instead:
 # the fix is a click in the panel, not a retry.
 $held = (Invoke-RestMethod -Uri "$base/status" -TimeoutSec 10).details.claimed_by
@@ -164,7 +164,7 @@ try {
 
     $d = Get-Racks
     $m = $d.mounted_tips.$Pipette
-    if (-not $m) { throw "picked, but no mount was recorded — that is the bug this checks for." }
+    if (-not $m) { throw "picked, but no mount was recorded -- that is the bug this checks for." }
     $rack = $m.rack; $well = $m.well
     Write-Host ("picked   : rack {0} well {1} | contacted_liquid={2} | uncertain={3}" -f `
         $rack, $well, $m.contacted_liquid, $m.uncertain) -ForegroundColor Green
@@ -178,17 +178,17 @@ try {
     $after = $d.tip_racks.$rack.tips.$well
     if (-not $after) { $after = "new (absent from the map = fresh)" }
     Write-Host ("returned : {0}   <-- expect new" -f $after) -ForegroundColor Green
-    $left = "none — mount cleared"
+    $left = "none -- mount cleared"
     # -gt 0, not -ne 0: an empty object's property count comes back $null, and
-    # ($null -ne 0) is TRUE — which printed the raw "{}" instead of the plain
+    # ($null -ne 0) is TRUE -- which printed the raw "{}" instead of the plain
     # answer on the one line the check exists to report.
     if ($d.mounted_tips.PSObject.Properties.Count -gt 0) { $left = ($d.mounted_tips | ConvertTo-Json -Compress) }
     Write-Host ("mounted  : {0}" -f $left)
 }
 finally {
     # Home before releasing, whatever happened. `drop_tip` leaves the head over
-    # the rack it just used — the gateway does not home on its own, and there is
-    # no reason it should mid-protocol — but a bench tool that hands the robot
+    # the rack it just used -- the gateway does not home on its own, and there is
+    # no reason it should mid-protocol -- but a bench tool that hands the robot
     # back parked over a deck slot is a tool that obstructs the next person and
     # starts the next operation from an arbitrary position. Homing is idempotent
     # and retracts Z first, so it is also the right thing after a failure.
@@ -199,7 +199,7 @@ finally {
         Invoke-RestMethod -Uri "$base/control/home" -Method Post -Headers $hdr -TimeoutSec 120 | Out-Null
         Write-Host "homed"
     } catch {
-        Write-Warning ("home failed: {0} — the head may still be over the deck." -f $_.Exception.Message)
+        Write-Warning ("home failed: {0} -- the head may still be over the deck." -f $_.Exception.Message)
     }
     Invoke-RestMethod -Uri "$base/control/release" -Method Post -Headers $hdr -TimeoutSec 10 | Out-Null
     Write-Host "released"

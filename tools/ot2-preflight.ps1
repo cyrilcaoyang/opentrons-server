@@ -6,21 +6,21 @@
     Reads /status from each gateway and prints the handful of fields an operator
     actually checks before touching a robot: health, whether anything is on a
     head, who holds the claim, and what the tip tracker believes about each
-    rack. Read-only — it issues nothing but GETs, so it is safe at any time,
+    rack. Read-only -- it issues nothing but GETs, so it is safe at any time,
     including mid-run.
 
     It exists because those fields are scattered across a deep `details` blob,
     and the two that matter most are easy to miss:
 
-    * `mounted tips` — a tip left on a head by an earlier run. The gateway now
+    * `mounted tips` -- a tip left on a head by an earlier run. The gateway now
       records this across restarts, so "none" here is a real answer rather than
       an absence of memory.
-    * `channels` / `volumes` — the two pipette bindings, judged SEPARATELY
+    * `channels` / `volumes` -- the two pipette bindings, judged SEPARATELY
       because they resolve differently. Both come from the robot's instrument
       report, via a /control/setup recipe or (declared-deck flow) per-call by
       mount. `volumes` empty means the live per-pipette guard is genuinely
       inactive and only the 0-1000 uL schema bound applies. `channels` empty
-      with a reachable probe is normal on a declared deck — mount-addressed
+      with a reachable probe is normal on a declared deck -- mount-addressed
       picks still resolve; only a nickname-addressed pipette with no recipe
       falls back to 1 tip, which would track an 8-channel pick as one.
       The script spells out which case it is, because both are silent.
@@ -54,7 +54,7 @@ foreach ($p in $Ports) {
         $s = Invoke-RestMethod -Uri "http://${BaseHost}:$p/status" -TimeoutSec 10
     } catch {
         Write-Output ""
-        Write-Output ("=== port {0} UNREACHABLE — {1}" -f $p, $_.Exception.Message)
+        Write-Output ("=== port {0} UNREACHABLE -- {1}" -f $p, $_.Exception.Message)
         continue
     }
     $d = $s.details
@@ -91,18 +91,18 @@ foreach ($p in $Ports) {
     # Interpretation, not just fields. The two bindings are independent and must
     # be judged separately: keying both off `channels` claimed the volume guard
     # was inactive on a declared-deck robot where it is in fact live off the
-    # probe — the exact over-warning this script exists to prevent.
+    # probe -- the exact over-warning this script exists to prevent.
     $volBound   = ($d.pipette_volumes.PSObject.Properties.Count -gt 0)
     $haveProbe  = (@($d.robot.instruments).Count -gt 0)
 
     if (-not $volBound) {
-        Write-Output "  NOTE     : per-pipette volume guard INACTIVE — only the schema bound"
+        Write-Output "  NOTE     : per-pipette volume guard INACTIVE -- only the schema bound"
         Write-Output "             (0-1000 uL) applies, so an over-volume aspirate reaches the robot."
         if ($haveProbe) {
             # The probe knows the limits, so the gateway is the part that cannot
             # read them: a build older than the mount-addressed fallback.
             Write-Output "             The robot probe DOES report limits, so this gateway predates"
-            Write-Output "             the probe fallback — pull and restart the service to fix it."
+            Write-Output "             the probe fallback -- pull and restart the service to fix it."
         } else {
             Write-Output "             No robot probe to read limits from; resolves when the robot"
             Write-Output "             is reachable."
@@ -123,7 +123,7 @@ foreach ($p in $Ports) {
     $onHead = 0
     foreach ($k in $d.tip_racks.PSObject.Properties.Name) { $onHead += [int]$d.tip_racks.$k.on_pipette }
     if ($onHead -gt 0) {
-        Write-Output ("  NOTE     : {0} well(s) read on_pipette — a tip is off the rack. Resolve it" -f $onHead)
+        Write-Output ("  NOTE     : {0} well(s) read on_pipette -- a tip is off the rack. Resolve it" -f $onHead)
         Write-Output "             (return to its own well, or drop to trash) before a new run."
     }
 }

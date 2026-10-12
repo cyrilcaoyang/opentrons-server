@@ -108,7 +108,10 @@ lab-skills / dashboard / agents          this repo                        robot
   encode, worth knowing before writing another: `nssm set AppEnvironmentExtra`
   **replaces** the whole variable block rather than appending, and `nssm get`
   writes to stderr even when it succeeds — which is a *terminating* error under
-  `ErrorActionPreference = "Stop"` despite `2>$null`.
+  `ErrorActionPreference = "Stop"` despite `2>$null`. Keep the scripts
+  **ASCII-only**: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI,
+  so an em dash inside a string becomes a stray quote and the script fails to
+  parse (seen on the UPLC PC, 2026-10-12).
 - **Live testing happens on Complexation only**, through the edge-gated panel
   at `http://100.64.254.6/ot2/complexation/ui/`. **Never HTE** (`ot2_hte`,
   :8020) — it runs real campaigns. This applies to any hands-on check: manual

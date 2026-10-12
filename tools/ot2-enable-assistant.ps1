@@ -9,7 +9,7 @@
     That preservation is the whole point of the script. `nssm set
     AppEnvironmentExtra` REPLACES the entire variable block rather than adding
     to it, so the naive one-liner silently drops OT2_EQUIPMENT_ID, the three
-    state paths, the SSH password and the edge secret — a gateway that then
+    state paths, the SSH password and the edge secret -- a gateway that then
     comes back pointed at the wrong robot with no state. This reads the current
     block, changes exactly one entry, writes it back, and refuses to proceed if
     the variable count would change unexpectedly.
@@ -44,7 +44,7 @@ $principal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw ("This script reconfigures a Windows service and must run ELEVATED. " +
-           "UAC prompts render only inside an interactive RDP session on this PC — " +
+           "UAC prompts render only inside an interactive RDP session on this PC -- " +
            "open an elevated PowerShell there and re-run.")
 }
 
@@ -78,7 +78,7 @@ if ($updated.Count -ne $expected) {
 
 $after = @((& $nssm get $Service AppEnvironmentExtra 2>$null) -split "`r?`n" | Where-Object { $_ -match "=" })
 Write-Host ("after : {0} variables" -f $after.Count) -ForegroundColor Cyan
-if ($after.Count -ne $expected) { throw "Write-back changed the variable count — inspect before restarting." }
+if ($after.Count -ne $expected) { throw "Write-back changed the variable count -- inspect before restarting." }
 Write-Host ("  $VAR is now: {0}" -f ($after | Where-Object { $_ -like "$VAR=*" })) -ForegroundColor Green
 
 # Names only, so a dropped variable is visible without printing any secret.
