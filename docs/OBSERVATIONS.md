@@ -286,8 +286,11 @@ acquisition tokens it was committed under (`session_generation`,
 - `current`: committed under the current session generation, validity
   generation, epoch and geometry revision, with nothing in flight.
 - `superseded`: a later command may have moved the gantry. `reason`:
-  `move_in_flight`, `this_mount_moved`, `other_mount_moved`, `external_run`.
-  Stays visible as last-known, with the superseding `move_id`.
+  `move_in_flight` (a motion command is outstanding), `other_mount_moved`
+  (the other mount's move succeeded), `unattributed_move` (a move tied to no
+  mount succeeded, such as `home`, or an SSH action), `external_run`. Stays
+  visible as last-known, with the superseding `move_id`. A mount's own move
+  never leaves it `superseded`: it ends `current` or `invalid`.
 - `invalid`, `xyz_mm` null: `move_failed`, `pose_unknown_after_command`
   (pickup, drop, unlisted, non-success outcomes), `read_failed` (a position
   read that failed cannot confirm the earlier value), `session_lost`,
