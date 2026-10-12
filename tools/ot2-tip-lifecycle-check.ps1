@@ -13,8 +13,10 @@
 
     Prints a plan and stops unless -Run is given.
 
-    Complexation only. It refuses port 8020 outright -- ot2_hte runs real
-    campaigns and is never a test target.
+    Either robot (-Port 8021 Complexation, the default, or 8020 HTE), per
+    AGENT_RULES.md rule 4a: run it only when a human asks, and only while the
+    robot is free. With -Run it refuses unless the gateway is idle with no
+    plan or automation, no claim, no external run and no tip on a head.
 
 .PARAMETER ApiKey
     Optional override. Normally omitted: the key is resolved automatically, in
@@ -46,7 +48,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if ($Port -eq 8020) { throw "Refusing: 8020 is ot2_hte, which runs real campaigns. Complexation (8021) only." }
 
 if (-not $Service) {
     $Service = switch ($Port) {
@@ -142,7 +143,16 @@ if (-not $Run) {
 # A claim held by someone else -- very often the operator's own panel session --
 # makes the POST below a 409 and a raw WebException. Name the holder instead:
 # the fix is a click in the panel, not a retry.
-$held = (Invoke-RestMethod -Uri "$base/status" -TimeoutSec 10).details.claimed_by
+$now = Invoke-RestMethod -Uri "$base/status" -TimeoutSec 10
+$busy = @()
+if ($now.activity -ne "idle") { $busy += "activity is $($now.activity)" }
+if ($now.details.automation) { $busy += "a plan or automation is running" }
+if ($now.details.robot.run_active -ne $false) { $busy += "the robot reports an active run (or its run list is unreadable)" }
+if ($now.details.mounted_tips.PSObject.Properties.Count -gt 0) { $busy += "a tip is already on a head" }
+if ($busy.Count -gt 0) {
+    throw ("Refusing: the robot is not free -- {0}. Wait until it is idle, then re-run." -f ($busy -join "; "))
+}
+$held = $now.details.claimed_by
 if ($held) {
     # One format string, not a concatenation: `-f` binds to the string
     # immediately left of it, so ("a {0}" + "b {1}" -f $x, $y) formats only the

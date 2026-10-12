@@ -46,11 +46,14 @@ agent working here must hold onto.
    hardware. Hardware verification is a human-at-the-bench activity, planned in
    advance, on a robot known to be free. `pytest -m 'not integration'` is the
    default; assume it.
-4a. **When a live check is genuinely needed, it happens on Complexation
-   only**, via `http://100.64.254.6/ot2/complexation/ui/`. The HTE robot
-   (`ot2_hte`, :8020) is off limits — it runs real campaigns, and an
-   exploratory move there costs someone their experiment. No exceptions
-   without a human saying so for that specific check.
+4a. **When a live check is genuinely needed, it may run on either robot**
+   (Complexation `ot2_complexation`, :8021, or HTE `ot2_hte`, :8020), with
+   the same rules for both: only when a human asks for that check, and only
+   while the robot is free — idle, no plan or automation running, no claim
+   held, no external run — confirmed from `/status` immediately before the
+   first motion. Both robots run real work; a check that starts on a busy
+   robot costs someone their experiment. (Changed 2026-10-12 at the owner's
+   request; HTE was previously off limits.)
 5. **Both gateways share one checkout, one venv, and one PC.** Ports 8020 (HTE)
    and 8021 (Complexation) run from the same working tree on
    `sdl2-pc-03-cytation`. An edit here is live for **both** robots on the next

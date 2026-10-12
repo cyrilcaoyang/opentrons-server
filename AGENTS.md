@@ -112,12 +112,13 @@ lab-skills / dashboard / agents          this repo                        robot
   **ASCII-only**: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI,
   so an em dash inside a string becomes a stray quote and the script fails to
   parse (seen on the UPLC PC, 2026-10-12).
-- **Live testing happens on Complexation only**, through the edge-gated panel
-  at `http://100.64.254.6/ot2/complexation/ui/`. **Never HTE** (`ot2_hte`,
-  :8020) — it runs real campaigns. This applies to any hands-on check: manual
+- **Live testing may happen on either robot**, under `AGENT_RULES.md` rule 4a:
+  only when a human asks for that check, and only while the robot is free
+  (idle, no plan or automation, no claim, no external run), checked on
+  `/status` right before the first motion. HTE and Complexation are treated
+  the same since 2026-10-12. This applies to any hands-on check: manual
   clicks, `curl` against `/control/*`, bench acceptance. The two deploy
-  checkouts track the same branch, so a change reaches both robots; the
-  *testing* does not.
+  checkouts track the same branch, so a change reaches both robots.
 - **UI:** `cd ui && npm run typecheck` / `npm run build`. The build must be
   committed as `ui_dist/` for the wheel to serve `/ui`.
 - **Fail-fast style.** Do not add defensive code that swallows exceptions and

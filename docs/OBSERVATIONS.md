@@ -568,10 +568,11 @@ session generation; the clock bounds follow §4.7.
   plan, pause and error; confirm no claim changes and no extra commands in the
   run log; run the 5 Hz polling ceiling during a plan. Its right `p20_multi`
   exercises the 8-channel reference-point rules.
-- **HTE**, passive only, never interrupting campaigns: no control actions, no
-  claims, no jogs. Once deployed there, the twin reads `/observations` during
-  normal campaigns and checks HTE's reference points, calibration metadata and
-  mappings against what it sees. The only robot traffic the feature adds is
+- **HTE**: the twin reads `/observations` during normal campaigns and checks
+  HTE's reference points, calibration metadata and mappings against what it
+  sees. Since 2026-10-12 operator-run motion checks may also run on HTE, under
+  the same rule as Complexation (`AGENT_RULES.md` rule 4a): only between
+  campaigns, while the robot is free. The only robot traffic the feature adds is
   the calibration-metadata read (3 GETs, session start then every 10 min),
   agreed for both robots on 2026-10-11; a per-gateway setting turns it off.
 

@@ -33,10 +33,9 @@
 
     Prints a plan and stops unless -Run is given.
 
-    Unlike ot2-tip-lifecycle-check.ps1 this does NOT refuse port 8020. That
-    refusal exists because *actuating* HTE would collide with real campaigns;
-    this script cannot move the robot, and HTE is where tracker drift actually
-    has to be repaired. Repairing state is not bench testing.
+    Unlike ot2-tip-lifecycle-check.ps1 this does not require the robot to be
+    free of campaigns for motion: it cannot move the robot. Repairing state is
+    not bench testing.
 
 .PARAMETER Slots
     Optional override: repair exactly these slots instead of the detected set.

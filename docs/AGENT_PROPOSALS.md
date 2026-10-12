@@ -198,9 +198,9 @@ The server probes `GET /` at startup and exits non-zero if the gateway is
 unreachable — a silent, dead MCP server looks to a model like a robot with no
 state, which is the wrong impression to give it.
 
-> **Register Complexation only.** Hands-on OT-2 work goes through
-> `http://100.64.254.6/ot2/complexation/ui/`. The HTE robot (`:8020`) runs real
-> campaigns and is off limits — see `AGENT_RULES.md` rule 4a.
+> **Hands-on OT-2 work** may target either robot (Complexation `:8021`, HTE
+> `:8020`), only when a human asks for it and only while that robot is free —
+> see `AGENT_RULES.md` rule 4a.
 
 If the gateway runs with `OT2_REQUIRE_LOGIN`, pass `--api-key` (or
 `OT2_MCP_API_KEY`) — and make it an **`OT2_PROPOSER_KEYS`** entry, not an

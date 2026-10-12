@@ -37,8 +37,8 @@ are identical on both:
 
 | instance | `OT2_EQUIPMENT_ID` | port | notes |
 |---|---|---|---|
-| HTE | `ot2_hte` | 8020 | runs real campaigns |
-| Complexation | `ot2_complexation` | 8021 | the instance used for hands-on testing |
+| HTE | `ot2_hte` | 8020 | runs real campaigns; hands-on checks only while free |
+| Complexation | `ot2_complexation` | 8021 | hands-on checks only while free |
 
 What genuinely differs per instance is configuration, not API: equipment id
 and name, `OT2_HOST_ALIAS` / `OT2_HTTP_BASE_URL` (which robot, and by which

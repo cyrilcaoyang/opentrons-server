@@ -27,7 +27,8 @@ See [review findings and limits](PACKAGE_REVIEW.md).
   motion without a Z-retract waypoint.
 - [ ] Operator-planned physical acceptance, including stopping an in-flight
   setup command and observing module states. Develop/test with fakes only;
-  OT-2 acceptance is Complexation only. No deployment performed.
+  OT-2 acceptance runs on either robot while it is free (`AGENT_RULES.md`
+  rule 4a). No deployment performed.
 - [ ] Migrate central `lab-skills` action definitions and sample-prep callers
   in their own repositories after reviewing the proposed external changes.
 - [ ] Future features: 96-channel/partial-layout tracking, moving tracked tip

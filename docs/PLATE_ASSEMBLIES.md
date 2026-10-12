@@ -93,7 +93,8 @@ volume automatically; collector samples are never folded onto the filter's wells
 conformance, persistence, declared/observed provenance, covered-collector guards,
 session transitions and transport parity. UI tests cover declaration preservation.
 
-After a reviewed deployment, operator acceptance is on **Complexation only**:
+After a reviewed deployment, operator acceptance runs on either robot while it
+is free (`AGENT_RULES.md` rule 4a):
 verify the actual riser lift and seated pair dimensions, use empty plates and
 approved motion checks to confirm well positions/clearance, then verify collector
 access only after ending the session and redeclaring. No development test moves

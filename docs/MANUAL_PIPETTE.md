@@ -155,7 +155,8 @@ claims, state and stop guards, bounds, speed/path preservation, controller
 readback, unknown outcomes, and mount resolution. UI tests verify the disabled
 initial state, controls, precision and HTTP clipboard behavior.
 
-After reviewed deployment, operator acceptance belongs on **Complexation only**.
+After reviewed deployment, operator acceptance runs on either robot while it is
+free (`AGENT_RULES.md` rule 4a).
 With a clear deck and known tip state, check each axis with a small increment,
 check both mounts, compare the copied XYZ with the displayed readback, and verify
 speed and stop behavior using the approved acceptance procedure. Development
