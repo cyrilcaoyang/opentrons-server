@@ -42,8 +42,8 @@ agent working here must hold onto.
 ## 2. Driving the robot from this repo
 
 4. **Never actuate a robot to test a code change.** This repo's tests run
-   against `dry_run=True`, mocks, and fixtures — all 400 of them, with no
-   hardware. Hardware verification is a human-at-the-bench activity, planned in
+   against `dry_run=True`, mocks, and fixtures — every test in `tests/unit/`
+   (count in `AGENTS.md` §3), with no hardware. Hardware verification is a human-at-the-bench activity, planned in
    advance, on a robot known to be free. `pytest -m 'not integration'` is the
    default; assume it.
 4a. **When a live check is genuinely needed, it may run on either robot**
@@ -54,11 +54,16 @@ agent working here must hold onto.
    first motion. Both robots run real work; a check that starts on a busy
    robot costs someone their experiment. (Changed 2026-10-12 at the owner's
    request; HTE was previously off limits.)
-5. **Both gateways share one checkout, one venv, and one PC.** Ports 8020 (HTE)
-   and 8021 (Complexation) run from the same working tree on
-   `sdl2-pc-03-cytation`. An edit here is live for **both** robots on the next
-   restart, and `uv sync` can disturb a running service (see `AGENTS.md`).
-   Treat every change as a two-robot change.
+5. **Each gateway runs from its own deploy checkout, venv and PC; both track
+   `main`.** HTE (:8020) runs from `C:\SDL_Deploy\ot2-hte` on the Cytation PC,
+   Complexation (:8021) from `C:\SDL_Deploy\ot2-complexation` on the UPLC PC
+   (since 2026-08-08). Editing a development tree changes nothing a robot
+   runs; a change reaches a robot only when someone deploys it there (pull,
+   `uv sync` if dependencies changed, restart), and only while that robot is
+   free. Because both checkouts track the same branch, every merged change is
+   a two-robot change, yet the two can sit on different commits: confirm what
+   each one runs on the wire (`/status`, `/openapi.json`). `uv sync` can
+   disturb a running service (see `AGENTS.md` §4).
 6. **Never weaken the claim gate to make something work.** `enforce_claims`,
    `OT2_REQUIRE_LOGIN`, and the `X-Claim-Token` check are the concurrency and
    identity boundary. Turning one off to get a call through is the exact move
