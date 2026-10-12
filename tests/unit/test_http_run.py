@@ -293,6 +293,92 @@ def test_stop_run_noop_without_run():
     assert session.calls == []
 
 
+def _run_status(status):
+    return FakeResponse(200, {"data": {"id": "run-1", "status": status}})
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr("opentrons_server.control.http_run.time.sleep", sleeps.append)
+    return sleeps
+
+
+def test_stop_run_waits_until_the_run_reads_stopped(no_sleep):
+    # The robot acknowledges stop at once but refuses a new run until the old
+    # one leaves stop-requested/finishing (HTE, 2026-10-12).
+    session = FakeSession(
+        [
+            FakeResponse(200, {"data": {}}),
+            _run_status("stop-requested"),
+            _run_status("finishing"),
+            _run_status("stopped"),
+        ]
+    )
+    client = _client(session)
+    client.run_id = "run-1"
+    client.stop_run()
+    assert [c["method"] for c in session.calls] == ["POST", "GET", "GET", "GET"]
+    assert session.calls[0]["json"] == {"data": {"actionType": "stop"}}
+    assert all(c["url"] == "http://robot:31950/runs/run-1" for c in session.calls[1:])
+    assert len(no_sleep) == 2
+
+
+@pytest.mark.parametrize("status", ["stopped", "failed", "succeeded"])
+def test_stop_run_returns_on_any_terminal_status(no_sleep, status):
+    session = FakeSession([FakeResponse(200, {"data": {}}), _run_status(status)])
+    client = _client(session)
+    client.run_id = "run-1"
+    client.stop_run()
+    assert len(session.calls) == 2
+    assert no_sleep == []
+
+
+def test_stop_run_still_waits_when_the_stop_action_is_refused(no_sleep):
+    # A 409 on the stop action is also what "already stopping" looks like.
+    session = FakeSession(
+        [
+            FakeResponse(409, {"errors": [{"detail": "Run is stop-requested"}]}),
+            _run_status("stop-requested"),
+            _run_status("stopped"),
+        ]
+    )
+    client = _client(session)
+    client.run_id = "run-1"
+    client.stop_run()
+    assert [c["method"] for c in session.calls] == ["POST", "GET", "GET"]
+
+
+def test_stop_run_gives_up_after_the_settle_timeout(no_sleep, monkeypatch, caplog):
+    clock = iter([0.0, 0.1, 5.0])
+    monkeypatch.setattr("opentrons_server.control.http_run.time.monotonic", lambda: next(clock))
+    session = FakeSession([FakeResponse(200, {"data": {}}), _run_status("stop-requested"),
+                           _run_status("stop-requested")])
+    client = _client(session)
+    client.run_id = "run-1"
+    with caplog.at_level("WARNING", logger="opentrons_server.control.http_run"):
+        client.stop_run(settle_timeout_s=1.0)  # must not raise
+    assert len(session.calls) == 3
+    assert "still 'stop-requested'" in caplog.text
+
+
+def test_stop_run_does_not_wait_when_the_status_read_fails(no_sleep):
+    session = FakeSession([FakeResponse(200, {"data": {}}), FakeResponse(404, {"errors": [{"detail": "gone"}]})])
+    client = _client(session)
+    client.run_id = "run-1"
+    client.stop_run()  # must not raise
+    assert len(session.calls) == 2
+    assert no_sleep == []
+
+
+def test_stop_run_unreachable_sends_one_request_and_no_status_reads():
+    session = FakeSession(raises=requests.ConnectionError("down"))
+    client = _client(session)
+    client.run_id = "run-1"
+    client.stop_run()
+    assert len(session.calls) == 1
+
+
 # --- error mapping ----------------------------------------------------------
 
 

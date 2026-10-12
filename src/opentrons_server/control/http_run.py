@@ -41,6 +41,12 @@ _DEFAULT_OPENTRONS_VERSION = os.getenv("OT2_OPENTRONS_VERSION", "3")
 _DEFAULT_COMMAND_TIMEOUT_S = float(os.getenv("OT2_HTTP_COMMAND_TIMEOUT", "120"))
 # Timeout for non-command control-plane calls (create run, get run, register def).
 _DEFAULT_REQUEST_TIMEOUT_S = float(os.getenv("OT2_HTTP_TIMEOUT", "10"))
+# How long stop_run waits for a stopped run to read terminal. An idle run took
+# about 9 s on HTE (2026-10-12); a run stopped mid-command can take longer.
+_STOP_SETTLE_TIMEOUT_S = float(os.getenv("OT2_HTTP_STOP_SETTLE_TIMEOUT", "30"))
+_STOP_SETTLE_POLL_S = 0.25
+# Run statuses after which the robot-server accepts a new run.
+_TERMINAL_RUN_STATUSES = frozenset({"stopped", "failed", "succeeded"})
 
 
 # ---------------------------------------------------------------------------
@@ -694,8 +700,16 @@ class RunEngineClient:
         self.engine_well_known = True
         return run_id
 
-    def stop_run(self) -> None:
-        """Best-effort ``stop`` action; safe to call without a run."""
+    def stop_run(self, settle_timeout_s: float = _STOP_SETTLE_TIMEOUT_S) -> None:
+        """Best-effort ``stop`` action that waits for the run to finish stopping.
+
+        The robot-server acknowledges ``stop`` at once but takes seconds to leave
+        ``stop-requested``/``finishing``, and refuses a new run until then (409
+        "Current run is not idle or stopped", seen on HTE 2026-10-12 when a
+        startup followed a shutdown). So a session is not over until the run
+        reads terminal. Safe to call without a run; an unreachable robot returns
+        at once, and a settle that times out is logged, not raised.
+        """
         if self.run_id is None:
             return
         try:
@@ -705,8 +719,25 @@ class RunEngineClient:
                 json_body={"data": {"actionType": "stop"}},
                 timeout=self.request_timeout_s,
             )
+        except RunEngineUnreachable:
+            return  # shutdown is best-effort; the run id is discarded regardless
         except RunEngineError:
-            pass  # shutdown is best-effort; the run id is discarded regardless
+            pass  # e.g. 409 when a stop is already under way: still wait for it
+        deadline = time.monotonic() + settle_timeout_s
+        status: Any = None
+        while True:
+            try:
+                status = self.get_run().get("status")
+            except RunEngineError as exc:
+                logger.warning("run %s: stop sent, status unreadable (%s); not waiting", self.run_id, exc)
+                return
+            if status in _TERMINAL_RUN_STATUSES:
+                return
+            if time.monotonic() >= deadline:
+                logger.warning("run %s still %r %.0f s after stop; a new run may be refused",
+                               self.run_id, status, settle_timeout_s)
+                return
+            time.sleep(_STOP_SETTLE_POLL_S)
 
     def stop_and_confirm(self, timeout_s: float = 10.0) -> None:
         """Stop this run over a separate connection, then require stopped readback.

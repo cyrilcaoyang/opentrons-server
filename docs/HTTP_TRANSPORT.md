@@ -177,8 +177,9 @@ branches on transport only at control construction and snapshot refresh.
   (optional override; otherwise the official OT-2 GEN2 blow-out rate for the
   loaded model, which equals its dispense rate — was a flat 100 before 2026-10-06),
   `OT2_HTTP_COMMAND_TIMEOUT` (120 s per blocking command),
-  `OT2_HTTP_TIMEOUT` (10 s control-plane calls), `OT2_OPENTRONS_VERSION`
-  (`Opentrons-Version` header, default 3).
+  `OT2_HTTP_TIMEOUT` (10 s control-plane calls),
+  `OT2_HTTP_STOP_SETTLE_TIMEOUT` (30 s for a stopped run to read terminal at
+  shutdown), `OT2_OPENTRONS_VERSION` (`Opentrons-Version` header, default 3).
 - The run engine **requires** `flowRate` on every liquid command — there is
   no protocol-API default on this transport. Precedence per call: explicit
   `flow_rate` > `set_flow_rate()` per-pipette override > env override or model default.
@@ -246,7 +247,7 @@ Every request/response uses the `{"data": {...}}` envelope and carries the
 | Read run + loaded labware/modules/pipettes | `GET /runs/{runId}` |
 | Loaded labware definitions (geometry readbacks) | `GET /runs/{runId}/loaded_labware_definitions` |
 | Register a custom labware definition | `POST /runs/{runId}/labware_definitions` (idempotent per namespace/loadName/version) |
-| Stop a run (shutdown, best-effort) | `POST /runs/{runId}/actions` `{"actionType": "stop"}` |
+| Stop a run (shutdown, best-effort) | `POST /runs/{runId}/actions` `{"actionType": "stop"}`, then `GET /runs/{runId}` until `stopped`/`failed`/`succeeded` (a new run is refused with 409 until then) |
 | Health / external-run probe | `GET /health`, `GET /runs`, `GET /instruments` |
 | Deck lights | `GET`/`POST /robot/lights` (no `data` envelope) |
 | Live module telemetry | `GET /modules` (serial-matched by the control adapter) |
