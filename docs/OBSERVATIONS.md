@@ -1,7 +1,7 @@
 # Observations for external followers
 
-**Status: Phase 1 implemented (2026-10-11), not yet deployed; Phase 2 is
-design only.** Code: `gateway/observations.py`, `GET /observations`;
+**Status: Phase 1 implemented and deployed on both robots (2026-10-11);
+Phase 2 is design only.** Code: `gateway/observations.py`, `GET /observations`;
 fixtures: `tests/fixtures/observations/` (§8.2); Phase 2 examples:
 `docs/observations_examples/phase2_events_draft.json` (hand-written draft). Requested by the digital-twin
 team (Astra). Their twin targets **HTE** (`ot2_hte`: left `p300_multi_gen2`,
