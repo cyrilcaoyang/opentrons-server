@@ -991,9 +991,10 @@ Useful control endpoints:
 
 > **Addressing.** `labware_nickname` accepts the setup recipe's nickname, or —
 > on a declared deck with no recipe — the deck slot (e.g. `"9"`); `pipette`
-> accepts the recipe nickname or the mount (`"left"` / `"right"`). Slot- and
-> mount-addressed gear is loaded into the control session on first use, from
-> the operator's declaration and the robot's own instrument probe, so the
+> accepts the recipe nickname or the mount (`"left"` / `"right"`). Mount-addressed
+> pipettes are loaded on first use, from the robot's own instrument probe; every
+> declared deck item is loaded before the first planned move, so the robot plans
+> around all of it (docs/DECK_STATE.md, *Declared items are obstacles*). The
 > declare-then-run flow needs no `/control/setup`. Request bodies are strict:
 > unknown keys are rejected (422), never silently ignored.
 

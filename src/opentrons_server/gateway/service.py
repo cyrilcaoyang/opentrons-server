@@ -32,7 +32,7 @@ from ..version import __version__ as GATEWAY_VERSION
 from .advanced import ADVANCED_ACTIONS, FLEX_ACTIONS
 from .robot_profile import PROFILE, IS_FLEX
 from ..control.flex_control import FlexHttpControl
-from .platebalance import BalancePipettingGeometry, BalanceStabilityTimeout, PlateBalanceRequest, PlateBalanceV1, load_platebalance_config, validate_balance_plate
+from .platebalance import BalancePipettingGeometry, BalanceStabilityTimeout, PlateBalanceRequest, PlateBalanceV1, balance_obstacle_definition, load_platebalance_config, validate_balance_plate
 from .module_access import require_module_admin
 from .claims import ClaimManager
 from .assemblies import PlateAssembly
@@ -234,6 +234,40 @@ def _module_family(name: Optional[str]) -> Optional[str]:
     return None
 
 
+def _slot_sort_key(slot: str) -> tuple[int, str]:
+    return (int(slot), "") if slot.isdigit() else (0, slot)
+
+
+def _declaration_identity(item: Any) -> Any:
+    """What makes two declarations of one slot the same physical object:
+    a full-layout re-declare that repeats a slot unchanged must compare equal."""
+
+    if item is None:
+        return None
+    if isinstance(item, SlotModule):
+        return ("module", item.module_name, item.local_peripheral)
+    definition = getattr(item, "definition", None)
+    assembly = getattr(item, "assembly", None)
+    # A standard Opentrons definition is fixed by its load name, whether or
+    # not a source carried a copy; only a custom definition is compared.
+    custom = isinstance(definition, dict) and definition.get("namespace") != "opentrons"
+    return (
+        "labware",
+        item.load_name,
+        _digest(definition) if custom and definition else None,
+        getattr(item, "support_module", None),
+        _digest(assembly.model_dump(mode="json")) if assembly is not None else None,
+    )
+
+
+def _is_fixed_trash_declaration(slot: str, item: Any) -> bool:
+    """The OT-2 fixed trash declared in slot 12: a deck fixture the robot
+    models itself (an addressable area), not loadable labware."""
+
+    name = str(getattr(item, "load_name", "") or "")
+    return not IS_FLEX and slot == "12" and "trash" in name and "fixed" in name
+
+
 def _tempmod_engine_name(label: str) -> str:
     """Map a human/declared module_name to the engine's loadModule model."""
 
@@ -248,6 +282,25 @@ def _tempmod_engine_name(label: str) -> str:
 _SSH_NON_MOTION_ACTIONS = frozenset(
     {"pipette_position", "lights.set", "tempmod.set", "tempmod.deactivate",
      "platebalance.read", "platebalance.tare", "platebalance.zero"}
+)
+# Actions that never plan an arc between labware, so they need not wait for
+# every declared deck item to be loaded first: no gantry motion, homing (Z
+# first, straight up), module-internal motion, and the operator's direct jog.
+# Everything else is gated (deny by default), so a new action is gated until
+# someone decides otherwise.
+_DECK_OBSTACLE_EXEMPT_ACTIONS = frozenset(
+    {"setup", "home", "pause", "resume", "jog", "pipette_position",
+     "platebalance.read", "platebalance.tare", "platebalance.zero",
+     "tempmod.set", "tempmod.deactivate",
+     "comment", "delay", "set_flow_rate", "set_speed",
+     "home_pipette", "home_pipette_z", "home_plunger", "prepare_aspirate",
+     "hs_latch_open", "hs_latch_close", "hs_set_and_wait_shake_speed", "hs_deactivate_shaker",
+     "hs_set_target_temperature", "hs_set_and_wait_temperature", "hs_wait_for_temperature",
+     "hs_deactivate_heater", "hs_deactivate", "tempmod_await_temperature",
+     "magmod_engage", "magmod_disengage",
+     "thermocycler_open_lid", "thermocycler_close_lid", "thermocycler_set_block_temperature",
+     "thermocycler_set_lid_temperature", "thermocycler_deactivate_block",
+     "thermocycler_deactivate_lid", "thermocycler_deactivate"}
 )
 def _revisions_of(*, tip_racks: Any, mounted_tips: Any, deck: Dict[str, Any], loaded_plate: Any) -> Dict[str, str]:
     """Opaque content revisions (docs/OBSERVATIONS.md §4.8); the deck's own
@@ -322,6 +375,11 @@ class UnknownOutcomeError(RuntimeError):
 class JogReferenceRefused(RuntimeError):
     """A jog refused before motion: its position read and move would not share
     a critical point (``OT2HttpControl.jog_reference_refusal``)."""
+
+
+class DeckObstaclesNotLoaded(RuntimeError):
+    """A declared deck item could not be loaded into the run, so the robot
+    would plan this move's travel height without it. Raised before motion."""
 
 
 class OT2Service:
@@ -516,6 +574,13 @@ class OT2Service:
         # (startup / shutdown).
         self._session_labware: Dict[str, str] = {}
         self._session_balance_load_name: str | None = None
+        # The balance rig's planning envelope, once loaded into this session:
+        # (labware nickname, load name). Never addressable.
+        self._session_balance_obstacle: tuple[str, str] | None = None
+        # Slots a setup recipe filled in a run that is gone (robot restart,
+        # self-heal). Nothing declares them, so nothing would stand for them in
+        # the new run; planned moves wait for setup again or a shutdown.
+        self._recipe_slots_lost: set[str] = set()
         self._session_pipettes: Dict[str, str] = {}
         self._session_modules: Dict[str, str] = {}
         # Stamp the opening span so `activity_since` is a real instant from the
@@ -594,9 +659,12 @@ class OT2Service:
                     simulation=self.simulation,
                 )
             # A new control session starts empty: anything the previous session
-            # auto-loaded from the declared deck is gone with it.
+            # loaded, from the declared deck or a setup recipe, is gone with it.
+            # Keeping the recipe would make an empty run look loaded.
+            self._forget_recipe()
             self._session_labware = {}
             self._session_balance_load_name = None
+            self._session_balance_obstacle = None
             self._session_pipettes = {}
             self._session_modules = {}
             self.state = OT2ServiceState.READY
@@ -674,11 +742,13 @@ class OT2Service:
                 self.control = None
         self._session_labware = {}
         self._session_balance_load_name = None
+        self._session_balance_obstacle = None
         self._session_pipettes = {}
         self._session_modules = {}
         # Successful session closure invalidates its loaded geometry and names.
         # Keep operator declarations; they can now be edited before a new run.
         self.session_recipe = {"labware": [], "instruments": [], "modules": []}
+        self._recipe_slots_lost = set()
         self.last_snapshot = self._empty_snapshot()
         self._last_run_labware = None
         self.claims.force_clear()
@@ -721,6 +791,13 @@ class OT2Service:
         if self.platebalance and any(str(item.get("location")) == self.platebalance.slot
                                      for item in setup.get("labware", []) + setup.get("modules", [])):
             raise ValueError(f"Slot {self.platebalance.slot} is reserved for platebalanceV1; pipetting geometry is not calibrated")
+        loaded = self._slots_loaded_from_declaration()
+        for item in setup.get("labware", []) + setup.get("modules", []):
+            if str(item.get("location")) in loaded:
+                raise ValueError(
+                    f"slot {item.get('location')} was already loaded from the deck declaration in "
+                    "this session; end the session before a setup recipe places something there"
+                )
         labware = []
         for raw in setup.get("labware", []):
             item = dict(raw)
@@ -782,6 +859,7 @@ class OT2Service:
             # by the transport's adopt_run_state (real ids stay resolvable).
             self.session_recipe = previous_recipe
             raise
+        self._recipe_slots_lost -= self._slots_loaded_by_recipe()
         self.register_tiprack_slots()
         self._bind_pipette_channels()
         self._bind_pipette_volumes()
@@ -1099,16 +1177,20 @@ class OT2Service:
 
     def _resolve_session_labware(self, ref: str, *, allow_balance: bool = False) -> str:
         """Resolve a labware reference to a session nickname, loading declared
-        labware on demand.
+        labware if this session has not yet.
 
         Recipe nicknames pass through. A deck-slot reference — the only name
         a declared deck has — is loaded into the session from the operator's
-        declaration on first use, under ``slot_<n>`` (a valid identifier, so
-        the SSH REPL path works too). Anything else passes through for the
+        declaration under ``slot_<n>`` (a valid identifier, so the SSH REPL
+        path works too). Before a planned move ``_load_declared_obstacles``
+        has already loaded every declared slot this way; loading here covers
+        callers outside that path. Anything else passes through for the
         transport to refuse honestly.
         """
 
         name = str(ref).strip()
+        if self._session_balance_obstacle is not None and name in self._session_balance_obstacle:
+            raise ValueError("The balance rig envelope is a planning obstacle, not labware; it cannot be addressed")
         balance_target = self._balance_plate_for_ref(name)
         if balance_target is not None:
             if not allow_balance:
@@ -1117,6 +1199,12 @@ class OT2Service:
             geometry = self.platebalance.config.pipetting_geometry if self.platebalance else None
             if geometry is None or not isinstance(balance_item.definition, dict):
                 raise ValueError("Balance plate geometry is not calibrated; pipetting is unavailable")
+            obstacle_height = self.platebalance.config.obstacle_height_mm if self.platebalance else None
+            if slot not in self._session_labware and (
+                    self._session_balance_obstacle is not None
+                    or obstacle_height is None or geometry.rim_height_mm < obstacle_height):
+                raise ValueError("The balance plate cannot be loaded over the rig envelope in this "
+                                 "session; check obstacle_height_mm and start a new session")
             compiled = geometry.compile_definition(balance_item.definition)
             load_name = compiled["parameters"]["loadName"]
             if slot in self._session_labware:
@@ -1193,6 +1281,96 @@ class OT2Service:
             )
         self._session_labware[name] = nickname
         return nickname
+
+    def _load_declared_obstacles(self) -> None:
+        """Load every declared deck item into the run before a planned move.
+
+        The robot flies between labware at the height of the tallest item
+        *loaded in its run*, and the gateway used to load a declared slot only
+        when a step addressed it. Anything not yet addressed was invisible to
+        the planner: on 2026-10-14 a drop_tip move from slot 2 to the trash
+        cleared the slot 2 rack and the slot 7 tip rack and flew into the
+        balance lift in slot 9. Nothing here moves the gantry; must be called
+        inside a ``_run_action`` closure (under the command lock).
+
+        Idempotent: what this session already loaded, from the declaration or
+        the setup recipe, is not loaded again. A slot that cannot be loaded
+        raises, and the move does not happen — the next one tries again.
+        """
+
+        fault = self._deck_obstacle_fault()
+        if fault is not None:
+            raise RuntimeError(fault[0])
+        self._load_balance_obstacle()
+        recipe_slots = self._slots_loaded_by_recipe()
+        for slot, item in self._declared_slots().items():
+            if slot in recipe_slots:
+                continue  # setup loaded it
+            if self.platebalance is not None and slot == self.platebalance.slot:
+                continue  # _load_balance_obstacle
+            if isinstance(item, SlotModule):
+                if item.local_peripheral:
+                    continue
+                family = _module_family(item.module_name)
+                if family is None:
+                    raise RuntimeError(
+                        f"slot {slot}: declared module {item.module_name!r} has no loadable "
+                        "Opentrons model, so the robot cannot plan around it"
+                    )
+                self._ensure_session_module(slot, family=family)
+            elif _is_fixed_trash_declaration(slot, item):
+                continue  # a deck fixture; the robot already plans around it
+            else:
+                self._resolve_session_labware(slot)
+
+    def _load_balance_obstacle(self) -> None:
+        """Represent the balance rig in the run at its configured height.
+
+        A qualified balance plate (pipetting geometry set, plate declared)
+        is loaded as its compiled definition, whose top is the measured rim;
+        that serves only while the rim is at least the rig's height. Otherwise
+        the slot gets a non-addressable envelope (``balance_obstacle_definition``).
+        """
+
+        balance = self.platebalance
+        if balance is None:
+            return
+        height = balance.config.obstacle_height_mm
+        if height is None:
+            raise RuntimeError(
+                f"platebalanceV1 in slot {balance.slot} has no obstacle_height_mm configured, "
+                "so the robot cannot plan around the balance rig; set it in the balance "
+                "config (the rig's highest point above the deck) and restart the gateway"
+            )
+        slot = balance.slot
+        if slot in self._session_labware:
+            return  # the compiled balance plate; its height was checked when loaded
+        geometry = balance.config.pipetting_geometry
+        target = self._balance_plate_for_ref(slot)
+        if (geometry is not None and target is not None
+                and isinstance(target[1].definition, dict)
+                and BalancePipettingGeometry.digest(target[1].definition) == geometry.definition_sha256):
+            if self._session_balance_obstacle is not None:
+                raise RuntimeError(
+                    "the balance rig envelope was loaded before this qualified plate was "
+                    "declared; end the session and start a new one to load the plate"
+                )
+            if geometry.rim_height_mm < height:
+                raise RuntimeError(
+                    f"the qualified balance plate's rim ({geometry.rim_height_mm:g} mm) is below "
+                    f"the rig's obstacle height ({height:g} mm); a plate below the rig top "
+                    "is not supported yet"
+                )
+            self._resolve_session_labware(slot, allow_balance=True)
+            return
+        if self._session_balance_obstacle is not None:
+            return
+        definition = balance_obstacle_definition(height)
+        nickname = f"balance_obstacle_{slot}"
+        self._require_control().load_labware(
+            {"ot_default": False, "nickname": nickname, "config": definition, "location": slot}
+        )
+        self._session_balance_obstacle = (nickname, definition["parameters"]["loadName"])
 
     def _ensure_session_module(
         self, ref: Optional[str], *, family: str = "temperature"
@@ -2518,7 +2696,13 @@ class OT2Service:
                 raise ValueError("fixed assemblies cannot be moved or dismantled in a session; end the session and redeclare")
         if getattr(request, "use_gripper", False) and self._tiprack_slot(request.labware_nickname) is not None:
             raise RuntimeError("moving tracked tip racks is not supported; rack tracking remains keyed by its declared slot")
+        # Declared labware is loaded before this move runs, and off deck the
+        # robot would stop planning around it while its declaration (and the
+        # deck) still have it in place. Moving it means redeclaring, in a new
+        # session. Checked here for a clean refusal and again under the lock.
+        self._refuse_moving_declared_labware(request.labware_nickname)
         def move() -> None:
+            self._refuse_moving_declared_labware(request.labware_nickname)
             control = self._require_control()
             nick = self._resolve_session_labware(request.labware_nickname)
             destination = request.new_location
@@ -3010,8 +3194,10 @@ class OT2Service:
         previous = self.state
         self.control = None
         self._observe_safely(lambda: self.observations.new_session("session_lost"))
+        self._forget_recipe()
         self._session_labware = {}
         self._session_balance_load_name = None
+        self._session_balance_obstacle = None
         self._session_pipettes = {}
         self._session_modules = {}
         self.state = OT2ServiceState.REQUIRES_INIT
@@ -3383,6 +3569,17 @@ class OT2Service:
             details["platebalance"] = self._public_balance_snapshot()
             details["platebalance"]["placement_error"] = (None if self._balance_placement_valid()
                 else f"Slot {self.platebalance.slot} has another occupant. Reconcile its records and clear the slot declaration.")
+            # Cache-only: what this session loaded to stand for the rig. The
+            # envelope is loaded before the first planned move, not here.
+            obstacle_height = self.platebalance.config.obstacle_height_mm
+            details["platebalance"]["obstacle"] = {
+                "height_mm": obstacle_height,
+                "loaded_as": ("envelope" if self._session_balance_obstacle is not None
+                              else "balance_plate" if self.platebalance.slot in self._session_labware
+                              else None),
+                "error": (None if obstacle_height is not None else
+                          "obstacle_height_mm is not configured; every planned move is refused"),
+            }
         loaded_plate = self.plates.get()
         details["loaded_plate"] = loaded_plate.model_dump(mode="json") if loaded_plate else None
         details["pause_requested"] = self._pause_requested
@@ -3765,6 +3962,15 @@ class OT2Service:
 
         if self.platebalance is not None:
             slot = deck.slots[self.platebalance.slot]
+            if (self._session_balance_obstacle is not None and slot.labware is not None
+                    and slot.source in {"run", "repl"}
+                    and slot.labware.load_name == self._session_balance_obstacle[1]):
+                # The run holds the rig's planning envelope, not labware the
+                # robot observed: the slot's physical content is what the
+                # operator declared, and readers must see that, not a conflict.
+                slot.labware = slot.declared
+                slot.source = "declared" if slot.declared is not None else "empty"
+                slot.slot_state = "declared" if slot.declared is not None else "empty"
             geometry = self.platebalance.config.pipetting_geometry
             declared_balance = self._declared_slots().get(self.platebalance.slot)
             compiled_observed = (
@@ -3901,12 +4107,68 @@ class OT2Service:
                         slot in self._nickname_to_slot().values() or
                         (slot in deck.slots and deck.slots[slot].source in {"run", "repl"})):
                     raise ValueError(f"assembly in slot {slot} is loaded; end the session before changing the stack")
+            standing = self.decks.get()
+            recipe_slots = self._slots_loaded_by_recipe()
+            for slot in sorted(self._slots_loaded_from_declaration(include_envelope=False) | recipe_slots):
+                accepted = {_declaration_identity(current.get(slot))}
+                if slot in recipe_slots:
+                    # The recipe's item shadows the standing declaration; a
+                    # full-layout re-declare may repeat either, unchanged.
+                    accepted.add(_declaration_identity(standing.get(slot)))
+                if _declaration_identity(proposed.get(slot)) not in accepted:
+                    # The run cannot unload what it loaded, so the robot would
+                    # keep planning around the old item and never see the new one.
+                    raise ValueError(
+                        f"slot {slot} is loaded in this session; end the session before changing or clearing it"
+                    )
             result = self.decks.declare(mapping)
+            # A lost recipe slot the operator now declares has a representation
+            # again: the next planned move loads the declaration.
+            self._recipe_slots_lost -= set(self.decks.get())
             self.register_tiprack_slots()
             self._retire_racks_off_deck()
             return result
         finally:
             self._command_lock.release()
+
+    def _slots_loaded_from_declaration(self, *, include_envelope: bool = True) -> set[str]:
+        """Deck slots this session loaded from the operator's declaration:
+        fixed for the life of the run. The balance envelope stands for the
+        rig, not for the plate declared on it, so ``include_envelope=False``
+        leaves plates on the balance free to change."""
+
+        slots = {slot for slot in [*self._session_labware, *self._session_modules] if slot in SLOTS}
+        if include_envelope and self._session_balance_obstacle is not None and self.platebalance is not None:
+            slots.add(self.platebalance.slot)
+        return slots
+
+    def _refuse_moving_declared_labware(self, ref: str) -> None:
+        recipe_slots = self._slots_loaded_by_recipe()
+        declared = {slot for slot in self.decks.get() if slot not in recipe_slots}
+        name = str(ref).strip()
+        for slot in declared | set(self._session_labware):
+            if (name in {slot, f"slot_{slot}", self._session_labware.get(slot)}
+                    or self._nickname_to_slot().get(name) == slot):
+                raise ValueError(
+                    f"labware in slot {slot} comes from the deck declaration; it cannot be moved "
+                    "in this session. End the session, move it, and redeclare the deck"
+                )
+
+    def _forget_recipe(self) -> None:
+        """Drop a recipe whose run is gone, remembering the slots it filled."""
+
+        self._recipe_slots_lost |= self._slots_loaded_by_recipe()
+        self.session_recipe = {"labware": [], "instruments": [], "modules": []}
+
+    def _slots_loaded_by_recipe(self) -> set[str]:
+        """Deck slots the setup recipe loaded into this session's run."""
+
+        return {
+            str(item.get("location"))
+            for item in [*(self.session_recipe.get("labware") or []),
+                         *(self.session_recipe.get("modules") or [])]
+            if str(item.get("location")) in SLOTS
+        }
 
     def _retire_racks_off_deck(self) -> List[str]:
         """Stop tracking racks whose slot no longer holds a tip rack.
@@ -4039,6 +4301,8 @@ class OT2Service:
             base_actions += [f"platebalance.{action}" for action in ("read", "tare", "zero")
                              if self.platebalance.supports(action)]
         actions = [a for a in base_actions if not self._blocked_by_activity(a)]
+        if self._deck_obstacle_fault() is not None:
+            actions = [a for a in actions if not self._gated_by_deck_obstacles(a)]
         # The two convenience actions used to be appended by the /status builder
         # instead of here, so this method returned a NARROWER list than the
         # device advertised on the wire — `lights.set` and `deck.declare` were
@@ -4302,6 +4566,8 @@ class OT2Service:
         )
         ssh_ok = False
         try:
+            if name not in _DECK_OBSTACLE_EXEMPT_ACTIONS:
+                self._load_declared_obstacles_for(name)
             func()
             ssh_ok = True
             with self._state_lock:
@@ -4374,6 +4640,50 @@ class OT2Service:
             # unanswerable until an operator reconciles.
             self._sync_activity()
 
+    def _deck_obstacle_fault(self) -> Optional[tuple[str, str]]:
+        """A known fault that refuses every planned move: (message, the
+        action that clears it), or None.
+
+        Cache-only, so ``/status`` can report it (STATUS_SPEC §2.2: a known
+        run-blocking fault must not sit under a top-level ``ready``)."""
+
+        if self.dry_run:
+            return None
+        if self.platebalance is not None and self.platebalance.config.obstacle_height_mm is None:
+            return (f"platebalanceV1 in slot {self.platebalance.slot} has no obstacle_height_mm "
+                    "configured; every planned move is refused until it is set",
+                    "Set platebalance obstacle_height_mm and restart the gateway")
+        if self._recipe_slots_lost:
+            slots = ", ".join(sorted(self._recipe_slots_lost, key=_slot_sort_key))
+            return (f"the setup recipe for slots {slots} belonged to a run that is gone; "
+                    "planned moves are refused until it is loaded again",
+                    "Run setup again, or shut down and declare the deck")
+        return None
+
+    @staticmethod
+    def _gated_by_deck_obstacles(action: str) -> bool:
+        """Advertised actions ``_run_action`` loads the deck for first."""
+
+        return ((action in _RUN_STARTING_ACTIONS or action in ADVANCED_ACTIONS)
+                and action not in _DECK_OBSTACLE_EXEMPT_ACTIONS)
+
+    def _load_declared_obstacles_for(self, name: str) -> None:
+        """``_load_declared_obstacles`` with its failures named for what they
+        are: the requested command never started. A transport error while
+        loading is therefore not that command's unknown outcome. A 409 from a
+        robot-server that lost the run passes through unchanged, so the
+        dead-session recovery still sees it."""
+
+        try:
+            self._load_declared_obstacles()
+        except RunEngineHTTPError:
+            raise
+        except Exception as exc:
+            raise DeckObstaclesNotLoaded(
+                f"{name} refused before motion: the deck declaration is not fully loaded "
+                f"into the run, so the robot cannot plan around it ({exc})"
+            ) from exc
+
     def _require_control(self) -> OT2Control:
         if self.control is None:
             raise RuntimeError("OT-2 is not initialized")
@@ -4409,7 +4719,7 @@ class OT2Service:
             # the session state (which describes a robot we last saw minutes ago).
             return "unknown"
         if self.state == OT2ServiceState.READY:
-            return "ready"
+            return "error" if self._deck_obstacle_fault() is not None else "ready"
         if self.state in {
             OT2ServiceState.BUSY,
             OT2ServiceState.EXTERNAL_CONTROL,
@@ -4498,6 +4808,8 @@ class OT2Service:
             return f"Robot unreachable at {self._probe_base_url() or 'unknown host'} since {since}{seen}"
         if self.last_error is not None:
             return self.last_error.message
+        if self.state == OT2ServiceState.READY and (fault := self._deck_obstacle_fault()) is not None:
+            return fault[0]
         if self.state == OT2ServiceState.EXTERNAL_CONTROL:
             return self._status_note or "Robot under external control; gateway is standing off"
         if self.state == OT2ServiceState.REQUIRES_INIT:
@@ -4525,6 +4837,8 @@ class OT2Service:
             # command (or any successful recovery action, which auto-clears
             # per §6.4); without one, only a fresh startup can help.
             return ["reconcile"] if self.control is not None else ["startup"]
+        if self.state == OT2ServiceState.READY and (fault := self._deck_obstacle_fault()) is not None:
+            return [fault[1]]
         return []
 
     def _control_liveness(self) -> tuple[bool, str]:

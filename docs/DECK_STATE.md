@@ -354,8 +354,9 @@ is ported to the other (`6c46e57` here, `6b95e86` / `a35ad41` there):
 something cannot be re-declared in place: the picker's catalog and free-text
 field go inert, only **Clear slot** stays live, and `ControlPanel.declare`
 refuses a non-null entry for an already-declared slot. A declaration is not a
-label — the gateway *auto-loads* labware from it — so a slot changed by a stray
-click reaches the robot. **Clear all declared intent** likewise confirms before
+label — the gateway loads every declared item into the run before the first
+planned move (see *Declared items are obstacles* below) — so a slot changed
+by a stray click reaches the robot. **Clear all declared intent** likewise confirms before
 firing, being the one declare action with no per-slot undo.
 - **Workflow repos** consume `details.loaded_plate` (unchanged contract) and
   gain the per-slot deck + mismatch flags.
@@ -392,3 +393,37 @@ serial; family-only matching is used only for a single unambiguous candidate.
 | Wiring (`_build_deck_state`, TTL run probe, endpoints) | `gateway/service.py`, `gateway/api.py` |
 | Tests (decision table, normalizers, store, side-effect-free status) | `tests/unit/test_deck.py`, `test_deck_declare.py`, `test_deck_status.py` |
 | Fixtures | `tests/fixtures/status_deck_*.json`, `repl_get_all_states.json`, `robot_run_labware.json` |
+
+## Declared items are obstacles
+
+The robot plans travel height between labware from the tallest item *loaded
+in its run*, so a declared slot the run does not hold is invisible to it.
+Since 2026-10-14, before any action that can plan such an arc, the gateway
+loads every declared item that this session has not loaded yet: labware
+(`slot_<n>`), declared Opentrons modules, and the plate balance's envelope
+(`docs/PLATEBALANCE_V1.md`). The setup recipe's slots are skipped, since setup
+loaded them, and so is the OT-2 fixed trash, a deck fixture. A slot that
+cannot be loaded refuses the action before motion (`DeckObstaclesNotLoaded`,
+`last_error.code: command_failed`); reconciling clears the error, not the
+missing item, so the next planned move tries again. Homing, jogging, module
+and balance commands are not gated (`_DECK_OBSTACLE_EXEMPT_ACTIONS`).
+
+A loaded item stays for the run: a run cannot unload, so changing or clearing
+a loaded slot's declaration (whether the declaration or a setup recipe loaded
+it), a setup recipe placing something in a declaration-loaded slot, and
+`move_labware` of declaration-loaded labware (off deck it would leave the
+run's obstacles) are all refused until a new session. Re-declaring a slot
+unchanged and adding to an empty slot are allowed. The plate on the balance
+may change under the envelope.
+
+A new run (startup, or the self-heal after a robot restart) drops the setup
+recipe of the old one, which no longer describes anything loaded. Slots only
+that recipe filled are then represented by nothing, so planned moves are
+refused until setup runs again or the session is shut down. Like a missing
+`obstacle_height_mm`, this is a known run-blocking fault: `/status` reports
+`equipment_status: "error"`, names the fault in `message` and
+`required_actions`, and leaves the gated actions out of `allowed_actions`.
+
+This covers arcs between labware only. Direct moves (`force_direct`), moves
+within one labware (which use that labware's height), and jogs do not use the
+deck-wide height; the caller still owns their clearance.

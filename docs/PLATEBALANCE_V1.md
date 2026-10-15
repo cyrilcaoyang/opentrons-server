@@ -19,6 +19,7 @@ Install with `uv sync --extra labware --extra platebalance`. Set
   "adapter_height_mm": null,
   "balance_blow_out_enabled": false,
   "max_labware_height_mm": 25,
+  "obstacle_height_mm": 132,
   "com_port": "COM3",
   "baudrate": 9600,
   "bytesize": 7,
@@ -76,6 +77,47 @@ Changing it does not move or retire any recorded tips or labware. The optional
 **strictly below 25 mm** can be declared on the balance for weighing. A configured
 maximum may lower this limit but cannot raise it. These fields do not enable
 pipetting; geometry must be qualified before loading plates into the robot run. Never substitute zero for an unknown height.
+
+### Obstacle height (required before motion)
+
+`obstacle_height_mm` is the rig's highest point above the deck, with the
+tallest accepted plate at the lift's highest pose. Before any action that can
+plan an arc between labware (moves, tip handling, liquid steps, labware
+moves), the gateway loads a slot-sized, non-addressable envelope this tall
+(`ac_balance_obstacle_<tenths of mm>`, nickname `balance_obstacle_<slot>`)
+into the run, so the robot's travel height clears the rig. Without the field,
+every such action is refused: `/status` reports `equipment_status: "error"`
+with the fault in `message` and `required_actions`, leaves those actions out
+of `allowed_actions`, and `details.platebalance.obstacle.error` says why. Homing, jogging, balance reads/tares/zeroes and module commands are not
+gated. `/status` never loads anything; `details.platebalance.obstacle`
+reports the configured height and what this session loaded
+(`loaded_as: "envelope" | "balance_plate" | null`). The deck view shows the
+balance slot as declared, not as the envelope.
+
+The robot travels at least 1 mm above the tallest loaded item, clipped to how
+high the head can go with its current tip. With the Opentrons defaults
+(before per-robot calibration), the tip-end ceiling is about 147.8 mm for a
+p300 single with a 300 µL tip, 142.2 mm for a p20 multi with a 20 µL tip, and
+137.2 mm for a p20 multi with a 10 µL filter tip. An envelope above a
+combination's ceiling makes the robot refuse that combination's arcs
+(`ArcOutOfBoundsError`) rather than fly lower.
+
+Complexation, measured 2026-10-14 on the lowered six-stand frame: fixed top
+frame 114 mm; `agilent_96_700ul_square_flat` rim about 118 mm at the
+`weighing` pose (−4000) and about 124 mm at `raised` (−9200; the carrier meets
+the holder near −5900). A 25 mm plate fully raised would be about 130 mm; the
+configured **132 mm** adds 2 mm. 140 mm was rejected because it is above the
+p20 multi + 10 µL filter tip ceiling. Before that, the gateway loaded slot 9
+never, and other declared slots only on first use: on 2026-10-14 a `drop_tip`
+move from slot 2 to the trash planned around a 64.5 mm tip rack and struck
+the rig.
+
+With qualified pipetting geometry and the plate declared, the compiled plate
+stands for the rig instead, only while its rim is at or above
+`obstacle_height_mm`; a rig taller than the plate rim is refused until an
+envelope that keeps the plate's well coordinates is designed. The envelope
+and the compiled plate cannot share a session: changing between them needs a
+new session.
 
 The serial settings must match the balance's configured SBI interface; the
 example uses the Matter Lab defaults, not observed device settings. Confirm

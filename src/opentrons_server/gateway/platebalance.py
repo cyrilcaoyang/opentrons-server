@@ -90,6 +90,12 @@ class PlateBalanceConfig(BaseModel):
     # Enabled only after the guarded blow-out path is accepted on this holder.
     balance_blow_out_enabled: bool = False
     max_labware_height_mm: float | None = Field(default=25, gt=0, le=25, allow_inf_nan=False)
+    # Highest point of the rig in this slot above the deck, with the tallest
+    # accepted plate at the lift's highest pose. Every run loads an envelope
+    # this tall here, so the robot's arcs between labware clear it; without
+    # it the planner sees an empty slot (2026-10-14: a drop_tip move to the
+    # trash flew into the Complexation lift). Required before any motion.
+    obstacle_height_mm: float | None = Field(default=None, gt=0, le=200, allow_inf_nan=False)
     # "serial": this gateway opens the port per action (com_port).
     # "weigh_every_plate": a weigh-every-plate service on this PC owns the
     # port (and the balance lift); this gateway reads, tares and zeroes
@@ -196,6 +202,33 @@ def validate_balance_plate(definition: dict[str, Any], *, max_height_mm: float =
         depth = _number(well.get("depth"), f"{name}.depth", positive=True)
         if bottom + depth > height + 1e-6:
             raise ValueError(f"{name} extends above the declared plate height")
+
+
+def balance_obstacle_definition(height_mm: float) -> dict[str, Any]:
+    """A slot-sized planning envelope for the balance rig, ``height_mm`` tall.
+
+    Not physical labware: it exists so the run engine's tallest-obstacle
+    height includes the rig. Its single well is never addressable; the
+    gateway refuses every reference to it.
+    """
+    x, y = 127.76, 85.48
+    return {
+        "schemaVersion": 2,
+        "version": 1,
+        "namespace": "custom",
+        "metadata": {"displayName": f"Balance rig envelope {height_mm:g} mm",
+                     "displayCategory": "other", "displayVolumeUnits": "µL", "tags": []},
+        "brand": {"brand": "SDL2", "brandId": []},
+        "parameters": {"format": "irregular", "quirks": [], "isTiprack": False,
+                       "isMagneticModuleCompatible": False,
+                       "loadName": f"ac_balance_obstacle_{round(height_mm * 10):d}"},
+        "ordering": [["A1"]],
+        "cornerOffsetFromSlot": {"x": 0, "y": 0, "z": 0},
+        "dimensions": {"xDimension": x, "yDimension": y, "zDimension": height_mm},
+        "wells": {"A1": {"depth": 1, "totalLiquidVolume": 0, "shape": "circular", "diameter": 1,
+                         "x": x / 2, "y": y / 2, "z": height_mm - 1}},
+        "groups": [{"metadata": {}, "wells": ["A1"]}],
+    }
 
 
 def load_platebalance_config() -> PlateBalanceConfig | None:

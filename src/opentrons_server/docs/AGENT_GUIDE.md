@@ -353,6 +353,13 @@ agreed, to what hash) and `plan_executed` (what became of it).
   OT-2, `A1..D4` on a Flex profile. Use the profile, never hard-coded slots.
 - `deck.declare` is a **full-layout replacement, not a patch**: omitted slots
   are cleared.
+- Every declared item is loaded into the robot's run before the first planned
+  move, so arcs between labware clear all of it (the plate balance slot as a
+  `details.platebalance.obstacle.height_mm` envelope). A move is refused if
+  any declared item cannot be loaded. Once loaded, a slot is fixed for the
+  session: changing or clearing it, or placing recipe labware there, needs
+  shutdown and startup. Re-declaring it unchanged is fine. Report such a
+  refusal to the operator rather than retrying it.
 - `tempmod.set` accepts a target and returns; the block ramps in the
   background. Watch current vs target on `/status`.
 - `move_to` defaults to an arced path. `force_direct: true` omits the

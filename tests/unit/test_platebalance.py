@@ -557,6 +557,8 @@ def qualified_balance(tmp_path):
         xy_alignment="slot", seating_height_mm=102, rim_height_mm=121,
     )
     service.platebalance.config.pipetting_geometry = geometry
+    # A bare balance: the plate rim is the rig's highest point.
+    service.platebalance.config.obstacle_height_mm = 121
     service._last_probe = {"instruments": [{"mount": "right", "name": "p300_single_gen2"}]}
     service.declare_deck({"9": plate})
     return service, geometry, definition
@@ -597,6 +599,32 @@ def test_balance_move_requires_explicit_clearance_and_arc(tmp_path):
     service._last_probe["instruments"][0]["name"] = "p300_multi_gen2"
     with pytest.raises(ValueError, match="single-channel"):
         service.move_to(MoveToRequest(pipette="right", location=location))
+
+
+def test_a_qualified_plate_stands_for_the_rig_instead_of_the_envelope(tmp_path):
+    service, _, _ = qualified_balance(tmp_path)
+    service.control = Mock()
+    service._ensure_session_pipette = Mock(return_value="right")
+    location = WellLocation(labware_nickname="9", position="A1", top=20)
+
+    service.move_to(MoveToRequest(pipette="right", location=location))
+
+    loads = [c.args[0] for c in service.control.load_labware.call_args_list]
+    assert [(cfg["location"], cfg["nickname"]) for cfg in loads] == [("9", "slot_9")]
+    assert loads[0]["config"]["dimensions"]["zDimension"] == 121
+    assert service._session_balance_obstacle is None
+
+
+@pytest.mark.parametrize("obstacle_height_mm", [None, 121.5])
+def test_qualified_plate_is_not_loaded_below_the_rig(tmp_path, obstacle_height_mm):
+    # The compiled plate stands for the rig only while its rim is at least
+    # as high; otherwise the robot would plan arcs below the rig's top.
+    service, _, _ = qualified_balance(tmp_path)
+    service.platebalance.config.obstacle_height_mm = obstacle_height_mm
+    service.control = Mock()
+    with pytest.raises(ValueError, match="rig envelope"):
+        service._resolve_session_labware("9", allow_balance=True)
+    service.control.load_labware.assert_not_called()
 
 
 def test_compiled_balance_run_is_reconciled_without_hiding_observed_name(tmp_path):

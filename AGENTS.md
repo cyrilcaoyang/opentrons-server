@@ -130,9 +130,20 @@ lab-skills / dashboard / agents          this repo                        robot
   plate is accessible; collector identities and contents must never be folded
   onto it. Loaded assemblies require session shutdown before redeclaration.
   See `docs/PLATE_ASSEMBLIES.md`; no tip racks or module layouts are supported.
+- **Declared deck = obstacles in the run.** The robot plans travel height
+  between labware from what its run has loaded, so before any planned move
+  `_load_declared_obstacles` loads every declared slot, declared Opentrons
+  modules and the balance envelope; failure refuses the move before motion.
+  Exempt only actions that cannot plan an arc (`_DECK_OBSTACLE_EXEMPT_ACTIONS`;
+  deny by default). Loaded slots are fixed for the run: changing or clearing one
+  needs a new session. Never reintroduce load-on-first-use for declared
+  slots — that is how a `drop_tip` hit Complexation's balance rig on
+  2026-10-14. See `docs/DECK_STATE.md` *Declared items are obstacles*.
 - **Local plate balance:** optional `platebalanceV1` defaults to OT-2 slot 9 (configurable) via
   `OT2_PLATEBALANCE_CONFIG`. It is a local serial peripheral, never an Opentrons
-  `loadModule` model.
+  `loadModule` model. `obstacle_height_mm` (the rig's highest point; 132 on
+  Complexation) is required before any planned move; it adds a field the
+  pre-2026-10-15 config parser rejects, so deploy the code before writing it.
   With `"transport": "weigh_every_plate"` a weigh-every-plate service on the
   same PC owns the port (Complexation, under its balance lift) and the gateway
   reads, tares and zeroes through that service's claim-gated API; the default

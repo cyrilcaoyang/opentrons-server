@@ -30,7 +30,8 @@ Opentrons adapter objects, gripper handling, or in-session stack disassembly.
 5. **Validate and preview assembly**. Check the base and total heights against
    the seated hardware, confirm the geometry, then **Declare assembly**.
 6. Start a session if needed. Existing well-addressed controls can reference the
-   deck slot or the top plate ID. Geometry is loaded on first use, not on preview,
+   deck slot or the top plate ID. Geometry is loaded before the session's first
+   planned move, with the rest of the declared deck, not on preview,
    declaration or status polling.
 
 The riser must fit within the declared plate footprint, with no lateral shift.
